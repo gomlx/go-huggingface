@@ -19,6 +19,11 @@
 //	if err != nil { ... }
 //
 // From here, downloadedFiles will point to files in the local cache that one can read.
+//
+// Environment variables:
+//
+// - HF_ENDPOINT: Where to connect to huggingface, default is https://huggingface.co
+// - XDG_CACHE_HOME: Cache directory, defaults to ${HOME}/.cache
 package hub
 
 import (

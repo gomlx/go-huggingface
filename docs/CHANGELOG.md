@@ -1,8 +1,10 @@
 # `go-huggingface` Changelog
 
-## Next
+## v0.1.2
 
 * If verbosity is 0, it won't print progress.
+* Added support for custom end-points. Default being "https://huggingface.co" or the environment variable
+  `$HF_ENDPOINT` if defined.
 
 ## v0.1.1
 

@@ -94,6 +94,7 @@ func (r *Repo) WithType(repoType RepoType) *Repo {
 }
 
 // WithEndpoint sets the HuggingFace endpoint to use.
+// Default is "https://huggingface.co" or, if set, the environment variable HF_ENDPOINT.
 func (r *Repo) WithEndpoint(endpoint string) *Repo {
 	r.hfEndpoint = endpoint
 	return r
