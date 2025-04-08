@@ -5,11 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/gomlx/go-huggingface/internal/files"
-	"github.com/pkg/errors"
 	"log"
 	"os"
 	"path"
+
+	"github.com/gomlx/go-huggingface/internal/files"
+	"github.com/pkg/errors"
 )
 
 // RepoInfo holds information about a HuggingFace repo, it is the json served when hitting the URL
@@ -58,7 +59,7 @@ func (r *Repo) Info() *RepoInfo {
 
 // infoURL for the API that returns the info about a repository.
 func (r *Repo) infoURL() string {
-	return fmt.Sprintf("https://huggingface.co/api/%s/%s/revision/%s", r.repoType, r.ID, r.revision)
+	return fmt.Sprintf("%s/api/%s/%s/revision/%s", r.hfEndpoint, r.repoType, r.ID, r.revision)
 }
 
 // DownloadInfo about the model, if it hasn't yet.

@@ -2,19 +2,23 @@ package hub
 
 import (
 	"fmt"
-	"github.com/gomlx/go-huggingface/internal/downloader"
-	"github.com/gomlx/go-huggingface/internal/files"
-	"github.com/pkg/errors"
 	"log"
 	"os"
 	"path"
 	"strings"
+
+	"github.com/gomlx/go-huggingface/internal/downloader"
+	"github.com/gomlx/go-huggingface/internal/files"
+	"github.com/pkg/errors"
 )
 
 // Repo from which one wants to download files. Create it with New.
 type Repo struct {
 	// ID of the Repo may include owner/model. E.g.: google/gemma-2-2b-it
 	ID string
+
+	// Hugginface endpint to use, defaults to "https://huggingface.co".
+	hfEndpoint string
 
 	// repoType of the repository, usually RepoTypeModel.
 	repoType RepoType
@@ -58,10 +62,17 @@ type Repo struct {
 //
 // If authentication is needed, use Repo.WithAuth.
 func New(id string) *Repo {
+	hfEndpoint := os.Getenv("HF_ENDPOINT")
+	if hfEndpoint == "" {
+		hfEndpoint = "https://huggingface.co"
+	} else {
+		hfEndpoint = strings.TrimSuffix(hfEndpoint, "/")
+	}
 	return &Repo{
 		ID:                  id,
 		repoType:            RepoTypeModel,
 		revision:            "main",
+		hfEndpoint:          hfEndpoint,
 		cacheDir:            DefaultCacheDir(),
 		Verbosity:           1,
 		MaxParallelDownload: 20, // At most 20 parallel downloads.
@@ -79,6 +90,12 @@ func (r *Repo) WithAuth(authToken string) *Repo {
 // WithType sets the repository type to use during downloads.
 func (r *Repo) WithType(repoType RepoType) *Repo {
 	r.repoType = repoType
+	return r
+}
+
+// WithEndpoint sets the HuggingFace endpoint to use.
+func (r *Repo) WithEndpoint(endpoint string) *Repo {
+	r.hfEndpoint = endpoint
 	return r
 }
 
@@ -145,9 +162,9 @@ func (r *Repo) FileURL(fileName string) (string, error) {
 		return "", err
 	}
 	if r.repoType == RepoTypeModel {
-		return fmt.Sprintf("https://huggingface.co/%s/resolve/%s/%s", r.ID, commitHash, fileName), nil
+		return fmt.Sprintf("%s/%s/resolve/%s/%s", r.hfEndpoint, r.ID, commitHash, fileName), nil
 	} else {
-		return fmt.Sprintf("https://huggingface.co/%s/%s/resolve/%s/%s", r.repoType, r.ID, commitHash, fileName), nil
+		return fmt.Sprintf("%s/%s/%s/resolve/%s/%s", r.hfEndpoint, r.repoType, r.ID, commitHash, fileName), nil
 	}
 }
 
