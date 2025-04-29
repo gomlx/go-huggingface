@@ -9,7 +9,7 @@ import (
 	"math/rand"
 	"os"
 	"path"
-	"syscall"
+	"github.com/gofrs/flock"
 	"time"
 )
 
@@ -115,34 +115,26 @@ func (r *Repo) lockedDownload(ctx context.Context, url, filePath string, forceDo
 	return nil
 }
 
-// onFileLock opens the lockPath file (or creates if it doesn't yet exist), locks it, and executes the function.
+// execOnFileLock opens the lockPath file (or creates if it doesn't yet exist), locks it, and executes the function.
 // If the lockPath is already locked, it polls with a 1 to 2 seconds period (randomly), until it acquires the lock.
 //
 // The lockPath is not removed. It's safe to remove it from the given fn, if one knows that no new calls to
 // execOnFileLock with the same lockPath is going to be made.
 func execOnFileLock(lockPath string, fn func()) (err error) {
-	var f *os.File
-	f, err = os.OpenFile(lockPath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, DefaultFileCreationPerm)
-	if err != nil {
-		err = errors.Wrapf(err, "while locking %q", lockPath)
-		return
-	}
-	defer func() {
-		err := f.Close()
-		if err != nil {
-			log.Printf("failed to close lock file %q", lockPath)
-		}
-	}()
+	// Create a new flock instance directly using gofrs/flock
+	fileLock := flock.New(lockPath)
 
-	// Acquire lock or return an error if context is canceled (due to time out).
+	// Acquire lock with retry logic
 	for {
-		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			break
+		// Try to acquire the lock
+		locked, err := fileLock.TryLock()
+		if err != nil {
+			return errors.Wrapf(err, "while trying to lock %q", lockPath)
 		}
-		if !errors.Is(err, syscall.EAGAIN) {
-			err = errors.Wrapf(err, "while locking %q", lockPath)
-			return err
+
+		// If we got the lock, break out of the retry loop
+		if locked {
+			break
 		}
 
 		// Wait from 1 to 2 seconds.
@@ -151,11 +143,14 @@ func execOnFileLock(lockPath string, fn func()) (err error) {
 
 	// Setup clean up in a deferred function, so it happens even if `fn()` panics.
 	defer func() {
-		if err != nil {
-			err = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		unlockErr := fileLock.Unlock()
+		if unlockErr != nil {
+			// If we already have an error, don't overwrite it
+			if err == nil {
+				err = errors.Wrapf(unlockErr, "unlocking file %q", lockPath)
+			} else {
+				log.Printf("Error unlocking file %q: %v", lockPath, unlockErr)
 		}
-		if err != nil {
-			err = errors.Wrapf(err, "unlocking file %q", lockPath)
 		}
 	}()
 
