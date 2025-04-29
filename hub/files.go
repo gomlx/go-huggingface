@@ -3,19 +3,19 @@ package hub
 import (
 	"context"
 	"fmt"
-	"github.com/dustin/go-humanize"
-	"github.com/gomlx/go-huggingface/internal/files"
-	"github.com/pkg/errors"
 	"iter"
 	"net/http"
 	"os"
 	"path"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/dustin/go-humanize"
+	"github.com/gomlx/go-huggingface/internal/files"
+	"github.com/pkg/errors"
 )
 
 // IterFileNames iterate over the file names stored in the repo.
@@ -64,17 +64,40 @@ func (r *Repo) HasFile(fileName string) bool {
 	return false
 }
 
-// cleanRelativeFilePath returns the repoFileName converted to the local OS separator, and by filtering out paths
-// that reach out of the current directory (with too many ".." elements). for security reasons.
+// cleanRelativeFilePath sanitizes a file path by removing empty segments
+// and parent directory references ("..") for security reasons.
 func cleanRelativeFilePath(repoFileName string) string {
-	parts := strings.Split(repoFileName, "/")
-	p := path.Clean(path.Join(parts...)) // Resolve where possible the "..".
-	parts = strings.Split(filepath.ToSlash(p), "/")
-	parts = slices.DeleteFunc(parts, func(s string) bool { return s == "" || s == ".." })
-	if len(parts) == 0 {
+	// Convert to forward slashes and clean the path
+	normalized := filepath.ToSlash(repoFileName)
+
+	// Remove leading slash if present
+	normalized = strings.TrimPrefix(normalized, "/")
+
+	// Split into path components
+	parts := strings.Split(normalized, "/")
+
+	// Process parts to handle ".." components
+	var stack []string
+	for _, part := range parts {
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." {
+			if len(stack) > 0 {
+				// Remove last element if we have something to pop
+				stack = stack[:len(stack)-1]
+			}
+			continue
+		}
+		stack = append(stack, part)
+	}
+
+	if len(stack) == 0 {
 		return "."
 	}
-	return path.Join(parts...)
+
+	// Join with platform-specific separator
+	return filepath.FromSlash(strings.Join(stack, "/"))
 }
 
 // DownloadFiles downloads the repository files (the names returned by repo.IterFileNames), and return the path to the
