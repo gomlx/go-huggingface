@@ -1,5 +1,9 @@
 # `go-huggingface` Changelog
 
+## v0.1.3
+
+* Add windows support by moving to cross platform flock: see PR #6, thanks to @mrmichaeladavis
+
 ## v0.1.2
 
 * If verbosity is 0, it won't print progress.
