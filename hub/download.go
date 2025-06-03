@@ -2,15 +2,16 @@ package hub
 
 import (
 	"context"
-	"github.com/gomlx/go-huggingface/internal/downloader"
-	"github.com/gomlx/go-huggingface/internal/files"
-	"github.com/pkg/errors"
 	"log"
 	"math/rand"
 	"os"
 	"path"
-	"github.com/gofrs/flock"
 	"time"
+
+	"github.com/gofrs/flock"
+	"github.com/gomlx/go-huggingface/internal/downloader"
+	"github.com/gomlx/go-huggingface/internal/files"
+	"github.com/pkg/errors"
 )
 
 // Generic download utilities.
@@ -46,7 +47,7 @@ func (r *Repo) lockedDownload(ctx context.Context, url, filePath string, forceDo
 		return err
 	}
 
-	// Create directory for file.
+	// Create a directory for the file.
 	if err := os.MkdirAll(path.Dir(filePath), DefaultDirCreationPerm); err != nil {
 		return errors.Wrapf(err, "failed to create directory for file %q", filePath)
 	}
@@ -150,7 +151,7 @@ func execOnFileLock(lockPath string, fn func()) (err error) {
 				err = errors.Wrapf(unlockErr, "unlocking file %q", lockPath)
 			} else {
 				log.Printf("Error unlocking file %q: %v", lockPath, unlockErr)
-		}
+			}
 		}
 	}()
 

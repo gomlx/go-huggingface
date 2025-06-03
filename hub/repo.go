@@ -26,6 +26,10 @@ type Repo struct {
 	// revision to download, usually set to "main", but it can use a commit-hash version.
 	revision string
 
+	// revisionHashRefreshed indicates whether the revision hash has been refreshed.
+	// We force it to be refreshed at least once before hitting the server, just in case.
+	revisionHashRefreshed bool
+
 	// authToken is the HuggingFace authentication token to be used when downloading the files.
 	authToken string
 
@@ -174,10 +178,12 @@ func (r *Repo) FileURL(fileName string) (string, error) {
 //
 // repoCacheDir is returned by Repo.repoCacheDir().
 func (r *Repo) readCommitHashForRevision() (string, error) {
-	err := r.DownloadInfo(false)
+	forceDownload := !r.revisionHashRefreshed
+	err := r.DownloadInfo(forceDownload)
 	if err != nil {
 		return "", err
 	}
+	r.revisionHashRefreshed = true
 	return r.info.CommitHash, nil
 }
 
