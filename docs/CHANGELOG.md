@@ -1,5 +1,9 @@
 # `go-huggingface` Changelog
 
+## v0.2.1
+
+* Forcefully refresh (download) the revision's hash at least once before using.
+
 ## v0.2.0
 
 * Add Windows support by moving to cross platform flock: see PR #6, thanks to @mrmichaeladavis
