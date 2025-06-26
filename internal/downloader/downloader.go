@@ -6,12 +6,14 @@ package downloader
 import (
 	"context"
 	"fmt"
-	"github.com/gomlx/go-huggingface/internal/files"
-	"github.com/pkg/errors"
 	"io"
 	"net/http"
 	"os"
 	"path"
+
+	"github.com/pkg/errors"
+
+	"github.com/gomlx/go-huggingface/internal/files"
 )
 
 // ProgressCallback is called as download progresses.
@@ -127,23 +129,25 @@ func (m *Manager) Download(ctx context.Context, url string, filePath string, cal
 		if ctx.Err() != nil {
 			return CancellationError
 		}
-		n, err := resp.Body.Read(buf[:])
-		if err != nil && err != io.EOF {
+		n, readErr := resp.Body.Read(buf[:])
+		if readErr != nil && readErr != io.EOF {
 			if ctx.Err() != nil {
 				return CancellationError
 			}
 			return errors.Wrapf(err, "failed downloading %q", url)
 		}
-		if err == io.EOF {
+		if n > 0 {
+			wn, writeErr := file.Write(buf[:n])
+			if writeErr != nil && writeErr != io.EOF {
+				return errors.Wrapf(writeErr, "failed writing %q to %q", url, filePath)
+			}
+			if wn != n {
+				return errors.Wrapf(io.ErrShortWrite, "failed writing %q to %q: not enough bytes written (wanted %d, wrote only %d)",
+					url, filePath, n, wn)
+			}
+		}
+		if readErr == io.EOF {
 			break
-		}
-		wn, err := file.Write(buf[:n])
-		if err != nil && err != io.EOF {
-			return errors.Wrapf(err, "failed writing %q to %q", url, filePath)
-		}
-		if wn != n {
-			return errors.Wrapf(io.ErrShortWrite, "failed writing %q to %q: not enough bytes written (wanted %d, wrote only %d)",
-				url, filePath, n, wn)
 		}
 		downloadedBytes += int64(n)
 		if callback != nil {
