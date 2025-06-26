@@ -1,5 +1,9 @@
 # `go-huggingface` Changelog
 
+## Next
+
+* Fixed file truncation issues during download.
+
 ## v0.2.1
 
 * Forcefully refresh (download) the revision's hash at least once before using.
