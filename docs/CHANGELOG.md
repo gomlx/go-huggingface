@@ -1,6 +1,6 @@
 # `go-huggingface` Changelog
 
-## Next
+## v0.2.2
 
 * Fixed file truncation issues during download.
 
