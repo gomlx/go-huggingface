@@ -23,3 +23,6 @@ go.work.sum
 
 # IDEs
 .idea/
+
+# Notebooks temporary files.
+.ipynb_checkpoints
