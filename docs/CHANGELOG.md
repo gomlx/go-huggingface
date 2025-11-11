@@ -1,5 +1,9 @@
 # `go-huggingface` Changelog
 
+## v0.3.1
+
+- Fixed go.mod/go.sum.
+
 ## v0.3.0
 
 - Bumped the version of GoMLX in tests and documentation.
