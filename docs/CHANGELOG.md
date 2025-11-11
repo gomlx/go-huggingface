@@ -1,5 +1,11 @@
 # `go-huggingface` Changelog
 
+## v0.3.0
+
+- Bumped the version of GoMLX in tests and documentation.
+- Bumped version of dependencies: including github.com/daulet/tokenizers, which requires a fresh download of the 
+  corresponding c++ library libtokenizers.a.
+
 ## v0.2.2
 
 * Fixed file truncation issues during download.
@@ -10,7 +16,7 @@
 
 ## v0.2.0
 
-* Add Windows support by moving to cross platform flock: see PR #6, thanks to @mrmichaeladavis
+* Add Windows support by moving to the cross-platform flock: see PR #6, thanks to @mrmichaeladavis
 
 ## v0.1.2
 
@@ -25,7 +31,7 @@
 * Added dataset example. 
 * Added usage with Rust tokenizer.
 * Improved README.md
-* Added SentencePiece proto support -- to be used in future conversion of SentencePiece models.
+* Added SentencePiece proto support – to be used in future conversion of SentencePiece models.
 * Improved documentation.
 
 ## v0.1.0
