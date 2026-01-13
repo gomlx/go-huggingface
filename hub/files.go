@@ -27,13 +27,12 @@ func (r *Repo) IterFileNames() iter.Seq2[string, error] {
 		// Error downloading: yield error only.
 		return func(yield func(string, error) bool) {
 			yield("", err)
-			return
 		}
 	}
 	return func(yield func(string, error) bool) {
 		for _, si := range r.info.Siblings {
 			fileName := si.Name
-			if path.IsAbs(fileName) || strings.Index(fileName, "..") != -1 {
+			if path.IsAbs(fileName) || strings.Contains(fileName, "..") {
 				yield("", errors.Errorf("model %q contains illegal file name %q -- it cannot be an absolute path, nor contain \"..\"",
 					r.ID, fileName))
 				return
@@ -42,7 +41,6 @@ func (r *Repo) IterFileNames() iter.Seq2[string, error] {
 				return
 			}
 		}
-		return
 	}
 }
 
@@ -169,7 +167,6 @@ func (r *Repo) DownloadFiles(repoFiles ...string) (downloadedPaths []string, err
 		}
 		cancelFn()
 		downloadingMu.Unlock()
-		return
 	}
 
 	// Loop over each file to download.
