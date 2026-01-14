@@ -2,9 +2,10 @@ package hub
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestCleanRelativeFilePath(t *testing.T) {

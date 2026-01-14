@@ -6,7 +6,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1
 	github.com/eliben/go-sentencepiece v0.6.0
 	github.com/gofrs/flock v0.13.0
-	github.com/gomlx/gomlx v0.26.0
+	github.com/gomlx/gomlx v0.26.1-0.20260114072028-dd1b582c66f7
 	github.com/google/uuid v1.6.0
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.11.1
