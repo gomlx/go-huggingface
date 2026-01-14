@@ -97,7 +97,11 @@ func TestIterSafetensors(t *testing.T) {
 // TestGetTensor tests loading a specific tensor as GoMLX tensor.
 func TestGetTensor(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
-	model, err := NewModelSafetensor(repo)
+	m, err := NewModelSafetensor(repo)
+	require.NoError(t, err)
+
+	// Load model first to populate index
+	model, err := m.LoadModel()
 	require.NoError(t, err)
 
 	tensor, err := model.GetTensor("model.safetensors", "embeddings.position_embeddings.weight")

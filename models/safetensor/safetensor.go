@@ -33,8 +33,8 @@ func (r *ModelSafetensor) LoadModel() (*ModelSafetensor, error) {
 
 // DetectShardedModel checks if the repository contains a sharded model and returns the index filename.
 func (r *ModelSafetensor) DetectShardedModel() (string, bool, error) {
-	if r.Repo == nil || r.Index == nil || len(r.Index.WeightMap) == 0 {
-		return "", false, errors.New("create a ModelSafetensor with NewModelSafetensor and run LoadModel first")
+	if r.Repo == nil {
+		return "", false, errors.New("Repo is nil, create a ModelSafetensor with NewModelSafetensor first")
 	}
 
 	// Look for model.safetensors.index.json or pytorch_model.bin.index.json
@@ -60,8 +60,8 @@ func (r *ModelSafetensor) DetectShardedModel() (string, bool, error) {
 
 // LoadSingleFileModel loads a single-file safetensors model.
 func (r *ModelSafetensor) LoadSingleFileModel() (*ModelSafetensor, error) {
-	if r.Repo == nil || r.Index == nil || len(r.Index.WeightMap) == 0 {
-		return nil, errors.New("create a ModelSafetensor with NewModelSafetensor and run LoadModel first")
+	if r.Repo == nil {
+		return nil, errors.New("Repo is nil, create a ModelSafetensor with NewModelSafetensor first")
 	}
 
 	localPaths := []string{}
@@ -109,8 +109,8 @@ func (r *ModelSafetensor) LoadSingleFileModel() (*ModelSafetensor, error) {
 
 // LoadShardedModel loads a sharded model index file (typically model.safetensors.index.json).
 func (r *ModelSafetensor) LoadShardedModel(indexFilename string) (*ModelSafetensor, error) {
-	if r.Repo == nil || r.Index == nil || len(r.Index.WeightMap) == 0 {
-		return nil, errors.New("create a ModelSafetensor with NewModelSafetensor and run LoadModel first")
+	if r.Repo == nil {
+		return nil, errors.New("Repo is nil, create a ModelSafetensor with NewModelSafetensor first")
 	}
 
 	localPath, err := r.Repo.DownloadFile(indexFilename)
@@ -138,8 +138,8 @@ func (r *ModelSafetensor) LoadShardedModel(indexFilename string) (*ModelSafetens
 
 // GetSafetensor returns the parsed safetensor header for a specific tensor.
 func (r *ModelSafetensor) GetSafetensor(filename string) (*SafetensorFileInfo, error) {
-	if r.Repo == nil || r.Index == nil || len(r.Index.WeightMap) == 0 {
-		return nil, errors.New("create a ModelSafetensor with NewModelSafetensor and run LoadModel first")
+	if r.Repo == nil {
+		return nil, errors.New("Repo is nil, create a ModelSafetensor with NewModelSafetensor first")
 	}
 
 	if !strings.HasSuffix(filename, ".safetensors") {
@@ -196,8 +196,11 @@ func (r *ModelSafetensor) IterSafetensors() func(yield func(SafetensorFileInfo, 
 // GetTensor loads a tensor from a safetensors file and converts it to a GoMLX tensor.
 // The returned tensor can be used with graph.ConstTensor().
 func (r *ModelSafetensor) GetTensor(filename, tensorName string) (*TensorWithName, error) {
-	if r.Repo == nil || r.Index == nil || len(r.Index.WeightMap) == 0 {
-		return nil, errors.New("create a ModelSafetensor with NewModelSafetensor and run LoadModel first")
+	if r.Repo == nil {
+		return nil, errors.New("Repo is nil, create a ModelSafetensor with NewModelSafetensor first")
+	}
+	if r.Index == nil || len(r.Index.WeightMap) == 0 {
+		return nil, errors.New("model not loaded, call LoadModel first")
 	}
 
 	localPath, err := r.Repo.DownloadFile(filename)
@@ -265,8 +268,12 @@ func (r *ModelSafetensor) GetTensor(filename, tensorName string) (*TensorWithNam
 // This is optimal for startup when loading many tensors.
 func (r *ModelSafetensor) IterTensors() func(yield func(TensorWithName, error) bool) {
 	return func(yield func(TensorWithName, error) bool) {
-		if r.Repo == nil || r.Index == nil || len(r.Index.WeightMap) == 0 {
-			yield(TensorWithName{}, errors.New("create a ModelSafetensor with NewModelSafetensor and run LoadModel first"))
+		if r.Repo == nil {
+			yield(TensorWithName{}, errors.New("Repo is nil, create a ModelSafetensor with NewModelSafetensor first"))
+			return
+		}
+		if r.Index == nil || len(r.Index.WeightMap) == 0 {
+			yield(TensorWithName{}, errors.New("model not loaded, call LoadModel first"))
 			return
 		}
 
