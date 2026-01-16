@@ -52,20 +52,15 @@ func (mr *MMapReader) ReadTensor(tensorName string) (*tensors.Tensor, error) {
 	}
 
 	// Convert shape to ints
-	dims := make([]int, len(meta.Shape))
-	copy(dims, meta.Shape)
-
-	// Create shape and tensor
-	shape := shapes.Make(dtype, dims...)
-	t := tensors.FromShape(shape)
+	t := tensors.FromShape(shapes.Make(dtype, meta.Shape...))
 
 	// Read from mmap directly into tensor memory
 	tensorOffset := mr.dataOffset + meta.DataOffsets[0]
 	var readErr error
 	t.MutableBytes(func(data []byte) {
-		expectedBytes := int64(shape.Size()) * int64(dtype.Size())
+		expectedBytes := int64(t.Shape().Size()) * int64(dtype.Size())
 		if int64(len(data)) != expectedBytes {
-			readErr = errors.Errorf("tensor shape %s expected %d bytes, but got %d bytes", shape, expectedBytes, len(data))
+			readErr = errors.Errorf("tensor shape %s expected %d bytes, but got %d bytes", t.Shape(), expectedBytes, len(data))
 			return
 		}
 		_, readErr = mr.reader.ReadAt(data, tensorOffset)
