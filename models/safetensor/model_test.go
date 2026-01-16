@@ -24,10 +24,10 @@ func TestListTensors(t *testing.T) {
 	require.NoError(t, err)
 
 	// Load model to populate index
-	model, err := m.Load()
+	err = m.Load()
 	require.NoError(t, err)
 
-	tensorNames := model.ListTensors()
+	tensorNames := m.ListTensors()
 	assert.Greater(t, len(tensorNames), 0)
 
 	// Verify all names are non-empty
@@ -42,19 +42,19 @@ func TestGetTensorLocation(t *testing.T) {
 	m, err := New(repo)
 	require.NoError(t, err)
 
-	model, err := m.Load()
+	err = m.Load()
 	require.NoError(t, err)
 
-	tensorNames := model.ListTensors()
+	tensorNames := m.ListTensors()
 	require.Greater(t, len(tensorNames), 0)
 
-	filename, err := model.GetTensorLocation(tensorNames[0])
+	filename, err := m.GetTensorLocation(tensorNames[0])
 	require.NoError(t, err)
 	assert.NotEmpty(t, filename)
 	assert.Contains(t, filename, ".safetensors")
 
 	// Test non-existent tensor
-	_, err = model.GetTensorLocation("non_existent_tensor")
+	_, err = m.GetTensorLocation("non_existent_tensor")
 	assert.Error(t, err)
 }
 
@@ -64,40 +64,18 @@ func TestGetTensorMetadata(t *testing.T) {
 	m, err := New(repo)
 	require.NoError(t, err)
 
-	model, err := m.Load()
+	err = m.Load()
 	require.NoError(t, err)
 
-	tensorNames := model.ListTensors()
+	tensorNames := m.ListTensors()
 	require.Greater(t, len(tensorNames), 0)
 
 	// Use a known tensor name
 	tensorName := "embeddings.position_embeddings.weight"
-	meta, err := model.GetTensorMetadata(tensorName)
+	meta, err := m.GetTensorMetadata(tensorName)
 	require.NoError(t, err)
 	assert.NotNil(t, meta)
 	assert.NotEmpty(t, meta.Dtype)
 	assert.NotNil(t, meta.Shape)
 	assert.Greater(t, meta.DataOffsets[1]-meta.DataOffsets[0], int64(0))
-}
-
-// TestTensorMetadataNumElements tests calculating number of elements.
-func TestTensorMetadataNumElements(t *testing.T) {
-	tests := []struct {
-		name     string
-		shape    []int
-		expected int64
-	}{
-		{"scalar", []int{}, 1},
-		{"vector", []int{10}, 10},
-		{"matrix", []int{3, 4}, 12},
-		{"3d", []int{2, 3, 4}, 24},
-		{"4d", []int{2, 3, 4, 5}, 120},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			meta := &TensorMetadata{Shape: tt.shape}
-			assert.Equal(t, tt.expected, meta.NumElements())
-		})
-	}
 }

@@ -15,13 +15,13 @@ func TestLoadModel(t *testing.T) {
 	m, err := New(repo)
 	require.NoError(t, err)
 
-	model, err := m.Load()
+	err = m.Load()
 	require.NoError(t, err)
-	require.NotNil(t, model)
-	assert.Greater(t, len(model.Index.WeightMap), 0, "should have tensors in weight map")
+	require.NotNil(t, m)
+	assert.Greater(t, len(m.Index.WeightMap), 0, "should have tensors in weight map")
 
 	// Verify we can access tensors through the model
-	tensorNames := model.ListTensors()
+	tensorNames := m.ListTensors()
 	assert.Greater(t, len(tensorNames), 0)
 }
 
@@ -44,13 +44,13 @@ func TestLoadSingleFileModel(t *testing.T) {
 	m, err := New(repo)
 	require.NoError(t, err)
 
-	model, err := m.LoadSingleFileModel()
+	err = m.LoadSingleFileModel()
 	require.NoError(t, err)
-	require.NotNil(t, model)
-	assert.Greater(t, len(model.Index.WeightMap), 0)
+	require.NotNil(t, m)
+	assert.Greater(t, len(m.Index.WeightMap), 0)
 
 	// Verify tensors are mapped to the safetensors file
-	for _, filename := range model.Index.WeightMap {
+	for _, filename := range m.Index.WeightMap {
 		assert.Contains(t, filename, ".safetensors")
 	}
 }
@@ -101,10 +101,10 @@ func TestGetTensor(t *testing.T) {
 	require.NoError(t, err)
 
 	// Load model first to populate index
-	model, err := m.Load()
+	err = m.Load()
 	require.NoError(t, err)
 
-	tensor, err := model.GetTensor("model.safetensors", "embeddings.position_embeddings.weight")
+	tensor, err := m.GetTensor("model.safetensors", "embeddings.position_embeddings.weight")
 	require.NoError(t, err)
 	assert.NotNil(t, tensor)
 	assert.NotNil(t, tensor.Tensor)
@@ -119,11 +119,11 @@ func TestIterTensors(t *testing.T) {
 	require.NoError(t, err)
 
 	// Load model first to populate index
-	model, err := m.Load()
+	err = m.Load()
 	require.NoError(t, err)
 
 	count := 0
-	for tensorWithName, err := range model.IterTensors() {
+	for tensorWithName, err := range m.IterTensors() {
 		require.NoError(t, err)
 		assert.NotEmpty(t, tensorWithName.Name)
 		assert.NotNil(t, tensorWithName.Tensor)

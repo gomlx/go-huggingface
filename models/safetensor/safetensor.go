@@ -15,10 +15,10 @@ import (
 // Load loads the model from the repo, whether it's sharded or a single file.
 // It automatically detects sharded models via index files, otherwise treats the first
 // .safetensors file as a single-file model.
-func (r *Model) Load() (*Model, error) {
+func (r *Model) Load() error {
 	indexFile, isSharded, err := r.DetectShardedModel()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if isSharded {
@@ -55,34 +55,34 @@ func (r *Model) DetectShardedModel() (string, bool, error) {
 }
 
 // LoadSingleFileModel loads a single-file safetensors model.
-func (r *Model) LoadSingleFileModel() (*Model, error) {
+func (r *Model) LoadSingleFileModel() error {
 	if r.Repo == nil {
-		return nil, errors.New("Repo is nil, create a ModelSafetensor with NewModelSafetensor first")
+		return errors.New("Repocreate a ModelSafetensor with NewModelSafetensor first")
 	}
 
 	localPaths := []string{}
 	for filename, err := range r.Repo.IterFileNames() {
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		if filepath.Ext(filename) == ".safetensors" {
 			// Download and parse the file to get tensor names
 			localPath, err := r.Repo.DownloadFile(filename)
 			if err != nil {
-				return nil, errors.Wrapf(err, "failed to download %s", filename)
+				return errors.Wrapf(err, "failed to download %s", filename)
 			}
 			localPaths = append(localPaths, localPath)
 		}
 	}
 
 	if len(localPaths) == 0 {
-		return nil, errors.New("no .safetensors files found in repository")
+		return errors.New("no .safetensors files found in repository")
 	}
 
 	header, _, err := r.parseHeader(localPaths[0])
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to parse header for %s", localPaths[0])
+		return errors.Wrapf(err, "failed to parse header for %s", localPaths[0])
 	}
 
 	// Create a synthetic index with all tensors pointing to this one file
@@ -91,7 +91,6 @@ func (r *Model) LoadSingleFileModel() (*Model, error) {
 		weightMap[tensorName] = path.Base(localPaths[0])
 	}
 
-	r.headers = make(map[string]*Header)
 	r.Index = &ShardedModelIndex{
 		WeightMap: weightMap,
 	}
@@ -100,36 +99,35 @@ func (r *Model) LoadSingleFileModel() (*Model, error) {
 		path.Base(localPaths[0]): header,
 	}
 
-	return r, nil
+	return nil
 }
 
 // LoadShardedModel loads a sharded model index file (typically model.safetensors.index.json).
-func (r *Model) LoadShardedModel(indexFilename string) (*Model, error) {
+func (r *Model) LoadShardedModel(indexFilename string) error {
 	if r.Repo == nil {
-		return nil, errors.New("Repo is nil, create a ModelSafetensor with NewModelSafetensor first")
+		return errors.New("Repo is nil, create a ModelSafetensor with NewModelSafetensor first")
 	}
 
 	localPath, err := r.Repo.DownloadFile(indexFilename)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to download %s", indexFilename)
+		return errors.Wrapf(err, "failed to download %s", indexFilename)
 	}
 
 	data, err := os.ReadFile(localPath)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to read %s", localPath)
+		return errors.Wrapf(err, "failed to read %s", localPath)
 	}
 
 	var index ShardedModelIndex
 	if err := json.Unmarshal(data, &index); err != nil {
-		return nil, errors.Wrap(err, "failed to parse sharded model index")
+		return errors.Wrap(err, "failed to parse sharded model index")
 	}
 
-	return &Model{
-		Repo:      r.Repo,
-		IndexFile: indexFilename,
-		Index:     &index,
-		headers:   make(map[string]*Header),
-	}, nil
+	r.IndexFile = indexFilename
+	r.Index = &index
+	r.headers = make(map[string]*Header)
+
+	return nil
 }
 
 // GetSafetensor returns the parsed safetensor header for a specific tensor.

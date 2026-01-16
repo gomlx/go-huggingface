@@ -78,18 +78,6 @@ type TensorMetadata struct {
 	DataOffsets [2]int64 `json:"data_offsets"` // [start, end] byte offsets in file
 }
 
-// NumElements returns the total number of elements in a tensor based on its shape.
-func (tm *TensorMetadata) NumElements() int64 {
-	if len(tm.Shape) == 0 {
-		return 1 // Scalar
-	}
-	prod := int64(1)
-	for _, dim := range tm.Shape {
-		prod *= int64(dim)
-	}
-	return prod
-}
-
 // TensorWithName holds a tensor name and its GoMLX tensor data.
 type TensorWithName struct {
 	Name   string
