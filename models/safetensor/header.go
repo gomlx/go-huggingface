@@ -11,13 +11,19 @@ import (
 	"github.com/pkg/errors"
 )
 
-// ParseSafetensorHeader reads and parses the header from a safetensors file.
+// Header represents the JSON header of a safetensors file.
+type Header struct {
+	Tensors  map[string]*TensorMetadata // Tensor name -> metadata
+	Metadata map[string]interface{}     // Optional __metadata__ field
+}
+
+// parseHeader reads and parses the header from a safetensors file.
 // Safetensor format:
 //
 //	[8 bytes: header size as little-endian u64]
 //	[header_size bytes: JSON header]
 //	[remaining bytes: tensor data]
-func (r *ModelSafetensor) ParseSafetensorHeader(path string) (*SafetensorHeader, int64, error) {
+func (r *Model) parseHeader(path string) (*Header, int64, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, 0, errors.Wrapf(err, "failed to open file %s", path)
@@ -46,7 +52,7 @@ func (r *ModelSafetensor) ParseSafetensorHeader(path string) (*SafetensorHeader,
 		return nil, 0, errors.Wrap(err, "failed to parse header JSON")
 	}
 
-	header := &SafetensorHeader{
+	header := &Header{
 		Tensors:  make(map[string]*TensorMetadata),
 		Metadata: make(map[string]interface{}),
 	}
@@ -72,7 +78,7 @@ func (r *ModelSafetensor) ParseSafetensorHeader(path string) (*SafetensorHeader,
 	return header, dataOffset, nil
 }
 
-func safetensorDtypeToGoMLX(stDtype string) (dtypes.DType, error) {
+func dtypeToGoMLX(stDtype string) (dtypes.DType, error) {
 	dtype, found := dtypes.MapOfNames[strings.ToLower(stDtype)]
 	if !found {
 		return dtypes.InvalidDType, errors.Errorf("dtype %q not supported", stDtype)

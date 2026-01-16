@@ -11,7 +11,7 @@ import (
 // TestNewModelSafetensor tests creating a new ModelSafetensor instance.
 func TestNewModelSafetensor(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
-	model, err := NewModelSafetensor(repo)
+	model, err := New(repo)
 	require.NoError(t, err)
 	assert.NotNil(t, model)
 	assert.NotNil(t, model.Repo)
@@ -20,11 +20,11 @@ func TestNewModelSafetensor(t *testing.T) {
 // TestListTensors tests listing all tensor names in a model.
 func TestListTensors(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
-	m, err := NewModelSafetensor(repo)
+	m, err := New(repo)
 	require.NoError(t, err)
 
 	// Load model to populate index
-	model, err := m.LoadModel()
+	model, err := m.Load()
 	require.NoError(t, err)
 
 	tensorNames := model.ListTensors()
@@ -39,10 +39,10 @@ func TestListTensors(t *testing.T) {
 // TestGetTensorLocation tests getting the filename containing a specific tensor.
 func TestGetTensorLocation(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
-	m, err := NewModelSafetensor(repo)
+	m, err := New(repo)
 	require.NoError(t, err)
 
-	model, err := m.LoadModel()
+	model, err := m.Load()
 	require.NoError(t, err)
 
 	tensorNames := model.ListTensors()
@@ -61,10 +61,10 @@ func TestGetTensorLocation(t *testing.T) {
 // TestGetTensorMetadata tests getting metadata for a specific tensor.
 func TestGetTensorMetadata(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
-	m, err := NewModelSafetensor(repo)
+	m, err := New(repo)
 	require.NoError(t, err)
 
-	model, err := m.LoadModel()
+	model, err := m.Load()
 	require.NoError(t, err)
 
 	tensorNames := model.ListTensors()
@@ -77,15 +77,7 @@ func TestGetTensorMetadata(t *testing.T) {
 	assert.NotNil(t, meta)
 	assert.NotEmpty(t, meta.Dtype)
 	assert.NotNil(t, meta.Shape)
-	assert.Greater(t, meta.SizeBytes(), int64(0))
-}
-
-// TestTensorMetadataSizeBytes tests calculating tensor size in bytes.
-func TestTensorMetadataSizeBytes(t *testing.T) {
-	meta := &TensorMetadata{
-		DataOffsets: [2]int64{100, 500},
-	}
-	assert.Equal(t, int64(400), meta.SizeBytes())
+	assert.Greater(t, meta.DataOffsets[1]-meta.DataOffsets[0], int64(0))
 }
 
 // TestTensorMetadataNumElements tests calculating number of elements.

@@ -2,24 +2,20 @@ package safetensor
 
 import (
 	"encoding/json"
-	"io"
 	"os"
 	"path"
 	"path/filepath"
 	"slices"
 	"strings"
 
-	"github.com/gomlx/gomlx/pkg/core/shapes"
-	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/pkg/errors"
 	"golang.org/x/exp/mmap"
 )
 
-// LoadModel loads a model as a Model, whether it's sharded or a single file.
-// This provides a unified interface for loading any safetensors model.
+// Load loads the model from the repo, whether it's sharded or a single file.
 // It automatically detects sharded models via index files, otherwise treats the first
 // .safetensors file as a single-file model.
-func (r *ModelSafetensor) LoadModel() (*ModelSafetensor, error) {
+func (r *Model) Load() (*Model, error) {
 	indexFile, isSharded, err := r.DetectShardedModel()
 	if err != nil {
 		return nil, err
@@ -32,7 +28,7 @@ func (r *ModelSafetensor) LoadModel() (*ModelSafetensor, error) {
 }
 
 // DetectShardedModel checks if the repository contains a sharded model and returns the index filename.
-func (r *ModelSafetensor) DetectShardedModel() (string, bool, error) {
+func (r *Model) DetectShardedModel() (string, bool, error) {
 	if r.Repo == nil {
 		return "", false, errors.New("Repo is nil, create a ModelSafetensor with NewModelSafetensor first")
 	}
@@ -59,7 +55,7 @@ func (r *ModelSafetensor) DetectShardedModel() (string, bool, error) {
 }
 
 // LoadSingleFileModel loads a single-file safetensors model.
-func (r *ModelSafetensor) LoadSingleFileModel() (*ModelSafetensor, error) {
+func (r *Model) LoadSingleFileModel() (*Model, error) {
 	if r.Repo == nil {
 		return nil, errors.New("Repo is nil, create a ModelSafetensor with NewModelSafetensor first")
 	}
@@ -84,7 +80,7 @@ func (r *ModelSafetensor) LoadSingleFileModel() (*ModelSafetensor, error) {
 		return nil, errors.New("no .safetensors files found in repository")
 	}
 
-	header, _, err := r.ParseSafetensorHeader(localPaths[0])
+	header, _, err := r.parseHeader(localPaths[0])
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse header for %s", localPaths[0])
 	}
@@ -95,12 +91,12 @@ func (r *ModelSafetensor) LoadSingleFileModel() (*ModelSafetensor, error) {
 		weightMap[tensorName] = path.Base(localPaths[0])
 	}
 
-	r.headers = make(map[string]*SafetensorHeader)
+	r.headers = make(map[string]*Header)
 	r.Index = &ShardedModelIndex{
 		WeightMap: weightMap,
 	}
 	r.IndexFile = localPaths[0]
-	r.headers = map[string]*SafetensorHeader{
+	r.headers = map[string]*Header{
 		path.Base(localPaths[0]): header,
 	}
 
@@ -108,7 +104,7 @@ func (r *ModelSafetensor) LoadSingleFileModel() (*ModelSafetensor, error) {
 }
 
 // LoadShardedModel loads a sharded model index file (typically model.safetensors.index.json).
-func (r *ModelSafetensor) LoadShardedModel(indexFilename string) (*ModelSafetensor, error) {
+func (r *Model) LoadShardedModel(indexFilename string) (*Model, error) {
 	if r.Repo == nil {
 		return nil, errors.New("Repo is nil, create a ModelSafetensor with NewModelSafetensor first")
 	}
@@ -128,16 +124,16 @@ func (r *ModelSafetensor) LoadShardedModel(indexFilename string) (*ModelSafetens
 		return nil, errors.Wrap(err, "failed to parse sharded model index")
 	}
 
-	return &ModelSafetensor{
+	return &Model{
 		Repo:      r.Repo,
 		IndexFile: indexFilename,
 		Index:     &index,
-		headers:   make(map[string]*SafetensorHeader),
+		headers:   make(map[string]*Header),
 	}, nil
 }
 
 // GetSafetensor returns the parsed safetensor header for a specific tensor.
-func (r *ModelSafetensor) GetSafetensor(filename string) (*SafetensorFileInfo, error) {
+func (r *Model) GetSafetensor(filename string) (*FileInfo, error) {
 	if r.Repo == nil {
 		return nil, errors.New("Repo is nil, create a ModelSafetensor with NewModelSafetensor first")
 	}
@@ -151,20 +147,20 @@ func (r *ModelSafetensor) GetSafetensor(filename string) (*SafetensorFileInfo, e
 		return nil, err
 	}
 
-	header, _, err := r.ParseSafetensorHeader(localPath)
+	header, _, err := r.parseHeader(localPath)
 	if err != nil {
 		return nil, err
 	}
 
-	return &SafetensorFileInfo{Filename: filename, Header: header}, nil
+	return &FileInfo{Filename: filename, Header: header}, nil
 }
 
 // IterSafetensors returns an iterator over all .safetensors files in the repository.
-func (r *ModelSafetensor) IterSafetensors() func(yield func(SafetensorFileInfo, error) bool) {
-	return func(yield func(SafetensorFileInfo, error) bool) {
+func (r *Model) IterSafetensors() func(yield func(FileInfo, error) bool) {
+	return func(yield func(FileInfo, error) bool) {
 		for filename, err := range r.Repo.IterFileNames() {
 			if err != nil {
-				yield(SafetensorFileInfo{}, err)
+				yield(FileInfo{}, err)
 				return
 			}
 
@@ -176,17 +172,17 @@ func (r *ModelSafetensor) IterSafetensors() func(yield func(SafetensorFileInfo, 
 			// Download and parse header
 			localPath, err := r.Repo.DownloadFile(filename)
 			if err != nil {
-				yield(SafetensorFileInfo{}, errors.Wrapf(err, "failed to download %s", filename))
+				yield(FileInfo{}, errors.Wrapf(err, "failed to download %s", filename))
 				return
 			}
 
-			header, _, err := r.ParseSafetensorHeader(localPath)
+			header, _, err := r.parseHeader(localPath)
 			if err != nil {
-				yield(SafetensorFileInfo{}, errors.Wrapf(err, "failed to parse header for %s", filename))
+				yield(FileInfo{}, errors.Wrapf(err, "failed to parse header for %s", filename))
 				return
 			}
 
-			if !yield(SafetensorFileInfo{Filename: filename, Header: header}, nil) {
+			if !yield(FileInfo{Filename: filename, Header: header}, nil) {
 				return
 			}
 		}
@@ -195,7 +191,7 @@ func (r *ModelSafetensor) IterSafetensors() func(yield func(SafetensorFileInfo, 
 
 // GetTensor loads a tensor from a safetensors file and converts it to a GoMLX tensor.
 // The returned tensor can be used with graph.ConstTensor().
-func (r *ModelSafetensor) GetTensor(filename, tensorName string) (*TensorWithName, error) {
+func (r *Model) GetTensor(filename, tensorName string) (*TensorWithName, error) {
 	if r.Repo == nil {
 		return nil, errors.New("Repo is nil, create a ModelSafetensor with NewModelSafetensor first")
 	}
@@ -208,65 +204,38 @@ func (r *ModelSafetensor) GetTensor(filename, tensorName string) (*TensorWithNam
 		return nil, errors.Wrapf(err, "failed to download %s", filename)
 	}
 
-	header, dataOffset, err := r.ParseSafetensorHeader(localPath)
+	header, dataOffset, err := r.parseHeader(localPath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse header for %s", localPath)
 	}
 
-	meta, ok := header.Tensors[tensorName]
-	if !ok {
-		return nil, errors.Errorf("tensor %s not found in %s", tensorName, localPath)
+	// Open mmap for reading
+	reader, err := mmap.Open(localPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to mmap %s", localPath)
+	}
+	defer reader.Close()
+
+	// Create MMapReader
+	mmapReader := &MMapReader{
+		reader:     reader,
+		dataOffset: dataOffset,
+		header:     header,
 	}
 
-	// Convert dtype
-	dtype, err := safetensorDtypeToGoMLX(meta.Dtype)
+	// Read tensor
+	tensor, err := mmapReader.ReadTensor(tensorName)
 	if err != nil {
 		return nil, err
 	}
 
-	// Convert shape to ints
-	dims := make([]int, len(meta.Shape))
-	copy(dims, meta.Shape)
-
-	// Create shape and tensor
-	shape := shapes.Make(dtype, dims...)
-	t := tensors.FromShape(shape)
-
-	// Open file and read directly into tensor memory
-	f, err := os.Open(localPath)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to open %s", localPath)
-	}
-	defer f.Close()
-
-	// Seek to tensor data position
-	offset := dataOffset + meta.DataOffsets[0]
-	if _, err := f.Seek(offset, io.SeekStart); err != nil {
-		return nil, errors.Wrap(err, "failed to seek to tensor data")
-	}
-
-	var readErr error
-	t.MutableBytes(func(data []byte) {
-		if int64(len(data)) != meta.SizeBytes() {
-			readErr = errors.Errorf("tensor shape %s expected %d bytes, but safetensor has %d bytes", shape, len(data), meta.SizeBytes())
-			return
-		}
-		_, readErr = io.ReadFull(f, data)
-		if readErr != nil {
-			readErr = errors.Wrapf(readErr, "failed to read from %s", localPath)
-		}
-	})
-	if readErr != nil {
-		return nil, readErr
-	}
-
-	return &TensorWithName{Name: tensorName, Tensor: t}, nil
+	return &TensorWithName{Name: tensorName, Tensor: tensor}, nil
 }
 
 // IterTensors returns an iterator over all tensors as GoMLX tensors.
 // It uses mmap efficiently: opens each shard file once and reads all tensors from it sequentially.
 // This is optimal for startup when loading many tensors.
-func (r *ModelSafetensor) IterTensors() func(yield func(TensorWithName, error) bool) {
+func (r *Model) IterTensors() func(yield func(TensorWithName, error) bool) {
 	return func(yield func(TensorWithName, error) bool) {
 		if r.Repo == nil {
 			yield(TensorWithName{}, errors.New("Repo is nil, create a ModelSafetensor with NewModelSafetensor first"))
@@ -293,7 +262,7 @@ func (r *ModelSafetensor) IterTensors() func(yield func(TensorWithName, error) b
 			}
 
 			// Parse header once
-			header, dataOffset, err := r.ParseSafetensorHeader(localPath)
+			header, dataOffset, err := r.parseHeader(localPath)
 			if err != nil {
 				yield(TensorWithName{}, errors.Wrapf(err, "failed to parse header for %s", filename))
 				return
@@ -306,54 +275,26 @@ func (r *ModelSafetensor) IterTensors() func(yield func(TensorWithName, error) b
 				return
 			}
 
+			// Create MMapReader
+			mmapReader := &MMapReader{
+				reader:     reader,
+				dataOffset: dataOffset,
+				header:     header,
+			}
+
 			// Sort tensors by file offset for sequential reading
 			sortedTensors := sortTensorsByOffset(tensorNames, header)
 
 			// Read all tensors from this shard
 			for _, tensorName := range sortedTensors {
-				meta, ok := header.Tensors[tensorName]
-				if !ok {
-					reader.Close()
-					yield(TensorWithName{}, errors.Errorf("tensor %s not found in %s", tensorName, filename))
-					return
-				}
-
-				// Convert dtype
-				dtype, err := safetensorDtypeToGoMLX(meta.Dtype)
+				tensor, err := mmapReader.ReadTensor(tensorName)
 				if err != nil {
 					reader.Close()
 					yield(TensorWithName{}, err)
 					return
 				}
 
-				// Convert shape to ints
-				dims := make([]int, len(meta.Shape))
-				copy(dims, meta.Shape)
-
-				// Create shape and tensor
-				shape := shapes.Make(dtype, dims...)
-				t := tensors.FromShape(shape)
-
-				// Read from mmap directly into tensor memory
-				tensorOffset := dataOffset + meta.DataOffsets[0]
-				var readErr error
-				t.MutableBytes(func(data []byte) {
-					if int64(len(data)) != meta.SizeBytes() {
-						readErr = errors.Errorf("tensor shape %s expected %d bytes, but safetensor has %d bytes", shape, len(data), meta.SizeBytes())
-						return
-					}
-					_, readErr = reader.ReadAt(data, tensorOffset)
-					if readErr != nil && readErr != io.EOF {
-						readErr = errors.Wrapf(readErr, "failed to read from %s", filename)
-					}
-				})
-				if readErr != nil {
-					reader.Close()
-					yield(TensorWithName{}, readErr)
-					return
-				}
-
-				if !yield(TensorWithName{Name: tensorName, Tensor: t}, nil) {
+				if !yield(TensorWithName{Name: tensorName, Tensor: tensor}, nil) {
 					reader.Close()
 					return
 				}
@@ -366,7 +307,7 @@ func (r *ModelSafetensor) IterTensors() func(yield func(TensorWithName, error) b
 }
 
 // sortTensorsByOffset sorts tensor names by their file offset for sequential reading.
-func sortTensorsByOffset(tensorNames []string, header *SafetensorHeader) []string {
+func sortTensorsByOffset(tensorNames []string, header *Header) []string {
 	type tensorOffset struct {
 		name   string
 		offset int64

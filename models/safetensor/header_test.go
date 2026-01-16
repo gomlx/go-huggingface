@@ -11,13 +11,13 @@ import (
 // TestParseSafetensorHeader tests parsing safetensor headers.
 func TestParseSafetensorHeader(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
-	model, err := NewModelSafetensor(repo)
+	model, err := New(repo)
 	require.NoError(t, err)
 
 	localPath, err := repo.DownloadFile("model.safetensors")
 	require.NoError(t, err)
 
-	header, dataOffset, err := model.ParseSafetensorHeader(localPath)
+	header, dataOffset, err := model.parseHeader(localPath)
 	require.NoError(t, err)
 	assert.NotNil(t, header)
 	assert.Greater(t, dataOffset, int64(0))
@@ -56,13 +56,13 @@ func TestSafetensorDtypeToGoMLX(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.dtype, func(t *testing.T) {
 			// Convert safetensor dtype name to GoMLX dtype
-			gomlxDtype, err := safetensorDtypeToGoMLX(tt.dtype)
+			gomlxDtype, err := dtypeToGoMLX(tt.dtype)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, gomlxDtype.Size())
 		})
 	}
 
 	// Test unknown dtype
-	_, err := safetensorDtypeToGoMLX("UNKNOWN")
+	_, err := dtypeToGoMLX("UNKNOWN")
 	assert.Error(t, err)
 }
