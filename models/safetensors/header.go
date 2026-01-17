@@ -1,4 +1,4 @@
-package safetensor
+package safetensors
 
 import (
 	"encoding/binary"
@@ -23,7 +23,10 @@ type Header struct {
 //	[8 bytes: header size as little-endian u64]
 //	[header_size bytes: JSON header]
 //	[remaining bytes: tensor data]
-func (r *Model) parseHeader(path string) (*Header, int64, error) {
+//
+// It returns the parsed header of the file, the offset of the actual data (same as the total header size)
+// and any error that may have occurred.
+func (m *Model) parseHeader(path string) (*Header, int64, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, 0, errors.Wrapf(err, "failed to open file %s", path)

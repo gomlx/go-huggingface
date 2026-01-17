@@ -1,4 +1,4 @@
-package safetensor
+package safetensors
 
 import (
 	"github.com/gomlx/go-huggingface/hub"
@@ -7,37 +7,52 @@ import (
 )
 
 // Model represents a model (possibly split across multiple safetensor files).
+// It contains a map of filename to a Header object, parsed from the safetensor file.
 type Model struct {
 	Repo      *hub.Repo
 	IndexFile string
 	Index     *ShardedModelIndex
-	headers   map[string]*Header // filename -> parsed header
+	Headers   map[string]*Header // ".safetensor" filename -> parsed header
 }
 
 // ShardedModelIndex represents a model.safetensors.index.json file for sharded models.
 type ShardedModelIndex struct {
-	Metadata  map[string]interface{} `json:"metadata"`   // Model metadata
-	WeightMap map[string]string      `json:"weight_map"` // Tensor name -> filename
+	Metadata  map[string]any    `json:"metadata"`   // Model metadata
+	WeightMap map[string]string `json:"weight_map"` // Tensor name -> filename
 }
 
+// New creates a new Model and loads the loads the headers from the repo safetensors file(s).
+// If err is nil, it's ready to be used.
 func New(repo *hub.Repo) (*Model, error) {
+	m := NewEmpty(repo)
+	err := m.Load()
+	if err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// NewEmpty creates an empty Model object, no headers are loaded.
+//
+// Call Model.Load() to load the model header(s).
+func NewEmpty(repo *hub.Repo) *Model {
 	return &Model{
 		Repo: repo,
-	}, nil
+	}
 }
 
-// ListTensors returns all tensor names in the model.
-func (r *Model) ListTensors() []string {
-	names := make([]string, 0, len(r.Index.WeightMap))
-	for name := range r.Index.WeightMap {
+// ListTensorNames returns all tensor names in the model.
+func (m *Model) ListTensorNames() []string {
+	names := make([]string, 0, len(m.Index.WeightMap))
+	for name := range m.Index.WeightMap {
 		names = append(names, name)
 	}
 	return names
 }
 
-// GetTensorLocation returns the filename containing a specific tensor.
-func (r *Model) GetTensorLocation(tensorName string) (string, error) {
-	filename, ok := r.Index.WeightMap[tensorName]
+// GetTensorFilename returns the filename containing a specific tensor.
+func (m *Model) GetTensorFilename(tensorName string) (string, error) {
+	filename, ok := m.Index.WeightMap[tensorName]
 	if !ok {
 		return "", errors.Errorf("tensor %s not found in weight map", tensorName)
 	}
@@ -45,13 +60,13 @@ func (r *Model) GetTensorLocation(tensorName string) (string, error) {
 }
 
 // GetTensorMetadata returns metadata for a specific tensor without loading data.
-func (r *Model) GetTensorMetadata(tensorName string) (*TensorMetadata, error) {
-	filename, err := r.GetTensorLocation(tensorName)
+func (m *Model) GetTensorMetadata(tensorName string) (*TensorMetadata, error) {
+	filename, err := m.GetTensorFilename(tensorName)
 	if err != nil {
 		return nil, err
 	}
 
-	st, err := r.GetSafetensor(filename)
+	st, err := m.GetSafetensor(filename)
 	if err != nil {
 		return nil, err
 	}
@@ -78,8 +93,8 @@ type TensorMetadata struct {
 	DataOffsets [2]int64 `json:"data_offsets"` // [start, end] byte offsets in file
 }
 
-// TensorWithName holds a tensor name and its GoMLX tensor data.
-type TensorWithName struct {
+// TensorAndName holds a tensor name and its GoMLX tensor data.
+type TensorAndName struct {
 	Name   string
 	Tensor *tensors.Tensor
 }

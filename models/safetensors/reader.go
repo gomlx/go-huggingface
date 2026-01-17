@@ -1,4 +1,4 @@
-package safetensor
+package safetensors
 
 import (
 	"io"
@@ -13,19 +13,33 @@ import (
 type MMapReader struct {
 	reader     *mmap.ReaderAt
 	dataOffset int64
-	header     *Header
-	meta       *TensorMetadata
+	Header     *Header
 }
 
-// ReadAt implements io.ReaderAt for the tensor data.
-func (sr *MMapReader) ReadAt(p []byte, off int64) (n int, err error) {
-	tensorOffset := sr.dataOffset + sr.meta.DataOffsets[0] + off
-	return sr.reader.ReadAt(p, tensorOffset)
-}
+// NewMMapReader creates a new MMapReader for a specific .safetensors file.
+func (m *Model) NewMMapReader(fileName string) (*MMapReader, error) {
+	localPath, err := m.Repo.DownloadFile(fileName)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to download %s", fileName)
+	}
 
-// Len returns the size of the tensor data in bytes.
-func (sr *MMapReader) Len() int {
-	return int(sr.meta.DataOffsets[1] - sr.meta.DataOffsets[0])
+	header, dataOffset, err := m.parseHeader(localPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to parse header for %s", localPath)
+	}
+
+	// Open mmap for reading
+	reader, err := mmap.Open(localPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to mmap %s", localPath)
+	}
+
+	// Create MMapReader
+	return &MMapReader{
+		reader:     reader,
+		dataOffset: dataOffset,
+		Header:     header,
+	}, nil
 }
 
 // Close closes the underlying memory-mapped file.
@@ -33,14 +47,9 @@ func (sr *MMapReader) Close() error {
 	return sr.reader.Close()
 }
 
-// Metadata returns the tensor metadata.
-func (sr *MMapReader) Metadata() *TensorMetadata {
-	return sr.meta
-}
-
 // ReadTensor reads a tensor by name from the memory-mapped file.
 func (mr *MMapReader) ReadTensor(tensorName string) (*tensors.Tensor, error) {
-	meta, ok := mr.header.Tensors[tensorName]
+	meta, ok := mr.Header.Tensors[tensorName]
 	if !ok {
 		return nil, errors.Errorf("tensor %s not found", tensorName)
 	}
