@@ -1,5 +1,5 @@
 // Package safetensors provides a Model object for safetensors-based models,
-// from which one can load individual weights (tensors) or interate over them, with access to headers.
+// from which one can load individual weights (tensors) or iterate over them and access their metadata.
 //
 // Example:
 //
