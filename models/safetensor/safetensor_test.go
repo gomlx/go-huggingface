@@ -12,16 +12,14 @@ import (
 func TestLoadModel(t *testing.T) {
 	// Test with single-file model
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
-	m, err := New(repo)
-	require.NoError(t, err)
-
-	err = m.Load()
+	m := NewEmpty(repo)
+	err := m.Load()
 	require.NoError(t, err)
 	require.NotNil(t, m)
 	assert.Greater(t, len(m.Index.WeightMap), 0, "should have tensors in weight map")
 
 	// Verify we can access tensors through the model
-	tensorNames := m.ListTensors()
+	tensorNames := m.ListTensorNames()
 	assert.Greater(t, len(tensorNames), 0)
 }
 
@@ -29,9 +27,7 @@ func TestLoadModel(t *testing.T) {
 func TestDetectShardedModel(t *testing.T) {
 	// Test non-sharded model
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
-	model, err := New(repo)
-	require.NoError(t, err)
-
+	model := NewEmpty(repo)
 	indexFile, isSharded, err := model.DetectShardedModel()
 	require.NoError(t, err)
 	assert.False(t, isSharded)
@@ -41,10 +37,8 @@ func TestDetectShardedModel(t *testing.T) {
 // TestLoadSingleFileModel tests loading a single-file safetensors model.
 func TestLoadSingleFileModel(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
-	m, err := New(repo)
-	require.NoError(t, err)
-
-	err = m.LoadSingleFileModel()
+	m := NewEmpty(repo)
+	err := m.LoadSingleFileModel()
 	require.NoError(t, err)
 	require.NotNil(t, m)
 	assert.Greater(t, len(m.Index.WeightMap), 0)
@@ -63,9 +57,7 @@ func TestLoadShardedModel(t *testing.T) {
 // TestGetSafetensor tests getting safetensor file information.
 func TestGetSafetensor(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
-	model, err := New(repo)
-	require.NoError(t, err)
-
+	model := NewEmpty(repo)
 	meta, err := model.GetSafetensor("model.safetensors")
 	require.NoError(t, err)
 	assert.NotNil(t, meta)
@@ -79,8 +71,7 @@ func TestGetSafetensor(t *testing.T) {
 // TestIterSafetensors tests iterating over all safetensor files.
 func TestIterSafetensors(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
-	m, err := New(repo)
-	require.NoError(t, err)
+	m := NewEmpty(repo)
 
 	count := 0
 	for safetensor, err := range m.IterSafetensors() {
@@ -94,17 +85,27 @@ func TestIterSafetensors(t *testing.T) {
 	assert.Greater(t, count, 0, "should have at least one safetensor file")
 }
 
+// TestGetTensorFromFile tests loading a specific tensor as GoMLX tensor.
+func TestGetTensorFromFile(t *testing.T) {
+	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
+	m, err := New(repo)
+	require.NoError(t, err)
+
+	tensor, err := m.GetTensorFromFile("model.safetensors", "embeddings.position_embeddings.weight")
+	require.NoError(t, err)
+	assert.NotNil(t, tensor)
+	assert.NotNil(t, tensor.Tensor)
+	assert.Equal(t, "embeddings.position_embeddings.weight", tensor.Name)
+	assert.Greater(t, tensor.Tensor.Shape().Size(), 0)
+}
+
 // TestGetTensor tests loading a specific tensor as GoMLX tensor.
 func TestGetTensor(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m, err := New(repo)
 	require.NoError(t, err)
 
-	// Load model first to populate index
-	err = m.Load()
-	require.NoError(t, err)
-
-	tensor, err := m.GetTensor("model.safetensors", "embeddings.position_embeddings.weight")
+	tensor, err := m.GetTensor("embeddings.position_embeddings.weight")
 	require.NoError(t, err)
 	assert.NotNil(t, tensor)
 	assert.NotNil(t, tensor.Tensor)
@@ -117,11 +118,6 @@ func TestIterTensors(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m, err := New(repo)
 	require.NoError(t, err)
-
-	// Load model first to populate index
-	err = m.Load()
-	require.NoError(t, err)
-
 	count := 0
 	for tensorWithName, err := range m.IterTensors() {
 		require.NoError(t, err)

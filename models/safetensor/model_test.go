@@ -8,11 +8,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestNewModelSafetensor tests creating a new ModelSafetensor instance.
-func TestNewModelSafetensor(t *testing.T) {
+// TestNew tests creating a new Model instance.
+func TestNew(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
-	model, err := New(repo)
-	require.NoError(t, err)
+	model := NewEmpty(repo)
 	assert.NotNil(t, model)
 	assert.NotNil(t, model.Repo)
 }
@@ -22,12 +21,7 @@ func TestListTensors(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m, err := New(repo)
 	require.NoError(t, err)
-
-	// Load model to populate index
-	err = m.Load()
-	require.NoError(t, err)
-
-	tensorNames := m.ListTensors()
+	tensorNames := m.ListTensorNames()
 	assert.Greater(t, len(tensorNames), 0)
 
 	// Verify all names are non-empty
@@ -36,25 +30,21 @@ func TestListTensors(t *testing.T) {
 	}
 }
 
-// TestGetTensorLocation tests getting the filename containing a specific tensor.
-func TestGetTensorLocation(t *testing.T) {
+// TestGetTensorFilename tests getting the filename containing a specific tensor.
+func TestGetTensorFilename(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m, err := New(repo)
 	require.NoError(t, err)
-
-	err = m.Load()
-	require.NoError(t, err)
-
-	tensorNames := m.ListTensors()
+	tensorNames := m.ListTensorNames()
 	require.Greater(t, len(tensorNames), 0)
 
-	filename, err := m.GetTensorLocation(tensorNames[0])
+	filename, err := m.GetTensorFilename(tensorNames[0])
 	require.NoError(t, err)
 	assert.NotEmpty(t, filename)
 	assert.Contains(t, filename, ".safetensors")
 
 	// Test non-existent tensor
-	_, err = m.GetTensorLocation("non_existent_tensor")
+	_, err = m.GetTensorFilename("non_existent_tensor")
 	assert.Error(t, err)
 }
 
@@ -63,11 +53,7 @@ func TestGetTensorMetadata(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m, err := New(repo)
 	require.NoError(t, err)
-
-	err = m.Load()
-	require.NoError(t, err)
-
-	tensorNames := m.ListTensors()
+	tensorNames := m.ListTensorNames()
 	require.Greater(t, len(tensorNames), 0)
 
 	// Use a known tensor name

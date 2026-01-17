@@ -11,9 +11,7 @@ import (
 // TestParseSafetensorHeader tests parsing safetensor headers.
 func TestParseSafetensorHeader(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
-	model, err := New(repo)
-	require.NoError(t, err)
-
+	model := NewEmpty(repo)
 	localPath, err := repo.DownloadFile("model.safetensors")
 	require.NoError(t, err)
 

@@ -12,8 +12,7 @@ import (
 // TestMMapReaderReadTensor tests reading a tensor using MMapReader.
 func TestMMapReaderReadTensor(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
-	m, err := New(repo)
-	require.NoError(t, err)
+	m := NewEmpty(repo)
 
 	// Download file
 	localPath, err := repo.DownloadFile("model.safetensors")
@@ -46,8 +45,7 @@ func TestMMapReaderReadTensor(t *testing.T) {
 // TestMMapReaderReadTensorNotFound tests reading a non-existent tensor.
 func TestMMapReaderReadTensorNotFound(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
-	m, err := New(repo)
-	require.NoError(t, err)
+	m := NewEmpty(repo)
 
 	localPath, err := repo.DownloadFile("model.safetensors")
 	require.NoError(t, err)
@@ -74,8 +72,7 @@ func TestMMapReaderReadTensorNotFound(t *testing.T) {
 // TestMMapReaderMetadata tests the Metadata method.
 func TestMMapReaderMetadata(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
-	m, err := New(repo)
-	require.NoError(t, err)
+	m := NewEmpty(repo)
 
 	localPath, err := repo.DownloadFile("model.safetensors")
 	require.NoError(t, err)
@@ -107,8 +104,7 @@ func TestMMapReaderMetadata(t *testing.T) {
 // TestMMapReaderLen tests the Len method.
 func TestMMapReaderLen(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
-	m, err := New(repo)
-	require.NoError(t, err)
+	m := NewEmpty(repo)
 
 	localPath, err := repo.DownloadFile("model.safetensors")
 	require.NoError(t, err)
@@ -142,8 +138,7 @@ func TestMMapReaderLen(t *testing.T) {
 // TestMMapReaderReadAt tests the ReadAt method.
 func TestMMapReaderReadAt(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
-	m, err := New(repo)
-	require.NoError(t, err)
+	m := NewEmpty(repo)
 
 	localPath, err := repo.DownloadFile("model.safetensors")
 	require.NoError(t, err)
