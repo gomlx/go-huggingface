@@ -28,13 +28,14 @@ package hub
 
 import (
 	"fmt"
-	"github.com/gomlx/go-huggingface"
-	"github.com/google/uuid"
-	"github.com/pkg/errors"
 	"os"
 	"path"
 	"runtime"
 	"strings"
+
+	"github.com/gomlx/go-huggingface"
+	"github.com/google/uuid"
+	"github.com/pkg/errors"
 )
 
 // SessionId is unique and always created anew at the start of the program, and used during the life of the program.
@@ -60,10 +61,6 @@ var (
 
 	// DefaultFileCreationPerm is used when creating files inside the cache subdirectories.
 	DefaultFileCreationPerm = os.FileMode(0644)
-)
-
-const (
-	tokenizersVersion = "0.0.1"
 )
 
 const (
