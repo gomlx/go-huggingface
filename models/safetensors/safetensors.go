@@ -33,6 +33,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/gomlx/go-huggingface/hub"
 	"github.com/pkg/errors"
 )
 
@@ -333,4 +334,25 @@ func sortTensorsByOffset(tensorNames []string, header *Header) []string {
 		result[i] = to.name
 	}
 	return result
+}
+
+// IterTensorsFromRepo iterates over all tensors in the repository.
+func IterTensorsFromRepo(repo *hub.Repo) func(yield func(TensorAndName, error) bool) {
+	return func(yield func(TensorAndName, error) bool) {
+		m, err := New(repo)
+		if err != nil {
+			yield(TensorAndName{}, err)
+			return
+		}
+
+		for tensorAndName, err := range m.IterTensors() {
+			if err != nil {
+				yield(TensorAndName{}, err)
+				return
+			}
+			if !yield(tensorAndName, nil) {
+				return
+			}
+		}
+	}
 }

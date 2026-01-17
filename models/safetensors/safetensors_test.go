@@ -113,18 +113,138 @@ func TestGetTensor(t *testing.T) {
 	assert.Greater(t, tensor.Tensor.Shape().Size(), 0)
 }
 
+var allMiniVariablesToShape = map[string]string{
+	"embeddings.position_ids":                           "(Int64)[1 512]",
+	"embeddings.LayerNorm.bias":                         "(Float32)[384]",
+	"embeddings.LayerNorm.weight":                       "(Float32)[384]",
+	"embeddings.position_embeddings.weight":             "(Float32)[512 384]",
+	"embeddings.token_type_embeddings.weight":           "(Float32)[2 384]",
+	"embeddings.word_embeddings.weight":                 "(Float32)[30522 384]",
+	"encoder.layer.0.attention.output.LayerNorm.bias":   "(Float32)[384]",
+	"encoder.layer.0.attention.output.LayerNorm.weight": "(Float32)[384]",
+	"encoder.layer.0.attention.output.dense.bias":       "(Float32)[384]",
+	"encoder.layer.0.attention.output.dense.weight":     "(Float32)[384 384]",
+	"encoder.layer.0.attention.self.key.bias":           "(Float32)[384]",
+	"encoder.layer.0.attention.self.key.weight":         "(Float32)[384 384]",
+	"encoder.layer.0.attention.self.query.bias":         "(Float32)[384]",
+	"encoder.layer.0.attention.self.query.weight":       "(Float32)[384 384]",
+	"encoder.layer.0.attention.self.value.bias":         "(Float32)[384]",
+	"encoder.layer.0.attention.self.value.weight":       "(Float32)[384 384]",
+	"encoder.layer.0.intermediate.dense.bias":           "(Float32)[1536]",
+	"encoder.layer.0.intermediate.dense.weight":         "(Float32)[1536 384]",
+	"encoder.layer.0.output.LayerNorm.bias":             "(Float32)[384]",
+	"encoder.layer.0.output.LayerNorm.weight":           "(Float32)[384]",
+	"encoder.layer.0.output.dense.bias":                 "(Float32)[384]",
+	"encoder.layer.0.output.dense.weight":               "(Float32)[384 1536]",
+	"encoder.layer.1.attention.output.LayerNorm.bias":   "(Float32)[384]",
+	"encoder.layer.1.attention.output.LayerNorm.weight": "(Float32)[384]",
+	"encoder.layer.1.attention.output.dense.bias":       "(Float32)[384]",
+	"encoder.layer.1.attention.output.dense.weight":     "(Float32)[384 384]",
+	"encoder.layer.1.attention.self.key.bias":           "(Float32)[384]",
+	"encoder.layer.1.attention.self.key.weight":         "(Float32)[384 384]",
+	"encoder.layer.1.attention.self.query.bias":         "(Float32)[384]",
+	"encoder.layer.1.attention.self.query.weight":       "(Float32)[384 384]",
+	"encoder.layer.1.attention.self.value.bias":         "(Float32)[384]",
+	"encoder.layer.1.attention.self.value.weight":       "(Float32)[384 384]",
+	"encoder.layer.1.intermediate.dense.bias":           "(Float32)[1536]",
+	"encoder.layer.1.intermediate.dense.weight":         "(Float32)[1536 384]",
+	"encoder.layer.1.output.LayerNorm.bias":             "(Float32)[384]",
+	"encoder.layer.1.output.LayerNorm.weight":           "(Float32)[384]",
+	"encoder.layer.1.output.dense.bias":                 "(Float32)[384]",
+	"encoder.layer.1.output.dense.weight":               "(Float32)[384 1536]",
+	"encoder.layer.2.attention.output.LayerNorm.bias":   "(Float32)[384]",
+	"encoder.layer.2.attention.output.LayerNorm.weight": "(Float32)[384]",
+	"encoder.layer.2.attention.output.dense.bias":       "(Float32)[384]",
+	"encoder.layer.2.attention.output.dense.weight":     "(Float32)[384 384]",
+	"encoder.layer.2.attention.self.key.bias":           "(Float32)[384]",
+	"encoder.layer.2.attention.self.key.weight":         "(Float32)[384 384]",
+	"encoder.layer.2.attention.self.query.bias":         "(Float32)[384]",
+	"encoder.layer.2.attention.self.query.weight":       "(Float32)[384 384]",
+	"encoder.layer.2.attention.self.value.bias":         "(Float32)[384]",
+	"encoder.layer.2.attention.self.value.weight":       "(Float32)[384 384]",
+	"encoder.layer.2.intermediate.dense.bias":           "(Float32)[1536]",
+	"encoder.layer.2.intermediate.dense.weight":         "(Float32)[1536 384]",
+	"encoder.layer.2.output.LayerNorm.bias":             "(Float32)[384]",
+	"encoder.layer.2.output.LayerNorm.weight":           "(Float32)[384]",
+	"encoder.layer.2.output.dense.bias":                 "(Float32)[384]",
+	"encoder.layer.2.output.dense.weight":               "(Float32)[384 1536]",
+	"encoder.layer.3.attention.output.LayerNorm.bias":   "(Float32)[384]",
+	"encoder.layer.3.attention.output.LayerNorm.weight": "(Float32)[384]",
+	"encoder.layer.3.attention.output.dense.bias":       "(Float32)[384]",
+	"encoder.layer.3.attention.output.dense.weight":     "(Float32)[384 384]",
+	"encoder.layer.3.attention.self.key.bias":           "(Float32)[384]",
+	"encoder.layer.3.attention.self.key.weight":         "(Float32)[384 384]",
+	"encoder.layer.3.attention.self.query.bias":         "(Float32)[384]",
+	"encoder.layer.3.attention.self.query.weight":       "(Float32)[384 384]",
+	"encoder.layer.3.attention.self.value.bias":         "(Float32)[384]",
+	"encoder.layer.3.attention.self.value.weight":       "(Float32)[384 384]",
+	"encoder.layer.3.intermediate.dense.bias":           "(Float32)[1536]",
+	"encoder.layer.3.intermediate.dense.weight":         "(Float32)[1536 384]",
+	"encoder.layer.3.output.LayerNorm.bias":             "(Float32)[384]",
+	"encoder.layer.3.output.LayerNorm.weight":           "(Float32)[384]",
+	"encoder.layer.3.output.dense.bias":                 "(Float32)[384]",
+	"encoder.layer.3.output.dense.weight":               "(Float32)[384 1536]",
+	"encoder.layer.4.attention.output.LayerNorm.bias":   "(Float32)[384]",
+	"encoder.layer.4.attention.output.LayerNorm.weight": "(Float32)[384]",
+	"encoder.layer.4.attention.output.dense.bias":       "(Float32)[384]",
+	"encoder.layer.4.attention.output.dense.weight":     "(Float32)[384 384]",
+	"encoder.layer.4.attention.self.key.bias":           "(Float32)[384]",
+	"encoder.layer.4.attention.self.key.weight":         "(Float32)[384 384]",
+	"encoder.layer.4.attention.self.query.bias":         "(Float32)[384]",
+	"encoder.layer.4.attention.self.query.weight":       "(Float32)[384 384]",
+	"encoder.layer.4.attention.self.value.bias":         "(Float32)[384]",
+	"encoder.layer.4.attention.self.value.weight":       "(Float32)[384 384]",
+	"encoder.layer.4.intermediate.dense.bias":           "(Float32)[1536]",
+	"encoder.layer.4.intermediate.dense.weight":         "(Float32)[1536 384]",
+	"encoder.layer.4.output.LayerNorm.bias":             "(Float32)[384]",
+	"encoder.layer.4.output.LayerNorm.weight":           "(Float32)[384]",
+	"encoder.layer.4.output.dense.bias":                 "(Float32)[384]",
+	"encoder.layer.4.output.dense.weight":               "(Float32)[384 1536]",
+	"encoder.layer.5.attention.output.LayerNorm.bias":   "(Float32)[384]",
+	"encoder.layer.5.attention.output.LayerNorm.weight": "(Float32)[384]",
+	"encoder.layer.5.attention.output.dense.bias":       "(Float32)[384]",
+	"encoder.layer.5.attention.output.dense.weight":     "(Float32)[384 384]",
+	"encoder.layer.5.attention.self.key.bias":           "(Float32)[384]",
+	"encoder.layer.5.attention.self.key.weight":         "(Float32)[384 384]",
+	"encoder.layer.5.attention.self.query.bias":         "(Float32)[384]",
+	"encoder.layer.5.attention.self.query.weight":       "(Float32)[384 384]",
+	"encoder.layer.5.attention.self.value.bias":         "(Float32)[384]",
+	"encoder.layer.5.attention.self.value.weight":       "(Float32)[384 384]",
+	"encoder.layer.5.intermediate.dense.bias":           "(Float32)[1536]",
+	"encoder.layer.5.intermediate.dense.weight":         "(Float32)[1536 384]",
+	"encoder.layer.5.output.LayerNorm.bias":             "(Float32)[384]",
+	"encoder.layer.5.output.LayerNorm.weight":           "(Float32)[384]",
+	"encoder.layer.5.output.dense.bias":                 "(Float32)[384]",
+	"encoder.layer.5.output.dense.weight":               "(Float32)[384 1536]",
+	"pooler.dense.bias":                                 "(Float32)[384]",
+	"pooler.dense.weight":                               "(Float32)[384 384]",
+}
+
 // TestIterTensors tests iterating over all tensors.
 func TestIterTensors(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m, err := New(repo)
 	require.NoError(t, err)
 	count := 0
-	for tensorWithName, err := range m.IterTensors() {
+	for tensorAndName, err := range m.IterTensors() {
 		require.NoError(t, err)
-		assert.NotEmpty(t, tensorWithName.Name)
-		assert.NotNil(t, tensorWithName.Tensor)
-		assert.Greater(t, tensorWithName.Tensor.Shape().Size(), 0)
+		wantShapeStr, found := allMiniVariablesToShape[tensorAndName.Name]
+		require.True(t, found, "tensor %q not expected", tensorAndName.Name)
+		assert.Equal(t, wantShapeStr, tensorAndName.Tensor.Shape().String())
 		count++
 	}
-	assert.Greater(t, count, 0, "should have at least one tensor")
+	assert.Equal(t, len(allMiniVariablesToShape), count)
+}
+
+func TestIterTensorsFromRepo(t *testing.T) {
+	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
+	count := 0
+	for tensorAndName, err := range IterTensorsFromRepo(repo) {
+		require.NoError(t, err)
+		wantShapeStr, found := allMiniVariablesToShape[tensorAndName.Name]
+		require.True(t, found, "tensor %q not expected", tensorAndName.Name)
+		assert.Equal(t, wantShapeStr, tensorAndName.Tensor.Shape().String())
+		count++
+	}
+	assert.Equal(t, len(allMiniVariablesToShape), count)
 }
