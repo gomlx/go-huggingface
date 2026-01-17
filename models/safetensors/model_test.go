@@ -1,4 +1,4 @@
-package safetensor
+package safetensors
 
 import (
 	"testing"

@@ -1,10 +1,10 @@
-// Package safetensor provides a Model object for safetensors-based models,
+// Package safetensors provides a Model object for safetensors-based models,
 // from which one can load individual weights (tensors) or interate over them, with access to headers.
 //
 // Example:
 //
 //	repo := hub.New(modelID).WithAuth(hfAuthToken)
-//	model, err := safetensor.New(repo)
+//	model, err := safetensors.New(repo)
 //	if err != nil {
 //		panic(err)
 //	}
@@ -17,13 +17,13 @@
 // Or use a simpler interface to directly iterate over the tensors of the model.
 //
 //	repo := hub.New(modelID).WithAuth(hfAuthToken)
-//	for tensorAndName, err := safetensor.IterTensorsFromRepo(repo) {
+//	for tensorAndName, err := safetensors.IterTensorsFromRepo(repo) {
 //		if err != nil {
 //			panic(err)
 //		}
 //		fmt.Printf("- Tensor %s: shape=%s\n", tensorAndName.Name, tensorAndName.Tensor.Shape())
 //	}
-package safetensor
+package safetensors
 
 import (
 	"encoding/json"
@@ -34,7 +34,6 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
-	"golang.org/x/exp/mmap"
 )
 
 // Load loads the model from the repo, whether it's sharded or a single file.
@@ -219,7 +218,7 @@ func (m *Model) IterSafetensors() func(yield func(FileInfo, error) bool) {
 }
 
 // GetTensor by its name.
-func (m *Model) GetTensor(tensorName string) (*TensorWithName, error) {
+func (m *Model) GetTensor(tensorName string) (*TensorAndName, error) {
 	filename, err := m.GetTensorFilename(tensorName)
 	if err != nil {
 		return nil, err
@@ -230,110 +229,67 @@ func (m *Model) GetTensor(tensorName string) (*TensorWithName, error) {
 // GetTensorFromFile loads a tensor from within a .safetensors file and converts it to a GoMLX tensor.
 //
 // This requires a loaded model -- see Model.Load().
-func (m *Model) GetTensorFromFile(filename, tensorName string) (*TensorWithName, error) {
+func (m *Model) GetTensorFromFile(fileName, tensorName string) (*TensorAndName, error) {
 	if m.Repo == nil {
-		return nil, errors.New("Repo is nil, create a ModelSafetensor with NewModelSafetensor first")
+		return nil, errors.New("repo is nil!?")
 	}
 	if m.Index == nil || len(m.Index.WeightMap) == 0 {
-		return nil, errors.New("model not loaded, call LoadModel first")
+		return nil, errors.New("model empty (not loaded) call Load first")
 	}
 
-	localPath, err := m.Repo.DownloadFile(filename)
+	reader, err := m.NewMMapReader(fileName)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to download %s", filename)
+		return nil, errors.Wrapf(err, "failed to create MMapReader for %s", fileName)
 	}
-
-	header, dataOffset, err := m.parseHeader(localPath)
+	tensor, err := reader.ReadTensor(tensorName)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to parse header for %s", localPath)
+		return nil, errors.Wrapf(err, "failed to read tensor %s from %s", tensorName, fileName)
 	}
-
-	// Open mmap for reading
-	reader, err := mmap.Open(localPath)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to mmap %s", localPath)
-	}
-	defer reader.Close()
-
-	// Create MMapReader
-	mmapReader := &MMapReader{
-		reader:     reader,
-		dataOffset: dataOffset,
-		header:     header,
-	}
-
-	// Read tensor
-	tensor, err := mmapReader.ReadTensor(tensorName)
-	if err != nil {
-		return nil, err
-	}
-
-	return &TensorWithName{Name: tensorName, Tensor: tensor}, nil
+	return &TensorAndName{Name: tensorName, Tensor: tensor}, nil
 }
 
 // IterTensors returns an iterator over all tensors as GoMLX tensors.
 // It uses mmap efficiently: opens each shard file once and reads all tensors from it sequentially.
 // This is optimal for startup when loading many tensors.
-func (m *Model) IterTensors() func(yield func(TensorWithName, error) bool) {
-	return func(yield func(TensorWithName, error) bool) {
+func (m *Model) IterTensors() func(yield func(TensorAndName, error) bool) {
+	return func(yield func(TensorAndName, error) bool) {
 		if m.Repo == nil {
-			yield(TensorWithName{}, errors.New("Repo is nil, create a ModelSafetensor with NewModelSafetensor first"))
+			yield(TensorAndName{}, errors.New("repo is nil!?"))
 			return
 		}
 		if m.Index == nil || len(m.Index.WeightMap) == 0 {
-			yield(TensorWithName{}, errors.New("model not loaded, call LoadModel first"))
+			yield(TensorAndName{}, errors.New("model empty (not loaded) call Load first"))
 			return
 		}
 
 		// Group tensors by shard file for efficient reading
 		shardToTensors := make(map[string][]string)
-		for tensorName, filename := range m.Index.WeightMap {
-			shardToTensors[filename] = append(shardToTensors[filename], tensorName)
+		for tensorName, fileName := range m.Index.WeightMap {
+			shardToTensors[fileName] = append(shardToTensors[fileName], tensorName)
 		}
 
 		// Process each shard file with one mmap
-		for filename, tensorNames := range shardToTensors {
-			// Download shard file
-			localPath, err := m.Repo.DownloadFile(filename)
+		for fileName, tensorNames := range shardToTensors {
+			// Create reader for shard.
+			reader, err := m.NewMMapReader(fileName)
 			if err != nil {
-				yield(TensorWithName{}, errors.Wrapf(err, "failed to download %s", filename))
+				yield(TensorAndName{}, errors.Wrapf(err, "failed to create MMapReader for %s", fileName))
 				return
-			}
-
-			// Parse header once
-			header, dataOffset, err := m.parseHeader(localPath)
-			if err != nil {
-				yield(TensorWithName{}, errors.Wrapf(err, "failed to parse header for %s", filename))
-				return
-			}
-
-			// Open mmap once for this shard
-			reader, err := mmap.Open(localPath)
-			if err != nil {
-				yield(TensorWithName{}, errors.Wrapf(err, "failed to mmap %s", localPath))
-				return
-			}
-
-			// Create MMapReader
-			mmapReader := &MMapReader{
-				reader:     reader,
-				dataOffset: dataOffset,
-				header:     header,
 			}
 
 			// Sort tensors by file offset for sequential reading
-			sortedTensors := sortTensorsByOffset(tensorNames, header)
+			sortedTensors := sortTensorsByOffset(tensorNames, reader.Header)
 
 			// Read all tensors from this shard
 			for _, tensorName := range sortedTensors {
-				tensor, err := mmapReader.ReadTensor(tensorName)
+				tensor, err := reader.ReadTensor(tensorName)
 				if err != nil {
 					reader.Close()
-					yield(TensorWithName{}, err)
+					yield(TensorAndName{}, err)
 					return
 				}
 
-				if !yield(TensorWithName{Name: tensorName, Tensor: tensor}, nil) {
+				if !yield(TensorAndName{Name: tensorName, Tensor: tensor}, nil) {
 					reader.Close()
 					return
 				}

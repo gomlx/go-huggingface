@@ -1,4 +1,4 @@
-package safetensor
+package safetensors
 
 import (
 	"github.com/gomlx/go-huggingface/hub"
@@ -93,8 +93,8 @@ type TensorMetadata struct {
 	DataOffsets [2]int64 `json:"data_offsets"` // [start, end] byte offsets in file
 }
 
-// TensorWithName holds a tensor name and its GoMLX tensor data.
-type TensorWithName struct {
+// TensorAndName holds a tensor name and its GoMLX tensor data.
+type TensorAndName struct {
 	Name   string
 	Tensor *tensors.Tensor
 }
