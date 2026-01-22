@@ -7,6 +7,7 @@ package tokenizers
 import (
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/tokenizers/api"
+	"github.com/gomlx/go-huggingface/tokenizers/hftokenizer"
 	"github.com/gomlx/go-huggingface/tokenizers/sentencepiece"
 	"github.com/pkg/errors"
 
@@ -95,11 +96,38 @@ var (
 )
 
 func init() {
-	// Initialize sentencepiece tokenizer classes, always included.
+	// Initialize sentencepiece tokenizer classes.
 	RegisterTokenizerClass("GemmaTokenizer", sentencepiece.New)
 
-	//for _, className := range []string{
-	//	"GemmaTokenizer", "BertTokenizer", "DebertaV2Tokenizer", "DistilBertTokenizer",
-	//	"DistilBertTokenizer", "RobertaTokenizer"} {
-	//}
+	// Initialize HuggingFace tokenizer classes (WordPiece/BPE based).
+	// These use the tokenizer.json format from HuggingFace Tokenizers library.
+	for _, className := range []string{
+		// BERT-style (WordPiece)
+		"BertTokenizer",
+		"BertTokenizerFast",
+		"DistilBertTokenizer",
+		"DistilBertTokenizerFast",
+		"DebertaTokenizer",
+		"DebertaTokenizerFast",
+		"DebertaV2Tokenizer",
+		"DebertaV2TokenizerFast",
+		"ElectraTokenizer",
+		"ElectraTokenizerFast",
+		// RoBERTa-style (BPE)
+		"RobertaTokenizer",
+		"RobertaTokenizerFast",
+		"XLMRobertaTokenizer",
+		"XLMRobertaTokenizerFast",
+		// GPT-2 style (BPE)
+		"GPT2Tokenizer",
+		"GPT2TokenizerFast",
+		// LLaMA-style (BPE, using tokenizer.json)
+		"LlamaTokenizer",
+		"LlamaTokenizerFast",
+		// Other common tokenizers
+		"PreTrainedTokenizerFast",
+		"AutoTokenizer",
+	} {
+		RegisterTokenizerClass(className, hftokenizer.New)
+	}
 }
