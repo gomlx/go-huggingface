@@ -13,6 +13,7 @@ import (
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/tokenizers/api"
 	"github.com/pkg/errors"
+	"golang.org/x/text/unicode/norm"
 )
 
 // TokenizerJSON represents the structure of HuggingFace's tokenizer.json file.
@@ -317,17 +318,16 @@ func (t *Tokenizer) applyNormalizer(text string, n *Normalizer) string {
 	case "Lowercase":
 		return strings.ToLower(text)
 	case "NFD":
-		// Simplified: just return as-is (full NFD requires unicode normalization)
-		return text
+		return norm.NFD.String(text)
 	case "NFC":
-		return text
+		return norm.NFC.String(text)
 	case "NFKC":
-		return text
+		return norm.NFKC.String(text)
 	case "NFKD":
-		return text
+		return norm.NFKD.String(text)
 	case "StripAccents":
-		// Simplified: remove combining marks
-		return removeAccents(text)
+		// NFD decomposition then remove combining marks (Mn category)
+		return removeAccents(norm.NFD.String(text))
 	case "BertNormalizer":
 		// Clean text, handle Chinese chars, strip accents, lowercase
 		result := cleanText(text)

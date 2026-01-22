@@ -11,6 +11,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96
+	golang.org/x/text v0.33.0
 	google.golang.org/protobuf v1.36.10
 )
 

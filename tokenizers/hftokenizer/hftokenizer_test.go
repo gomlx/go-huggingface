@@ -123,6 +123,155 @@ func TestNewFromContent_BPE(t *testing.T) {
 	}
 }
 
+// Simple BPE tokenizer for testing merge logic (uses whitespace pre-tokenizer)
+// Merges are applied in rank order (lower index = higher priority)
+// "hello" merges: h+e->he, l+l->ll, he+ll->hell, hell+o->hello
+// "world" merges: w+o->wo, r+l->rl, wo+rl->worl, worl+d->world
+var testSimpleBPETokenizerJSON = []byte(`{
+  "version": "1.0",
+  "added_tokens": [
+    {"id": 0, "content": "<unk>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true}
+  ],
+  "normalizer": null,
+  "pre_tokenizer": {
+    "type": "Whitespace"
+  },
+  "decoder": {
+    "type": "BPEDecoder"
+  },
+  "model": {
+    "type": "BPE",
+    "unk_token": "<unk>",
+    "vocab": {
+      "<unk>": 0,
+      "h": 1,
+      "e": 2,
+      "l": 3,
+      "o": 4,
+      "w": 5,
+      "r": 6,
+      "d": 7,
+      "he": 8,
+      "ll": 9,
+      "rl": 10,
+      "hell": 11,
+      "hello": 12,
+      "wo": 13,
+      "worl": 14,
+      "world": 15
+    },
+    "merges": [
+      "h e",
+      "l l",
+      "r l",
+      "he ll",
+      "hell o",
+      "w o",
+      "wo rl",
+      "worl d"
+    ]
+  }
+}`)
+
+func TestBPE_Encode(t *testing.T) {
+	tok, err := NewFromContent(nil, testSimpleBPETokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		input string
+		want  []int
+	}{
+		{
+			name:  "single word hello",
+			input: "hello",
+			want:  []int{12}, // "hello" after merges: h+e->he, l+l->ll, he+ll->hell, hell+o->hello
+		},
+		{
+			name:  "single word world",
+			input: "world",
+			want:  []int{15}, // "world" after merges: w+o->wo, r+l->rl, wo+rl->worl, worl+d->world
+		},
+		{
+			name:  "two words",
+			input: "hello world",
+			want:  []int{12, 15}, // both words merge fully
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tok.Encode(tt.input)
+			if !intSliceEqual(got, tt.want) {
+				t.Errorf("Encode(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBPE_Decode(t *testing.T) {
+	tok, err := NewFromContent(nil, testSimpleBPETokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		input []int
+		want  string
+	}{
+		{
+			name:  "single token hello",
+			input: []int{12},
+			want:  "hello",
+		},
+		{
+			name:  "single token world",
+			input: []int{15},
+			want:  "world",
+		},
+		{
+			name:  "multiple tokens",
+			input: []int{12, 15},
+			want:  "helloworld", // BPE decoder joins without spaces
+		},
+		{
+			name:  "subword tokens",
+			input: []int{8, 9, 4}, // "he" + "ll" + "o"
+			want:  "hello",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tok.Decode(tt.input)
+			if got != tt.want {
+				t.Errorf("Decode(%v) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBPE_PartialMerge(t *testing.T) {
+	// Test that partial merges work correctly
+	tok, err := NewFromContent(nil, testSimpleBPETokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	// "helloworld" without space - should be two separate words from pre-tokenizer
+	// but as one word, BPE should handle it
+	ids := tok.Encode("helloworld")
+	decoded := tok.Decode(ids)
+
+	// Encode then decode should give us back the original
+	if decoded != "helloworld" {
+		t.Errorf("round-trip failed: got %q, want %q", decoded, "helloworld")
+	}
+}
+
 func TestWordPiece_Encode(t *testing.T) {
 	tok, err := NewFromContent(nil, testWordPieceTokenizerJSON)
 	if err != nil {
@@ -450,6 +599,64 @@ func TestEmptyVocab(t *testing.T) {
 	ids := tok.Encode("hello")
 	if len(ids) != 0 {
 		t.Errorf("Encode() with empty vocab = %v, want empty", ids)
+	}
+}
+
+func TestUnicodeNormalization(t *testing.T) {
+	// Test tokenizer with NFD normalizer
+	nfdTokenizerJSON := []byte(`{
+		"normalizer": {"type": "NFD"},
+		"pre_tokenizer": {"type": "Whitespace"},
+		"model": {
+			"type": "WordPiece",
+			"vocab": {"cafe": 1, "e": 2, "\u0301": 3},
+			"unk_token": ""
+		}
+	}`)
+
+	tok, err := NewFromContent(nil, nfdTokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	// "café" in NFC form (single é character) should be normalized to NFD (e + combining accent)
+	// The combining acute accent is U+0301
+	cafeNFC := "caf\u00e9"  // café with precomposed é
+	cafeNFD := "cafe\u0301" // café with e + combining acute accent
+
+	// After NFD normalization, both should produce the same result
+	ids1 := tok.Encode(cafeNFC)
+	ids2 := tok.Encode(cafeNFD)
+
+	if !intSliceEqual(ids1, ids2) {
+		t.Errorf("NFD normalization failed: Encode(%q) = %v, Encode(%q) = %v", cafeNFC, ids1, cafeNFD, ids2)
+	}
+}
+
+func TestNFKCNormalization(t *testing.T) {
+	// Test NFKC normalization (used by some models)
+	nfkcTokenizerJSON := []byte(`{
+		"normalizer": {"type": "NFKC"},
+		"pre_tokenizer": {"type": "Whitespace"},
+		"model": {
+			"type": "WordPiece",
+			"vocab": {"fi": 1},
+			"unk_token": ""
+		}
+	}`)
+
+	tok, err := NewFromContent(nil, nfkcTokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	// The fi ligature (U+FB01) should be normalized to "fi" by NFKC
+	fiLigature := "\ufb01" // ﬁ ligature
+
+	ids := tok.Encode(fiLigature)
+	// Should find "fi" in vocab after NFKC normalization
+	if len(ids) != 1 || ids[0] != 1 {
+		t.Errorf("NFKC normalization failed: Encode(%q) = %v, want [1]", fiLigature, ids)
 	}
 }
 
