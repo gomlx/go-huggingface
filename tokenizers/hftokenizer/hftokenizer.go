@@ -141,8 +141,8 @@ type Tokenizer struct {
 // Compile time assert that Tokenizer implements api.Tokenizer interface.
 var _ api.Tokenizer = &Tokenizer{}
 
-// Compile time assert that Tokenizer implements api.TokenizerWithOffsets interface.
-var _ api.TokenizerWithOffsets = &Tokenizer{}
+// Compile time assert that Tokenizer implements api.TokenizerWithSpans interface.
+var _ api.TokenizerWithSpans = &Tokenizer{}
 
 // New creates a HuggingFace tokenizer from the tokenizer.json file.
 // It implements a tokenizer.TokenizerConstructor function signature.
@@ -291,8 +291,13 @@ func (t *Tokenizer) resolveSpecialTokens() {
 }
 
 // Encode converts text to a sequence of token IDs.
+//
+// Note: This delegates to EncodeWithSpans for simplicity. The overhead of computing
+// spans is minimal (just tracking byte positions during tokenization), so we avoid
+// maintaining duplicate code paths. If profiling shows this to be a bottleneck for
+// your use case, please open an issue.
 func (t *Tokenizer) Encode(text string) []int {
-	result := t.EncodeWithOffsets(text)
+	result := t.EncodeWithSpans(text)
 	return result.IDs
 }
 
@@ -303,34 +308,34 @@ type wordWithOffset struct {
 	end   int // end position in original text (exclusive)
 }
 
-// EncodeWithOffsets converts text to a sequence of token IDs along with their character offsets.
-func (t *Tokenizer) EncodeWithOffsets(text string) api.EncodingResult {
-	// Apply normalization with offset tracking
-	normalized, normOffsets := t.normalizeWithOffsets(text)
+// EncodeWithSpans converts text to a sequence of token IDs along with their byte spans.
+func (t *Tokenizer) EncodeWithSpans(text string) api.EncodingResult {
+	// Apply normalization with span tracking
+	normalized, normSpans := t.normalizeWithSpans(text)
 
-	// Apply pre-tokenization with offset tracking
-	words := t.preTokenizeWithOffsets(normalized, normOffsets)
+	// Apply pre-tokenization with span tracking
+	words := t.preTokenizeWithSpans(normalized, normSpans)
 
 	// Tokenize each word according to the model type
 	var ids []int
-	var offsets []api.TokenOffset
+	var spans []api.TokenSpan
 
 	for _, word := range words {
-		wordIDs, wordOffsets := t.tokenizeWordWithOffsets(word)
+		wordIDs, wordSpans := t.tokenizeWordWithSpans(word)
 		ids = append(ids, wordIDs...)
-		offsets = append(offsets, wordOffsets...)
+		spans = append(spans, wordSpans...)
 	}
 
 	return api.EncodingResult{
-		IDs:     ids,
-		Offsets: offsets,
+		IDs:   ids,
+		Spans: spans,
 	}
 }
 
-// normalizeWithOffsets applies normalization and returns the normalized text along with
-// a mapping from normalized character positions to original character positions.
+// normalizeWithSpans applies normalization and returns the normalized text along with
+// a mapping from normalized byte positions to original byte positions.
 // The returned slice maps normalized position -> original position.
-func (t *Tokenizer) normalizeWithOffsets(text string) (string, []int) {
+func (t *Tokenizer) normalizeWithSpans(text string) (string, []int) {
 	if t.tokenizer.Normalizer == nil {
 		// No normalization - create identity mapping
 		offsets := make([]int, len(text))
@@ -339,11 +344,11 @@ func (t *Tokenizer) normalizeWithOffsets(text string) (string, []int) {
 		}
 		return text, offsets
 	}
-	return t.applyNormalizerWithOffsets(text, t.tokenizer.Normalizer)
+	return t.applyNormalizerWithSpans(text, t.tokenizer.Normalizer)
 }
 
-// applyNormalizerWithOffsets applies a normalizer and tracks character offsets.
-func (t *Tokenizer) applyNormalizerWithOffsets(text string, n *Normalizer) (string, []int) {
+// applyNormalizerWithSpans applies a normalizer and tracks byte positions.
+func (t *Tokenizer) applyNormalizerWithSpans(text string, n *Normalizer) (string, []int) {
 	// For most normalizers, we need to track how characters map through the transformation.
 	// This is complex because normalizers can:
 	// 1. Remove characters (accents, control chars)
@@ -431,7 +436,7 @@ func (t *Tokenizer) applyNormalizerWithOffsets(text string, n *Normalizer) (stri
 		}
 		for _, child := range n.Normalizers {
 			childCopy := child
-			newResult, newOffsets := t.applyNormalizerWithOffsets(result, &childCopy)
+			newResult, newOffsets := t.applyNormalizerWithSpans(result, &childCopy)
 			// Compose the offset mappings
 			composedOffsets := make([]int, len(newOffsets))
 			for i, off := range newOffsets {
@@ -517,13 +522,13 @@ func remapOffsetsFromNFD(original string, nfdOffsets []int) []int {
 	return result
 }
 
-// preTokenizeWithOffsets splits text into words with their offsets.
-func (t *Tokenizer) preTokenizeWithOffsets(text string, normOffsets []int) []wordWithOffset {
+// preTokenizeWithSpans splits text into words with their byte spans.
+func (t *Tokenizer) preTokenizeWithSpans(text string, normOffsets []int) []wordWithOffset {
 	if t.tokenizer.PreTokenizer == nil {
 		// Default: split on whitespace
 		return fieldsWithOffsets(text, normOffsets)
 	}
-	return t.applyPreTokenizerWithOffsets(text, normOffsets, t.tokenizer.PreTokenizer)
+	return t.applyPreTokenizerWithSpans(text, normOffsets, t.tokenizer.PreTokenizer)
 }
 
 // fieldsWithOffsets splits text on whitespace and returns words with their offsets.
@@ -579,8 +584,8 @@ func fieldsWithOffsets(text string, normOffsets []int) []wordWithOffset {
 	return words
 }
 
-// applyPreTokenizerWithOffsets applies pre-tokenization with offset tracking.
-func (t *Tokenizer) applyPreTokenizerWithOffsets(text string, normOffsets []int, pt *PreTokenizer) []wordWithOffset {
+// applyPreTokenizerWithSpans applies pre-tokenization with offset tracking.
+func (t *Tokenizer) applyPreTokenizerWithSpans(text string, normOffsets []int, pt *PreTokenizer) []wordWithOffset {
 	switch pt.Type {
 	case "BertPreTokenizer":
 		return bertPreTokenizeWithOffsets(text, normOffsets)
@@ -612,7 +617,7 @@ func (t *Tokenizer) applyPreTokenizerWithOffsets(text string, normOffsets []int,
 				for i := range subOffsets {
 					subOffsets[i] = w.start + i
 				}
-				subWords := t.applyPreTokenizerWithOffsets(w.text, subOffsets, &childCopy)
+				subWords := t.applyPreTokenizerWithSpans(w.text, subOffsets, &childCopy)
 				newResult = append(newResult, subWords...)
 			}
 			result = newResult
@@ -900,34 +905,34 @@ func metaspacePreTokenizeWithOffsets(text string, normOffsets []int, addPrefixSp
 	return words
 }
 
-// tokenizeWordWithOffsets tokenizes a single word and returns IDs with their offsets.
-func (t *Tokenizer) tokenizeWordWithOffsets(word wordWithOffset) ([]int, []api.TokenOffset) {
+// tokenizeWordWithSpans tokenizes a single word and returns IDs with their offsets.
+func (t *Tokenizer) tokenizeWordWithSpans(word wordWithOffset) ([]int, []api.TokenSpan) {
 	// First check if word is an added token
 	if id, ok := t.addedTokens[word.text]; ok {
-		return []int{id}, []api.TokenOffset{{Start: word.start, End: word.end}}
+		return []int{id}, []api.TokenSpan{{Start: word.start, End: word.end}}
 	}
 
 	switch t.tokenizer.Model.Type {
 	case "WordPiece":
-		return t.wordPieceTokenizeWithOffsets(word)
+		return t.wordPieceTokenizeWithSpans(word)
 	case "BPE":
-		return t.bpeTokenizeWithOffsets(word)
+		return t.bpeTokenizeWithSpans(word)
 	case "Unigram":
-		return t.unigramTokenizeWithOffsets(word)
+		return t.unigramTokenizeWithSpans(word)
 	default:
 		// Fallback: try to find word in vocab
 		if id, ok := t.tokenizer.Model.Vocab[word.text]; ok {
-			return []int{id}, []api.TokenOffset{{Start: word.start, End: word.end}}
+			return []int{id}, []api.TokenSpan{{Start: word.start, End: word.end}}
 		}
 		if t.unkID >= 0 {
-			return []int{t.unkID}, []api.TokenOffset{{Start: word.start, End: word.end}}
+			return []int{t.unkID}, []api.TokenSpan{{Start: word.start, End: word.end}}
 		}
 		return nil, nil
 	}
 }
 
-// wordPieceTokenizeWithOffsets implements WordPiece tokenization with offset tracking.
-func (t *Tokenizer) wordPieceTokenizeWithOffsets(word wordWithOffset) ([]int, []api.TokenOffset) {
+// wordPieceTokenizeWithSpans implements WordPiece tokenization with offset tracking.
+func (t *Tokenizer) wordPieceTokenizeWithSpans(word wordWithOffset) ([]int, []api.TokenSpan) {
 	text := word.text
 	if text == "" {
 		return nil, nil
@@ -939,7 +944,7 @@ func (t *Tokenizer) wordPieceTokenizeWithOffsets(word wordWithOffset) ([]int, []
 	}
 	if len(text) > maxChars {
 		if t.unkID >= 0 {
-			return []int{t.unkID}, []api.TokenOffset{{Start: word.start, End: word.end}}
+			return []int{t.unkID}, []api.TokenSpan{{Start: word.start, End: word.end}}
 		}
 		return nil, nil
 	}
@@ -950,7 +955,7 @@ func (t *Tokenizer) wordPieceTokenizeWithOffsets(word wordWithOffset) ([]int, []
 	}
 
 	var ids []int
-	var offsets []api.TokenOffset
+	var offsets []api.TokenSpan
 	runes := []rune(text)
 	start := 0
 	charLen := len(runes)
@@ -977,7 +982,7 @@ func (t *Tokenizer) wordPieceTokenizeWithOffsets(word wordWithOffset) ([]int, []
 				origStart := word.start + startByte
 				origEnd := word.start + endByte
 
-				offsets = append(offsets, api.TokenOffset{Start: origStart, End: origEnd})
+				offsets = append(offsets, api.TokenSpan{Start: origStart, End: origEnd})
 				found = true
 				break
 			}
@@ -986,7 +991,7 @@ func (t *Tokenizer) wordPieceTokenizeWithOffsets(word wordWithOffset) ([]int, []
 
 		if !found {
 			if t.unkID >= 0 {
-				return []int{t.unkID}, []api.TokenOffset{{Start: word.start, End: word.end}}
+				return []int{t.unkID}, []api.TokenSpan{{Start: word.start, End: word.end}}
 			}
 			return nil, nil
 		}
@@ -996,8 +1001,8 @@ func (t *Tokenizer) wordPieceTokenizeWithOffsets(word wordWithOffset) ([]int, []
 	return ids, offsets
 }
 
-// bpeTokenizeWithOffsets implements BPE tokenization with offset tracking.
-func (t *Tokenizer) bpeTokenizeWithOffsets(word wordWithOffset) ([]int, []api.TokenOffset) {
+// bpeTokenizeWithSpans implements BPE tokenization with offset tracking.
+func (t *Tokenizer) bpeTokenizeWithSpans(word wordWithOffset) ([]int, []api.TokenSpan) {
 	text := word.text
 	if text == "" {
 		return nil, nil
@@ -1028,7 +1033,7 @@ func (t *Tokenizer) bpeTokenizeWithOffsets(word wordWithOffset) ([]int, []api.To
 	// If word is a single symbol that exists in vocab, return it
 	if len(symbols) == 1 {
 		if id, ok := t.tokenizer.Model.Vocab[symbols[0].text]; ok {
-			return []int{id}, []api.TokenOffset{{Start: word.start, End: word.end}}
+			return []int{id}, []api.TokenSpan{{Start: word.start, End: word.end}}
 		}
 	}
 
@@ -1069,7 +1074,7 @@ func (t *Tokenizer) bpeTokenizeWithOffsets(word wordWithOffset) ([]int, []api.To
 
 	// Convert symbols to IDs with offsets
 	var ids []int
-	var offsets []api.TokenOffset
+	var offsets []api.TokenSpan
 
 	for _, sym := range symbols {
 		if id, ok := t.tokenizer.Model.Vocab[sym.text]; ok {
@@ -1088,21 +1093,21 @@ func (t *Tokenizer) bpeTokenizeWithOffsets(word wordWithOffset) ([]int, []api.To
 		origStart := word.start + startByte
 		origEnd := word.start + endByte
 
-		offsets = append(offsets, api.TokenOffset{Start: origStart, End: origEnd})
+		offsets = append(offsets, api.TokenSpan{Start: origStart, End: origEnd})
 	}
 
 	return ids, offsets
 }
 
-// unigramTokenizeWithOffsets implements Unigram tokenization with offset tracking.
-func (t *Tokenizer) unigramTokenizeWithOffsets(word wordWithOffset) ([]int, []api.TokenOffset) {
+// unigramTokenizeWithSpans implements Unigram tokenization with offset tracking.
+func (t *Tokenizer) unigramTokenizeWithSpans(word wordWithOffset) ([]int, []api.TokenSpan) {
 	text := word.text
 	if text == "" {
 		return nil, nil
 	}
 
 	var ids []int
-	var offsets []api.TokenOffset
+	var offsets []api.TokenSpan
 	runes := []rune(text)
 	start := 0
 	runeLen := len(runes)
@@ -1124,7 +1129,7 @@ func (t *Tokenizer) unigramTokenizeWithOffsets(word wordWithOffset) ([]int, []ap
 				origStart := word.start + startByte
 				origEnd := word.start + endByte
 
-				offsets = append(offsets, api.TokenOffset{Start: origStart, End: origEnd})
+				offsets = append(offsets, api.TokenSpan{Start: origStart, End: origEnd})
 				found = true
 				start = end
 				break
@@ -1147,7 +1152,7 @@ func (t *Tokenizer) unigramTokenizeWithOffsets(word wordWithOffset) ([]int, []ap
 			} else if t.unkID >= 0 {
 				ids = append(ids, t.unkID)
 			}
-			offsets = append(offsets, api.TokenOffset{Start: origStart, End: origEnd})
+			offsets = append(offsets, api.TokenSpan{Start: origStart, End: origEnd})
 			start++
 		}
 	}

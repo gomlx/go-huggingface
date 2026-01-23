@@ -21,15 +21,15 @@ import (
 // may map to different ids (int) for different tokenizers.
 type Tokenizer = api.Tokenizer
 
-// TokenizerWithOffsets extends Tokenizer with offset tracking capability.
+// TokenizerWithSpans extends Tokenizer with span tracking capability.
 // This is useful for token classification tasks (NER, chunking) where you need
-// to map token predictions back to character positions in the original text.
-type TokenizerWithOffsets = api.TokenizerWithOffsets
+// to map token predictions back to byte positions in the original text.
+type TokenizerWithSpans = api.TokenizerWithSpans
 
-// TokenOffset represents the character span of a token in the original text.
-type TokenOffset = api.TokenOffset
+// TokenSpan represents the byte span of a token in the original text.
+type TokenSpan = api.TokenSpan
 
-// EncodingResult contains tokens with their offsets.
+// EncodingResult contains tokens with their spans.
 type EncodingResult = api.EncodingResult
 
 // SpecialToken is an enum of commonly used special tokens.

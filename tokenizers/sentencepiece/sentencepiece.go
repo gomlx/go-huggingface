@@ -41,8 +41,8 @@ type Tokenizer struct {
 // Compile time assert that sentencepiece.Tokenizer implements tokenizers.Tokenizer interface.
 var _ api.Tokenizer = &Tokenizer{}
 
-// Compile time assert that sentencepiece.Tokenizer implements tokenizers.TokenizerWithOffsets interface.
-var _ api.TokenizerWithOffsets = &Tokenizer{}
+// Compile time assert that sentencepiece.Tokenizer implements tokenizers.TokenizerWithSpans interface.
+var _ api.TokenizerWithSpans = &Tokenizer{}
 
 // Encode returns the text encoded into a sequence of ids.
 // It implements sampler.Vocabulary.
@@ -51,12 +51,12 @@ func (p *Tokenizer) Encode(text string) []int {
 	return sliceMap(tokens, func(t esentencepiece.Token) int { return t.ID })
 }
 
-// EncodeWithOffsets returns the text encoded into a sequence of ids along with their character offsets.
-// It implements api.TokenizerWithOffsets.
-func (p *Tokenizer) EncodeWithOffsets(text string) api.EncodingResult {
+// EncodeWithSpans returns the text encoded into a sequence of ids along with their byte spans.
+// It implements api.TokenizerWithSpans.
+func (p *Tokenizer) EncodeWithSpans(text string) api.EncodingResult {
 	tokens := p.Processor.Encode(text)
 	ids := make([]int, len(tokens))
-	offsets := make([]api.TokenOffset, len(tokens))
+	spans := make([]api.TokenSpan, len(tokens))
 
 	// Track position in original text by matching token pieces
 	pos := 0
@@ -91,9 +91,9 @@ func (p *Tokenizer) EncodeWithOffsets(text string) api.EncodingResult {
 			// Check if there was actually a space character
 			if hasLeadingSpace && start > 0 {
 				start = start - 1
-				offsets[i] = api.TokenOffset{Start: start, End: pos}
+				spans[i] = api.TokenSpan{Start: start, End: pos}
 			} else {
-				offsets[i] = api.TokenOffset{Start: pos, End: pos}
+				spans[i] = api.TokenSpan{Start: pos, End: pos}
 			}
 		} else {
 			// Find the piece in the text starting from current position
@@ -108,13 +108,13 @@ func (p *Tokenizer) EncodeWithOffsets(text string) api.EncodingResult {
 					pos = len(text)
 				}
 			}
-			offsets[i] = api.TokenOffset{Start: start, End: pos}
+			spans[i] = api.TokenSpan{Start: start, End: pos}
 		}
 	}
 
 	return api.EncodingResult{
-		IDs:     ids,
-		Offsets: offsets,
+		IDs:   ids,
+		Spans: spans,
 	}
 }
 

@@ -7,8 +7,8 @@ import (
 	"github.com/gomlx/go-huggingface/tokenizers/api"
 )
 
-// TestEncodeWithOffsets_MatchesEncode verifies that EncodeWithOffsets produces the same IDs as Encode.
-func TestEncodeWithOffsets_MatchesEncode(t *testing.T) {
+// TestEncodeWithSpans_MatchesEncode verifies that EncodeWithSpans produces the same IDs as Encode.
+func TestEncodeWithSpans_MatchesEncode(t *testing.T) {
 	// Use a public model that has a sentencepiece tokenizer
 	// google/flan-t5-small uses sentencepiece and is freely accessible
 	repo := hub.New("google/flan-t5-small")
@@ -33,16 +33,16 @@ func TestEncodeWithOffsets_MatchesEncode(t *testing.T) {
 	for _, input := range inputs {
 		t.Run(input, func(t *testing.T) {
 			ids := tok.Encode(input)
-			result := tok.EncodeWithOffsets(input)
+			result := tok.EncodeWithSpans(input)
 			if !intSliceEqual(ids, result.IDs) {
-				t.Errorf("Encode(%q) = %v, EncodeWithOffsets(%q).IDs = %v", input, ids, input, result.IDs)
+				t.Errorf("Encode(%q) = %v, EncodeWithSpans(%q).IDs = %v", input, ids, input, result.IDs)
 			}
 		})
 	}
 }
 
-// TestEncodeWithOffsets_ValidOffsets verifies that offsets are valid (within bounds and non-overlapping).
-func TestEncodeWithOffsets_ValidOffsets(t *testing.T) {
+// TestEncodeWithSpans_ValidSpans verifies that spans are valid (within bounds).
+func TestEncodeWithSpans_ValidSpans(t *testing.T) {
 	repo := hub.New("google/flan-t5-small")
 	if !repo.HasFile("tokenizer.model") {
 		t.Skip("tokenizer.model not found in repo")
@@ -62,13 +62,13 @@ func TestEncodeWithOffsets_ValidOffsets(t *testing.T) {
 
 	for _, input := range inputs {
 		t.Run(input, func(t *testing.T) {
-			result := tok.EncodeWithOffsets(input)
+			result := tok.EncodeWithSpans(input)
 
-			if len(result.Offsets) != len(result.IDs) {
-				t.Errorf("len(Offsets)=%d != len(IDs)=%d", len(result.Offsets), len(result.IDs))
+			if len(result.Spans) != len(result.IDs) {
+				t.Errorf("len(Spans)=%d != len(IDs)=%d", len(result.Spans), len(result.IDs))
 			}
 
-			for i, off := range result.Offsets {
+			for i, off := range result.Spans {
 				// Check bounds
 				if off.Start < 0 {
 					t.Errorf("Token %d: offset start %d is negative", i, off.Start)
@@ -90,8 +90,8 @@ func TestEncodeWithOffsets_ValidOffsets(t *testing.T) {
 	}
 }
 
-// TestEncodeWithOffsets_EmptyString verifies behavior with empty input.
-func TestEncodeWithOffsets_EmptyString(t *testing.T) {
+// TestEncodeWithSpans_EmptyString verifies behavior with empty input.
+func TestEncodeWithSpans_EmptyString(t *testing.T) {
 	repo := hub.New("google/flan-t5-small")
 	if !repo.HasFile("tokenizer.model") {
 		t.Skip("tokenizer.model not found in repo")
@@ -103,17 +103,17 @@ func TestEncodeWithOffsets_EmptyString(t *testing.T) {
 	}
 	tok := baseTok.(*Tokenizer)
 
-	result := tok.EncodeWithOffsets("")
+	result := tok.EncodeWithSpans("")
 	if len(result.IDs) != 0 {
 		t.Errorf("Expected empty IDs for empty input, got %v", result.IDs)
 	}
-	if len(result.Offsets) != 0 {
-		t.Errorf("Expected empty offsets for empty input, got %v", result.Offsets)
+	if len(result.Spans) != 0 {
+		t.Errorf("Expected empty offsets for empty input, got %v", result.Spans)
 	}
 }
 
-// TestEncodeWithOffsets_Unicode verifies that Unicode text is handled correctly.
-func TestEncodeWithOffsets_Unicode(t *testing.T) {
+// TestEncodeWithSpans_Unicode verifies that Unicode text is handled correctly.
+func TestEncodeWithSpans_Unicode(t *testing.T) {
 	repo := hub.New("google/flan-t5-small")
 	if !repo.HasFile("tokenizer.model") {
 		t.Skip("tokenizer.model not found in repo")
@@ -134,7 +134,7 @@ func TestEncodeWithOffsets_Unicode(t *testing.T) {
 
 	for _, input := range inputs {
 		t.Run(input, func(t *testing.T) {
-			result := tok.EncodeWithOffsets(input)
+			result := tok.EncodeWithSpans(input)
 
 			// Verify IDs match Encode
 			ids := tok.Encode(input)
@@ -143,7 +143,7 @@ func TestEncodeWithOffsets_Unicode(t *testing.T) {
 			}
 
 			// Verify offsets are valid
-			for i, off := range result.Offsets {
+			for i, off := range result.Spans {
 				if off.Start < 0 || off.End > len(input) || off.Start > off.End {
 					t.Errorf("Invalid offset at %d: [%d, %d] for input length %d",
 						i, off.Start, off.End, len(input))
@@ -153,8 +153,8 @@ func TestEncodeWithOffsets_Unicode(t *testing.T) {
 	}
 }
 
-// TestTokenizerWithOffsetsInterface verifies the interface is correctly implemented.
-func TestTokenizerWithOffsetsInterface(t *testing.T) {
+// TestTokenizerWithSpansInterface verifies the interface is correctly implemented.
+func TestTokenizerWithSpansInterface(t *testing.T) {
 	repo := hub.New("google/flan-t5-small")
 	if !repo.HasFile("tokenizer.model") {
 		t.Skip("tokenizer.model not found in repo")
@@ -165,8 +165,8 @@ func TestTokenizerWithOffsetsInterface(t *testing.T) {
 		t.Fatalf("New failed: %v", err)
 	}
 
-	// Verify the tokenizer implements TokenizerWithOffsets
-	var _ api.TokenizerWithOffsets = tok.(*Tokenizer)
+	// Verify the tokenizer implements TokenizerWithSpans
+	var _ api.TokenizerWithSpans = tok.(*Tokenizer)
 }
 
 func intSliceEqual(a, b []int) bool {

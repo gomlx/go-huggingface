@@ -631,9 +631,9 @@ func TestNFKCNormalization(t *testing.T) {
 	}
 }
 
-// Tests for EncodeWithOffsets
+// Tests for EncodeWithSpans
 
-func TestWordPiece_EncodeWithOffsets(t *testing.T) {
+func TestWordPiece_EncodeWithSpans(t *testing.T) {
 	tok, err := NewFromContent(nil, testWordPieceTokenizerJSON)
 	if err != nil {
 		t.Fatalf("NewFromContent failed: %v", err)
@@ -643,45 +643,45 @@ func TestWordPiece_EncodeWithOffsets(t *testing.T) {
 		name        string
 		input       string
 		wantIDs     []int
-		wantOffsets []api.TokenOffset
+		wantSpans []api.TokenSpan
 	}{
 		{
 			name:        "single word",
 			input:       "hello",
 			wantIDs:     []int{1},
-			wantOffsets: []api.TokenOffset{{Start: 0, End: 5}},
+			wantSpans: []api.TokenSpan{{Start: 0, End: 5}},
 		},
 		{
 			name:        "two words",
 			input:       "hello world",
 			wantIDs:     []int{1, 2},
-			wantOffsets: []api.TokenOffset{{Start: 0, End: 5}, {Start: 6, End: 11}},
+			wantSpans: []api.TokenSpan{{Start: 0, End: 5}, {Start: 6, End: 11}},
 		},
 		{
 			name:        "word with subword",
 			input:       "testing",
 			wantIDs:     []int{3, 4}, // test + ##ing
-			wantOffsets: []api.TokenOffset{{Start: 0, End: 4}, {Start: 4, End: 7}},
+			wantSpans: []api.TokenSpan{{Start: 0, End: 4}, {Start: 4, End: 7}},
 		},
 		{
 			name:        "sentence",
 			input:       "this is a test",
 			wantIDs:     []int{107, 106, 105, 3},
-			wantOffsets: []api.TokenOffset{{Start: 0, End: 4}, {Start: 5, End: 7}, {Start: 8, End: 9}, {Start: 10, End: 14}},
+			wantSpans: []api.TokenSpan{{Start: 0, End: 4}, {Start: 5, End: 7}, {Start: 8, End: 9}, {Start: 10, End: 14}},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := tok.EncodeWithOffsets(tt.input)
+			result := tok.EncodeWithSpans(tt.input)
 			if !intSliceEqual(result.IDs, tt.wantIDs) {
-				t.Errorf("EncodeWithOffsets(%q).IDs = %v, want %v", tt.input, result.IDs, tt.wantIDs)
+				t.Errorf("EncodeWithSpans(%q).IDs = %v, want %v", tt.input, result.IDs, tt.wantIDs)
 			}
-			if !offsetsEqual(result.Offsets, tt.wantOffsets) {
-				t.Errorf("EncodeWithOffsets(%q).Offsets = %v, want %v", tt.input, result.Offsets, tt.wantOffsets)
+			if !spansEqual(result.Spans, tt.wantSpans) {
+				t.Errorf("EncodeWithSpans(%q).Spans = %v, want %v", tt.input, result.Spans, tt.wantSpans)
 			}
 			// Verify offsets point to correct text
-			for i, off := range result.Offsets {
+			for i, off := range result.Spans {
 				if off.Start >= 0 && off.End <= len(tt.input) {
 					substr := tt.input[off.Start:off.End]
 					t.Logf("Token %d: ID=%d, offset=[%d,%d], text=%q", i, result.IDs[i], off.Start, off.End, substr)
@@ -691,7 +691,7 @@ func TestWordPiece_EncodeWithOffsets(t *testing.T) {
 	}
 }
 
-func TestBPE_EncodeWithOffsets(t *testing.T) {
+func TestBPE_EncodeWithSpans(t *testing.T) {
 	tok, err := NewFromContent(nil, testSimpleBPETokenizerJSON)
 	if err != nil {
 		t.Fatalf("NewFromContent failed: %v", err)
@@ -701,39 +701,39 @@ func TestBPE_EncodeWithOffsets(t *testing.T) {
 		name        string
 		input       string
 		wantIDs     []int
-		wantOffsets []api.TokenOffset
+		wantSpans []api.TokenSpan
 	}{
 		{
 			name:        "single word hello",
 			input:       "hello",
 			wantIDs:     []int{12},
-			wantOffsets: []api.TokenOffset{{Start: 0, End: 5}},
+			wantSpans: []api.TokenSpan{{Start: 0, End: 5}},
 		},
 		{
 			name:        "single word world",
 			input:       "world",
 			wantIDs:     []int{15},
-			wantOffsets: []api.TokenOffset{{Start: 0, End: 5}},
+			wantSpans: []api.TokenSpan{{Start: 0, End: 5}},
 		},
 		{
 			name:        "two words",
 			input:       "hello world",
 			wantIDs:     []int{12, 15},
-			wantOffsets: []api.TokenOffset{{Start: 0, End: 5}, {Start: 6, End: 11}},
+			wantSpans: []api.TokenSpan{{Start: 0, End: 5}, {Start: 6, End: 11}},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := tok.EncodeWithOffsets(tt.input)
+			result := tok.EncodeWithSpans(tt.input)
 			if !intSliceEqual(result.IDs, tt.wantIDs) {
-				t.Errorf("EncodeWithOffsets(%q).IDs = %v, want %v", tt.input, result.IDs, tt.wantIDs)
+				t.Errorf("EncodeWithSpans(%q).IDs = %v, want %v", tt.input, result.IDs, tt.wantIDs)
 			}
-			if !offsetsEqual(result.Offsets, tt.wantOffsets) {
-				t.Errorf("EncodeWithOffsets(%q).Offsets = %v, want %v", tt.input, result.Offsets, tt.wantOffsets)
+			if !spansEqual(result.Spans, tt.wantSpans) {
+				t.Errorf("EncodeWithSpans(%q).Spans = %v, want %v", tt.input, result.Spans, tt.wantSpans)
 			}
 			// Verify offsets point to correct text
-			for i, off := range result.Offsets {
+			for i, off := range result.Spans {
 				if off.Start >= 0 && off.End <= len(tt.input) {
 					substr := tt.input[off.Start:off.End]
 					t.Logf("Token %d: ID=%d, offset=[%d,%d], text=%q", i, result.IDs[i], off.Start, off.End, substr)
@@ -743,7 +743,7 @@ func TestBPE_EncodeWithOffsets(t *testing.T) {
 	}
 }
 
-func TestEncodeWithOffsets_Unicode(t *testing.T) {
+func TestEncodeWithSpans_Unicode(t *testing.T) {
 	// Test with a simple tokenizer that handles unicode
 	unicodeTokenizerJSON := []byte(`{
 		"normalizer": null,
@@ -771,34 +771,34 @@ func TestEncodeWithOffsets_Unicode(t *testing.T) {
 		name        string
 		input       string
 		wantIDs     []int
-		checkOffset bool
+		checkSpan bool
 	}{
 		{
 			name:        "mixed ascii and unicode",
 			input:       "hello 世界",
 			wantIDs:     []int{1, 2},
-			checkOffset: true,
+			checkSpan: true,
 		},
 		{
 			name:        "unicode only",
 			input:       "日本",
 			wantIDs:     []int{3},
-			checkOffset: true,
+			checkSpan: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := tok.EncodeWithOffsets(tt.input)
+			result := tok.EncodeWithSpans(tt.input)
 			if !intSliceEqual(result.IDs, tt.wantIDs) {
-				t.Errorf("EncodeWithOffsets(%q).IDs = %v, want %v", tt.input, result.IDs, tt.wantIDs)
+				t.Errorf("EncodeWithSpans(%q).IDs = %v, want %v", tt.input, result.IDs, tt.wantIDs)
 			}
-			if tt.checkOffset {
+			if tt.checkSpan {
 				// Verify offsets are valid
-				if len(result.Offsets) != len(result.IDs) {
-					t.Errorf("len(Offsets)=%d != len(IDs)=%d", len(result.Offsets), len(result.IDs))
+				if len(result.Spans) != len(result.IDs) {
+					t.Errorf("len(Spans)=%d != len(IDs)=%d", len(result.Spans), len(result.IDs))
 				}
-				for i, off := range result.Offsets {
+				for i, off := range result.Spans {
 					if off.Start < 0 || off.End > len(tt.input) || off.Start > off.End {
 						t.Errorf("Invalid offset at %d: [%d, %d] for input length %d", i, off.Start, off.End, len(tt.input))
 					} else {
@@ -811,7 +811,7 @@ func TestEncodeWithOffsets_Unicode(t *testing.T) {
 	}
 }
 
-func TestEncodeWithOffsets_Punctuation(t *testing.T) {
+func TestEncodeWithSpans_Punctuation(t *testing.T) {
 	tok, err := NewFromContent(nil, testWordPieceTokenizerJSON)
 	if err != nil {
 		t.Fatalf("NewFromContent failed: %v", err)
@@ -819,17 +819,17 @@ func TestEncodeWithOffsets_Punctuation(t *testing.T) {
 
 	// Test that punctuation gets its own offset
 	input := "hello, world!"
-	result := tok.EncodeWithOffsets(input)
+	result := tok.EncodeWithSpans(input)
 
 	// Verify we get some offsets
-	if len(result.Offsets) == 0 {
+	if len(result.Spans) == 0 {
 		t.Fatal("Expected some offsets")
 	}
 
 	// Check that offsets are valid and non-overlapping
-	for i, off := range result.Offsets {
+	for i, off := range result.Spans {
 		if off.Start < 0 || off.End > len(input) {
-			t.Errorf("Offset %d out of bounds: [%d, %d]", i, off.Start, off.End)
+			t.Errorf("Span %d out of bounds: [%d, %d]", i, off.Start, off.End)
 		}
 		if off.Start > off.End {
 			t.Errorf("Invalid offset %d: start > end: [%d, %d]", i, off.Start, off.End)
@@ -841,22 +841,22 @@ func TestEncodeWithOffsets_Punctuation(t *testing.T) {
 	}
 }
 
-func TestEncodeWithOffsets_EmptyString(t *testing.T) {
+func TestEncodeWithSpans_EmptyString(t *testing.T) {
 	tok, err := NewFromContent(nil, testWordPieceTokenizerJSON)
 	if err != nil {
 		t.Fatalf("NewFromContent failed: %v", err)
 	}
 
-	result := tok.EncodeWithOffsets("")
+	result := tok.EncodeWithSpans("")
 	if len(result.IDs) != 0 {
 		t.Errorf("Expected empty IDs for empty input, got %v", result.IDs)
 	}
-	if len(result.Offsets) != 0 {
-		t.Errorf("Expected empty offsets for empty input, got %v", result.Offsets)
+	if len(result.Spans) != 0 {
+		t.Errorf("Expected empty offsets for empty input, got %v", result.Spans)
 	}
 }
 
-func TestEncodeWithOffsets_MatchesEncode(t *testing.T) {
+func TestEncodeWithSpans_MatchesEncode(t *testing.T) {
 	tok, err := NewFromContent(nil, testWordPieceTokenizerJSON)
 	if err != nil {
 		t.Fatalf("NewFromContent failed: %v", err)
@@ -873,15 +873,15 @@ func TestEncodeWithOffsets_MatchesEncode(t *testing.T) {
 	for _, input := range inputs {
 		t.Run(input, func(t *testing.T) {
 			ids := tok.Encode(input)
-			result := tok.EncodeWithOffsets(input)
+			result := tok.EncodeWithSpans(input)
 			if !intSliceEqual(ids, result.IDs) {
-				t.Errorf("Encode(%q) = %v, EncodeWithOffsets(%q).IDs = %v", input, ids, input, result.IDs)
+				t.Errorf("Encode(%q) = %v, EncodeWithSpans(%q).IDs = %v", input, ids, input, result.IDs)
 			}
 		})
 	}
 }
 
-func offsetsEqual(a, b []api.TokenOffset) bool {
+func spansEqual(a, b []api.TokenSpan) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -929,7 +929,7 @@ func BenchmarkEncode(b *testing.B) {
 	}
 }
 
-func BenchmarkEncodeWithOffsets(b *testing.B) {
+func BenchmarkEncodeWithSpans(b *testing.B) {
 	tok, err := NewFromContent(nil, testWordPieceTokenizerJSON)
 	if err != nil {
 		b.Fatalf("NewFromContent failed: %v", err)
@@ -944,7 +944,7 @@ func BenchmarkEncodeWithOffsets(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, input := range inputs {
-			_ = tok.EncodeWithOffsets(input)
+			_ = tok.EncodeWithSpans(input)
 		}
 	}
 }
@@ -967,7 +967,7 @@ func BenchmarkEncode_LongText(b *testing.B) {
 	}
 }
 
-func BenchmarkEncodeWithOffsets_LongText(b *testing.B) {
+func BenchmarkEncodeWithSpans_LongText(b *testing.B) {
 	tok, err := NewFromContent(nil, testWordPieceTokenizerJSON)
 	if err != nil {
 		b.Fatalf("NewFromContent failed: %v", err)
@@ -981,6 +981,6 @@ func BenchmarkEncodeWithOffsets_LongText(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = tok.EncodeWithOffsets(input)
+		_ = tok.EncodeWithSpans(input)
 	}
 }

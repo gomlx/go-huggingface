@@ -3,18 +3,20 @@
 // default implementations.
 package api
 
-// TokenOffset represents the character span of a token in the original text.
+// TokenSpan represents the byte span of a token in the original text.
+// Start and End are byte offsets (not rune offsets), suitable for slicing
+// Go strings directly: originalText[span.Start:span.End].
 // This is useful for token classification tasks (NER, chunking) where you need
-// to map token predictions back to character positions in the original text.
-type TokenOffset struct {
-	Start int // start character position (inclusive)
-	End   int // end character position (exclusive)
+// to map token predictions back to positions in the original text.
+type TokenSpan struct {
+	Start int // start byte position (inclusive)
+	End   int // end byte position (exclusive)
 }
 
-// EncodingResult contains tokens with their offsets.
+// EncodingResult contains tokens with their spans in the original text.
 type EncodingResult struct {
-	IDs     []int         // token IDs
-	Offsets []TokenOffset // character offsets for each token
+	IDs   []int       // token IDs
+	Spans []TokenSpan // byte spans for each token (use originalText[span.Start:span.End] to extract)
 }
 
 // Tokenizer interface allows one convert test to "tokens" (integer ids) and back.
@@ -29,13 +31,13 @@ type Tokenizer interface {
 	SpecialTokenID(token SpecialToken) (int, error)
 }
 
-// TokenizerWithOffsets extends Tokenizer with offset tracking capability.
+// TokenizerWithSpans extends Tokenizer with span tracking capability.
 // This is useful for token classification tasks (NER, chunking) where you need
-// to map token predictions back to character positions in the original text.
-type TokenizerWithOffsets interface {
+// to map token predictions back to byte positions in the original text.
+type TokenizerWithSpans interface {
 	Tokenizer
-	// EncodeWithOffsets returns tokens along with their character offsets in the original text.
-	EncodeWithOffsets(text string) EncodingResult
+	// EncodeWithSpans returns tokens along with their byte spans in the original text.
+	EncodeWithSpans(text string) EncodingResult
 }
 
 // SpecialToken is an enum of commonly used special tokens.
