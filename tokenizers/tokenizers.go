@@ -21,6 +21,17 @@ import (
 // may map to different ids (int) for different tokenizers.
 type Tokenizer = api.Tokenizer
 
+// TokenizerWithSpans extends Tokenizer with span tracking capability.
+// This is useful for token classification tasks (NER, chunking) where you need
+// to map token predictions back to byte positions in the original text.
+type TokenizerWithSpans = api.TokenizerWithSpans
+
+// TokenSpan represents the byte span of a token in the original text.
+type TokenSpan = api.TokenSpan
+
+// EncodingResult contains tokens with their spans.
+type EncodingResult = api.EncodingResult
+
 // SpecialToken is an enum of commonly used special tokens.
 type SpecialToken = api.Tokenizer
 

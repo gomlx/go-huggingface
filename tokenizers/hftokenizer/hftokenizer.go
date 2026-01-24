@@ -141,6 +141,9 @@ type Tokenizer struct {
 // Compile time assert that Tokenizer implements api.Tokenizer interface.
 var _ api.Tokenizer = &Tokenizer{}
 
+// Compile time assert that Tokenizer implements api.TokenizerWithSpans interface.
+var _ api.TokenizerWithSpans = &Tokenizer{}
+
 // New creates a HuggingFace tokenizer from the tokenizer.json file.
 // It implements a tokenizer.TokenizerConstructor function signature.
 func New(config *api.Config, repo *hub.Repo) (api.Tokenizer, error) {
@@ -288,29 +291,873 @@ func (t *Tokenizer) resolveSpecialTokens() {
 }
 
 // Encode converts text to a sequence of token IDs.
+//
+// Note: This delegates to EncodeWithSpans for simplicity. The overhead of computing
+// spans is minimal (just tracking byte positions during tokenization), so we avoid
+// maintaining duplicate code paths. If profiling shows this to be a bottleneck for
+// your use case, please open an issue.
 func (t *Tokenizer) Encode(text string) []int {
-	// Apply normalization
-	normalized := t.normalize(text)
+	result := t.EncodeWithSpans(text)
+	return result.IDs
+}
 
-	// Apply pre-tokenization
-	words := t.preTokenize(normalized)
+// wordWithOffset holds a word/token string along with its character offset in the original text.
+type wordWithOffset struct {
+	text  string
+	start int // start position in original text (inclusive)
+	end   int // end position in original text (exclusive)
+}
+
+// EncodeWithSpans converts text to a sequence of token IDs along with their byte spans.
+func (t *Tokenizer) EncodeWithSpans(text string) api.EncodingResult {
+	// Apply normalization with span tracking
+	normalized, normSpans := t.normalizeWithSpans(text)
+
+	// Apply pre-tokenization with span tracking
+	words := t.preTokenizeWithSpans(normalized, normSpans)
 
 	// Tokenize each word according to the model type
 	var ids []int
+	var spans []api.TokenSpan
+
 	for _, word := range words {
-		wordIDs := t.tokenizeWord(word)
+		wordIDs, wordSpans := t.tokenizeWordWithSpans(word)
 		ids = append(ids, wordIDs...)
+		spans = append(spans, wordSpans...)
 	}
 
-	return ids
+	return api.EncodingResult{
+		IDs:   ids,
+		Spans: spans,
+	}
 }
 
-// normalize applies the normalizer to the text.
-func (t *Tokenizer) normalize(text string) string {
+// normalizeWithSpans applies normalization and returns the normalized text along with
+// a mapping from normalized byte positions to original byte positions.
+// The returned slice maps normalized position -> original position.
+func (t *Tokenizer) normalizeWithSpans(text string) (string, []int) {
 	if t.tokenizer.Normalizer == nil {
-		return text
+		// No normalization - create identity mapping
+		offsets := make([]int, len(text))
+		for i := range text {
+			offsets[i] = i
+		}
+		return text, offsets
 	}
-	return t.applyNormalizer(text, t.tokenizer.Normalizer)
+	return t.applyNormalizerWithSpans(text, t.tokenizer.Normalizer)
+}
+
+// applyNormalizerWithSpans applies a normalizer and tracks byte positions.
+func (t *Tokenizer) applyNormalizerWithSpans(text string, n *Normalizer) (string, []int) {
+	// For most normalizers, we need to track how characters map through the transformation.
+	// This is complex because normalizers can:
+	// 1. Remove characters (accents, control chars)
+	// 2. Replace characters (lowercase)
+	// 3. Expand characters (NFD decomposition)
+	// 4. Contract characters (NFC composition)
+	//
+	// For simplicity, we handle the common cases and fall back to approximate mapping for complex cases.
+
+	switch n.Type {
+	case "Lowercase":
+		// Lowercase preserves character positions (1:1 mapping)
+		normalized := strings.ToLower(text)
+		offsets := make([]int, len(normalized))
+		origPos := 0
+		normPos := 0
+		for _, r := range text {
+			lowerRunes := []rune(strings.ToLower(string(r)))
+			for range lowerRunes {
+				if normPos < len(offsets) {
+					offsets[normPos] = origPos
+					normPos++
+				}
+			}
+			origPos += len(string(r))
+		}
+		return normalized, offsets
+
+	case "BertNormalizer":
+		// Clean text and optionally lowercase
+		var result strings.Builder
+		var offsets []int
+		origPos := 0
+		for _, r := range text {
+			runeLen := len(string(r))
+			if r == 0 || r == 0xFFFD || isControl(r) {
+				// Skip this character
+				origPos += runeLen
+				continue
+			}
+			if isWhitespace(r) {
+				result.WriteRune(' ')
+				offsets = append(offsets, origPos)
+			} else if n.Lowercase {
+				lower := strings.ToLower(string(r))
+				for range lower {
+					offsets = append(offsets, origPos)
+				}
+				result.WriteString(lower)
+			} else {
+				result.WriteRune(r)
+				offsets = append(offsets, origPos)
+			}
+			origPos += runeLen
+		}
+		return result.String(), offsets
+
+	case "NFD", "NFC", "NFKC", "NFKD":
+		// Unicode normalization - approximate mapping
+		normalized := t.applyNormalizer(text, n)
+		return approximateOffsets(text, normalized)
+
+	case "StripAccents":
+		// NFD then remove combining marks
+		nfd := norm.NFD.String(text)
+		var result strings.Builder
+		var offsets []int
+		origPos := 0
+		for _, r := range nfd {
+			runeLen := len(string(r))
+			if !unicode.Is(unicode.Mn, r) {
+				result.WriteRune(r)
+				offsets = append(offsets, origPos)
+			}
+			origPos += runeLen
+		}
+		// Re-map offsets to original text positions
+		return result.String(), remapOffsetsFromNFD(text, offsets)
+
+	case "Sequence":
+		result := text
+		currentOffsets := make([]int, len(text))
+		for i := range text {
+			currentOffsets[i] = i
+		}
+		for _, child := range n.Normalizers {
+			childCopy := child
+			newResult, newOffsets := t.applyNormalizerWithSpans(result, &childCopy)
+			// Compose the offset mappings
+			composedOffsets := make([]int, len(newOffsets))
+			for i, off := range newOffsets {
+				if off < len(currentOffsets) {
+					composedOffsets[i] = currentOffsets[off]
+				} else if len(currentOffsets) > 0 {
+					composedOffsets[i] = currentOffsets[len(currentOffsets)-1]
+				}
+			}
+			result = newResult
+			currentOffsets = composedOffsets
+		}
+		return result, currentOffsets
+
+	default:
+		// Unknown normalizer - use approximate mapping
+		normalized := t.applyNormalizer(text, n)
+		return approximateOffsets(text, normalized)
+	}
+}
+
+// approximateOffsets creates an approximate offset mapping when exact tracking is too complex.
+// It spreads the original text positions evenly across the normalized text using linear interpolation.
+//
+// WARNING: This function produces APPROXIMATE offsets that may not accurately reflect the true
+// character-to-character mapping between original and normalized text. This is used as a fallback
+// for complex normalizers (like certain Unicode normalizations) where exact tracking would require
+// significantly more complexity. For token classification tasks (NER, chunking) that require precise
+// character offsets, consider using tokenizers with simpler normalizers (e.g., Lowercase, BertNormalizer)
+// that support exact offset tracking.
+func approximateOffsets(original, normalized string) (string, []int) {
+	if len(normalized) == 0 {
+		return normalized, nil
+	}
+	if len(original) == 0 {
+		return normalized, make([]int, len(normalized))
+	}
+
+	offsets := make([]int, len(normalized))
+	ratio := float64(len(original)) / float64(len(normalized))
+
+	for i := range offsets {
+		offsets[i] = int(float64(i) * ratio)
+		if offsets[i] >= len(original) {
+			offsets[i] = len(original) - 1
+		}
+	}
+	return normalized, offsets
+}
+
+// remapOffsetsFromNFD maps offsets from NFD-normalized text back to original text positions.
+func remapOffsetsFromNFD(original string, nfdOffsets []int) []int {
+	// This is an approximation - maps NFD positions to original positions
+	nfd := norm.NFD.String(original)
+	if len(nfd) == len(original) {
+		return nfdOffsets // No change in length, direct mapping
+	}
+
+	// Build mapping from NFD position to original position
+	nfdToOrig := make([]int, len(nfd))
+	origPos := 0
+	nfdPos := 0
+	for _, r := range original {
+		nfdRunes := []rune(norm.NFD.String(string(r)))
+		for range nfdRunes {
+			if nfdPos < len(nfdToOrig) {
+				nfdToOrig[nfdPos] = origPos
+				nfdPos++
+			}
+		}
+		origPos += len(string(r))
+	}
+
+	// Remap the offsets
+	result := make([]int, len(nfdOffsets))
+	for i, off := range nfdOffsets {
+		if off < len(nfdToOrig) {
+			result[i] = nfdToOrig[off]
+		} else if len(nfdToOrig) > 0 {
+			result[i] = nfdToOrig[len(nfdToOrig)-1]
+		}
+	}
+	return result
+}
+
+// preTokenizeWithSpans splits text into words with their byte spans.
+func (t *Tokenizer) preTokenizeWithSpans(text string, normOffsets []int) []wordWithOffset {
+	if t.tokenizer.PreTokenizer == nil {
+		// Default: split on whitespace
+		return fieldsWithOffsets(text, normOffsets)
+	}
+	return t.applyPreTokenizerWithSpans(text, normOffsets, t.tokenizer.PreTokenizer)
+}
+
+// fieldsWithOffsets splits text on whitespace and returns words with their offsets.
+func fieldsWithOffsets(text string, normOffsets []int) []wordWithOffset {
+	var words []wordWithOffset
+	var current strings.Builder
+	currentStart := -1
+
+	for i, r := range text {
+		if unicode.IsSpace(r) {
+			if current.Len() > 0 {
+				end := i
+				origStart := 0
+				origEnd := len(text)
+				if currentStart < len(normOffsets) {
+					origStart = normOffsets[currentStart]
+				}
+				if end <= len(normOffsets) && end > 0 {
+					origEnd = normOffsets[end-1] + 1
+				}
+				words = append(words, wordWithOffset{
+					text:  current.String(),
+					start: origStart,
+					end:   origEnd,
+				})
+				current.Reset()
+				currentStart = -1
+			}
+		} else {
+			if currentStart == -1 {
+				currentStart = i
+			}
+			current.WriteRune(r)
+		}
+	}
+
+	if current.Len() > 0 {
+		origStart := 0
+		origEnd := len(text)
+		if currentStart < len(normOffsets) {
+			origStart = normOffsets[currentStart]
+		}
+		if len(normOffsets) > 0 {
+			origEnd = normOffsets[len(normOffsets)-1] + 1
+		}
+		words = append(words, wordWithOffset{
+			text:  current.String(),
+			start: origStart,
+			end:   origEnd,
+		})
+	}
+
+	return words
+}
+
+// applyPreTokenizerWithSpans applies pre-tokenization with offset tracking.
+func (t *Tokenizer) applyPreTokenizerWithSpans(text string, normOffsets []int, pt *PreTokenizer) []wordWithOffset {
+	switch pt.Type {
+	case "BertPreTokenizer":
+		return bertPreTokenizeWithOffsets(text, normOffsets)
+	case "Whitespace", "WhitespaceSplit":
+		return fieldsWithOffsets(text, normOffsets)
+	case "ByteLevel":
+		if pt.AddPrefixSpace && len(text) > 0 && text[0] != ' ' {
+			// Prepend space - adjust offsets
+			text = " " + text
+			newOffsets := make([]int, len(normOffsets)+1)
+			newOffsets[0] = 0 // The added space maps to position 0
+			copy(newOffsets[1:], normOffsets)
+			normOffsets = newOffsets
+		}
+		return byteLevelPreTokenizeWithOffsets(text, normOffsets)
+	case "Metaspace":
+		return metaspacePreTokenizeWithOffsets(text, normOffsets, pt.AddPrefixSpace)
+	case "Sequence":
+		result := []wordWithOffset{{text: text, start: 0, end: len(text)}}
+		if len(normOffsets) > 0 {
+			result[0].end = normOffsets[len(normOffsets)-1] + 1
+		}
+		for _, child := range pt.PreTokenizers {
+			var newResult []wordWithOffset
+			childCopy := child
+			for _, w := range result {
+				// Create sub-offsets for this word
+				subOffsets := make([]int, len(w.text))
+				for i := range subOffsets {
+					subOffsets[i] = w.start + i
+				}
+				subWords := t.applyPreTokenizerWithSpans(w.text, subOffsets, &childCopy)
+				newResult = append(newResult, subWords...)
+			}
+			result = newResult
+		}
+		return result
+	case "Punctuation":
+		return punctuationPreTokenizeWithOffsets(text, normOffsets)
+	default:
+		return fieldsWithOffsets(text, normOffsets)
+	}
+}
+
+// bertPreTokenizeWithOffsets splits on whitespace and punctuation with offset tracking.
+func bertPreTokenizeWithOffsets(text string, normOffsets []int) []wordWithOffset {
+	var words []wordWithOffset
+	var current strings.Builder
+	currentStart := -1
+
+	runes := []rune(text)
+	for i, r := range runes {
+		bytePos := len(string(runes[:i]))
+
+		if isWhitespace(r) {
+			if current.Len() > 0 {
+				origStart := 0
+				origEnd := bytePos
+				if currentStart < len(normOffsets) {
+					origStart = normOffsets[currentStart]
+				}
+				if bytePos > 0 && bytePos <= len(normOffsets) {
+					origEnd = normOffsets[bytePos-1] + 1
+				}
+				words = append(words, wordWithOffset{
+					text:  current.String(),
+					start: origStart,
+					end:   origEnd,
+				})
+				current.Reset()
+				currentStart = -1
+			}
+		} else if isPunctuation(r) {
+			if current.Len() > 0 {
+				origStart := 0
+				origEnd := bytePos
+				if currentStart < len(normOffsets) {
+					origStart = normOffsets[currentStart]
+				}
+				if bytePos > 0 && bytePos <= len(normOffsets) {
+					origEnd = normOffsets[bytePos-1] + 1
+				}
+				words = append(words, wordWithOffset{
+					text:  current.String(),
+					start: origStart,
+					end:   origEnd,
+				})
+				current.Reset()
+				currentStart = -1
+			}
+			// Add punctuation as its own token
+			origStart := bytePos
+			origEnd := bytePos + len(string(r))
+			if bytePos < len(normOffsets) {
+				origStart = normOffsets[bytePos]
+			}
+			endBytePos := bytePos + len(string(r))
+			if endBytePos <= len(normOffsets) && endBytePos > 0 {
+				origEnd = normOffsets[endBytePos-1] + 1
+			}
+			words = append(words, wordWithOffset{
+				text:  string(r),
+				start: origStart,
+				end:   origEnd,
+			})
+		} else {
+			if currentStart == -1 {
+				currentStart = bytePos
+			}
+			current.WriteRune(r)
+		}
+	}
+
+	if current.Len() > 0 {
+		origStart := 0
+		origEnd := len(text)
+		if currentStart < len(normOffsets) {
+			origStart = normOffsets[currentStart]
+		}
+		if len(normOffsets) > 0 {
+			origEnd = normOffsets[len(normOffsets)-1] + 1
+		}
+		words = append(words, wordWithOffset{
+			text:  current.String(),
+			start: origStart,
+			end:   origEnd,
+		})
+	}
+
+	return words
+}
+
+// punctuationPreTokenizeWithOffsets splits on punctuation with offset tracking.
+func punctuationPreTokenizeWithOffsets(text string, normOffsets []int) []wordWithOffset {
+	var words []wordWithOffset
+	var current strings.Builder
+	currentStart := -1
+
+	runes := []rune(text)
+	for i, r := range runes {
+		bytePos := len(string(runes[:i]))
+
+		if isPunctuation(r) {
+			if current.Len() > 0 {
+				origStart := 0
+				origEnd := bytePos
+				if currentStart < len(normOffsets) {
+					origStart = normOffsets[currentStart]
+				}
+				if bytePos > 0 && bytePos <= len(normOffsets) {
+					origEnd = normOffsets[bytePos-1] + 1
+				}
+				words = append(words, wordWithOffset{
+					text:  current.String(),
+					start: origStart,
+					end:   origEnd,
+				})
+				current.Reset()
+				currentStart = -1
+			}
+			// Add punctuation as its own token
+			origStart := bytePos
+			origEnd := bytePos + len(string(r))
+			if bytePos < len(normOffsets) {
+				origStart = normOffsets[bytePos]
+			}
+			endBytePos := bytePos + len(string(r))
+			if endBytePos <= len(normOffsets) && endBytePos > 0 {
+				origEnd = normOffsets[endBytePos-1] + 1
+			}
+			words = append(words, wordWithOffset{
+				text:  string(r),
+				start: origStart,
+				end:   origEnd,
+			})
+		} else {
+			if currentStart == -1 {
+				currentStart = bytePos
+			}
+			current.WriteRune(r)
+		}
+	}
+
+	if current.Len() > 0 {
+		origStart := 0
+		origEnd := len(text)
+		if currentStart < len(normOffsets) {
+			origStart = normOffsets[currentStart]
+		}
+		if len(normOffsets) > 0 {
+			origEnd = normOffsets[len(normOffsets)-1] + 1
+		}
+		words = append(words, wordWithOffset{
+			text:  current.String(),
+			start: origStart,
+			end:   origEnd,
+		})
+	}
+
+	return words
+}
+
+// byteLevelPreTokenizeWithOffsets handles byte-level BPE pre-tokenization with offsets.
+func byteLevelPreTokenizeWithOffsets(text string, normOffsets []int) []wordWithOffset {
+	var words []wordWithOffset
+	var current strings.Builder
+	var currentOffsets []int
+
+	for i, r := range text {
+		if r == ' ' {
+			if current.Len() > 0 {
+				origStart := 0
+				origEnd := i
+				if len(currentOffsets) > 0 {
+					origStart = currentOffsets[0]
+					origEnd = currentOffsets[len(currentOffsets)-1] + 1
+				}
+				words = append(words, wordWithOffset{
+					text:  current.String(),
+					start: origStart,
+					end:   origEnd,
+				})
+				current.Reset()
+				currentOffsets = nil
+			}
+			// Start new token with space
+			current.WriteRune(byteToUnicode[' '])
+			if i < len(normOffsets) {
+				currentOffsets = append(currentOffsets, normOffsets[i])
+			}
+		} else {
+			for _, b := range []byte(string(r)) {
+				current.WriteRune(byteToUnicode[b])
+				if i < len(normOffsets) {
+					currentOffsets = append(currentOffsets, normOffsets[i])
+				}
+			}
+		}
+	}
+
+	if current.Len() > 0 {
+		origStart := 0
+		origEnd := len(text)
+		if len(currentOffsets) > 0 {
+			origStart = currentOffsets[0]
+			origEnd = currentOffsets[len(currentOffsets)-1] + 1
+		}
+		words = append(words, wordWithOffset{
+			text:  current.String(),
+			start: origStart,
+			end:   origEnd,
+		})
+	}
+
+	return words
+}
+
+// metaspacePreTokenizeWithOffsets handles metaspace pre-tokenization with offsets.
+func metaspacePreTokenizeWithOffsets(text string, normOffsets []int, addPrefixSpace bool) []wordWithOffset {
+	if addPrefixSpace && len(text) > 0 && text[0] != ' ' {
+		text = " " + text
+		newOffsets := make([]int, len(normOffsets)+1)
+		newOffsets[0] = 0
+		copy(newOffsets[1:], normOffsets)
+		normOffsets = newOffsets
+	}
+
+	// Replace spaces with metaspace character
+	var words []wordWithOffset
+	var current strings.Builder
+	currentStart := -1
+
+	for i, r := range text {
+		if r == ' ' {
+			if current.Len() > 0 {
+				origStart := 0
+				origEnd := i
+				if currentStart < len(normOffsets) && currentStart >= 0 {
+					origStart = normOffsets[currentStart]
+				}
+				if i > 0 && i <= len(normOffsets) {
+					origEnd = normOffsets[i-1] + 1
+				}
+				words = append(words, wordWithOffset{
+					text:  current.String(),
+					start: origStart,
+					end:   origEnd,
+				})
+				current.Reset()
+			}
+			current.WriteRune('\u2581')
+			currentStart = i
+		} else {
+			if currentStart == -1 {
+				currentStart = i
+			}
+			current.WriteRune(r)
+		}
+	}
+
+	if current.Len() > 0 {
+		origStart := 0
+		origEnd := len(text)
+		if currentStart < len(normOffsets) && currentStart >= 0 {
+			origStart = normOffsets[currentStart]
+		}
+		if len(normOffsets) > 0 {
+			origEnd = normOffsets[len(normOffsets)-1] + 1
+		}
+		words = append(words, wordWithOffset{
+			text:  current.String(),
+			start: origStart,
+			end:   origEnd,
+		})
+	}
+
+	return words
+}
+
+// tokenizeWordWithSpans tokenizes a single word and returns IDs with their offsets.
+func (t *Tokenizer) tokenizeWordWithSpans(word wordWithOffset) ([]int, []api.TokenSpan) {
+	// First check if word is an added token
+	if id, ok := t.addedTokens[word.text]; ok {
+		return []int{id}, []api.TokenSpan{{Start: word.start, End: word.end}}
+	}
+
+	switch t.tokenizer.Model.Type {
+	case "WordPiece":
+		return t.wordPieceTokenizeWithSpans(word)
+	case "BPE":
+		return t.bpeTokenizeWithSpans(word)
+	case "Unigram":
+		return t.unigramTokenizeWithSpans(word)
+	default:
+		// Fallback: try to find word in vocab
+		if id, ok := t.tokenizer.Model.Vocab[word.text]; ok {
+			return []int{id}, []api.TokenSpan{{Start: word.start, End: word.end}}
+		}
+		if t.unkID >= 0 {
+			return []int{t.unkID}, []api.TokenSpan{{Start: word.start, End: word.end}}
+		}
+		return nil, nil
+	}
+}
+
+// wordPieceTokenizeWithSpans implements WordPiece tokenization with offset tracking.
+func (t *Tokenizer) wordPieceTokenizeWithSpans(word wordWithOffset) ([]int, []api.TokenSpan) {
+	text := word.text
+	if text == "" {
+		return nil, nil
+	}
+
+	maxChars := t.tokenizer.Model.MaxInputCharsPerWord
+	if maxChars == 0 {
+		maxChars = 100
+	}
+	if len(text) > maxChars {
+		if t.unkID >= 0 {
+			return []int{t.unkID}, []api.TokenSpan{{Start: word.start, End: word.end}}
+		}
+		return nil, nil
+	}
+
+	prefix := t.tokenizer.Model.ContinuingSubwordPrefix
+	if prefix == "" {
+		prefix = "##"
+	}
+
+	var ids []int
+	var offsets []api.TokenSpan
+	runes := []rune(text)
+	start := 0
+	charLen := len(runes)
+
+	for start < charLen {
+		end := charLen
+		found := false
+
+		for start < end {
+			substr := string(runes[start:end])
+			if start > 0 {
+				substr = prefix + substr
+			}
+
+			if id, ok := t.tokenizer.Model.Vocab[substr]; ok {
+				ids = append(ids, id)
+
+				// Calculate character offsets for this subword
+				// Map from rune position to byte position within the word
+				startByte := len(string(runes[:start]))
+				endByte := len(string(runes[:end]))
+
+				// Add the word's start offset to get positions in original text
+				origStart := word.start + startByte
+				origEnd := word.start + endByte
+
+				offsets = append(offsets, api.TokenSpan{Start: origStart, End: origEnd})
+				found = true
+				break
+			}
+			end--
+		}
+
+		if !found {
+			if t.unkID >= 0 {
+				return []int{t.unkID}, []api.TokenSpan{{Start: word.start, End: word.end}}
+			}
+			return nil, nil
+		}
+		start = end
+	}
+
+	return ids, offsets
+}
+
+// bpeTokenizeWithSpans implements BPE tokenization with offset tracking.
+func (t *Tokenizer) bpeTokenizeWithSpans(word wordWithOffset) ([]int, []api.TokenSpan) {
+	text := word.text
+	if text == "" {
+		return nil, nil
+	}
+
+	// Convert word to list of symbols with their character positions (rune indices)
+	type symbolWithPos struct {
+		text  string
+		start int // rune position in word
+		end   int // rune position in word
+	}
+
+	runes := []rune(text)
+	symbols := make([]symbolWithPos, len(runes))
+	for i, r := range runes {
+		symbols[i] = symbolWithPos{
+			text:  string(r),
+			start: i,
+			end:   i + 1,
+		}
+	}
+
+	// Add end-of-word suffix if configured
+	if t.tokenizer.Model.EndOfWordSuffix != "" && len(symbols) > 0 {
+		symbols[len(symbols)-1].text += t.tokenizer.Model.EndOfWordSuffix
+	}
+
+	// If word is a single symbol that exists in vocab, return it
+	if len(symbols) == 1 {
+		if id, ok := t.tokenizer.Model.Vocab[symbols[0].text]; ok {
+			return []int{id}, []api.TokenSpan{{Start: word.start, End: word.end}}
+		}
+	}
+
+	// Apply BPE merges
+	for len(symbols) > 1 {
+		// Find best pair to merge
+		bestPair := ""
+		bestRank := -1
+		bestIdx := -1
+
+		for i := 0; i < len(symbols)-1; i++ {
+			pair := symbols[i].text + " " + symbols[i+1].text
+			if rank, ok := t.mergeRanks[pair]; ok {
+				if bestRank == -1 || rank < bestRank {
+					bestPair = pair
+					bestRank = rank
+					bestIdx = i
+				}
+			}
+		}
+
+		if bestIdx == -1 {
+			break // No more merges possible
+		}
+
+		// Apply the merge
+		merged := strings.Replace(bestPair, " ", "", 1)
+		newSymbols := make([]symbolWithPos, 0, len(symbols)-1)
+		newSymbols = append(newSymbols, symbols[:bestIdx]...)
+		newSymbols = append(newSymbols, symbolWithPos{
+			text:  merged,
+			start: symbols[bestIdx].start,
+			end:   symbols[bestIdx+1].end,
+		})
+		newSymbols = append(newSymbols, symbols[bestIdx+2:]...)
+		symbols = newSymbols
+	}
+
+	// Convert symbols to IDs with offsets
+	var ids []int
+	var offsets []api.TokenSpan
+
+	for _, sym := range symbols {
+		if id, ok := t.tokenizer.Model.Vocab[sym.text]; ok {
+			ids = append(ids, id)
+		} else if t.unkID >= 0 {
+			ids = append(ids, t.unkID)
+		} else {
+			continue
+		}
+
+		// Calculate offsets - map from rune position to byte position
+		startByte := len(string(runes[:sym.start]))
+		endByte := len(string(runes[:sym.end]))
+
+		// Add the word's start offset to get positions in original text
+		origStart := word.start + startByte
+		origEnd := word.start + endByte
+
+		offsets = append(offsets, api.TokenSpan{Start: origStart, End: origEnd})
+	}
+
+	return ids, offsets
+}
+
+// unigramTokenizeWithSpans implements Unigram tokenization with offset tracking.
+func (t *Tokenizer) unigramTokenizeWithSpans(word wordWithOffset) ([]int, []api.TokenSpan) {
+	text := word.text
+	if text == "" {
+		return nil, nil
+	}
+
+	var ids []int
+	var offsets []api.TokenSpan
+	runes := []rune(text)
+	start := 0
+	runeLen := len(runes)
+
+	for start < runeLen {
+		end := runeLen
+		found := false
+
+		for end > start {
+			substr := string(runes[start:end])
+			if id, ok := t.tokenizer.Model.Vocab[substr]; ok {
+				ids = append(ids, id)
+
+				// Calculate offsets - map from rune position to byte position
+				startByte := len(string(runes[:start]))
+				endByte := len(string(runes[:end]))
+
+				// Add the word's start offset to get positions in original text
+				origStart := word.start + startByte
+				origEnd := word.start + endByte
+
+				offsets = append(offsets, api.TokenSpan{Start: origStart, End: origEnd})
+				found = true
+				start = end
+				break
+			}
+			end--
+		}
+
+		if !found {
+			// Single character fallback
+			char := string(runes[start])
+			startByte := len(string(runes[:start]))
+			endByte := len(string(runes[:start+1]))
+
+			// Add the word's start offset to get positions in original text
+			origStart := word.start + startByte
+			origEnd := word.start + endByte
+
+			if id, ok := t.tokenizer.Model.Vocab[char]; ok {
+				ids = append(ids, id)
+			} else if t.unkID >= 0 {
+				ids = append(ids, t.unkID)
+			}
+			offsets = append(offsets, api.TokenSpan{Start: origStart, End: origEnd})
+			start++
+		}
+	}
+
+	return ids, offsets
 }
 
 func (t *Tokenizer) applyNormalizer(text string, n *Normalizer) string {
@@ -351,251 +1198,6 @@ func (t *Tokenizer) applyNormalizer(text string, n *Normalizer) string {
 	default:
 		return text
 	}
-}
-
-// preTokenize splits text into words using the pre-tokenizer.
-func (t *Tokenizer) preTokenize(text string) []string {
-	if t.tokenizer.PreTokenizer == nil {
-		// Default: split on whitespace
-		return strings.Fields(text)
-	}
-	return t.applyPreTokenizer(text, t.tokenizer.PreTokenizer)
-}
-
-func (t *Tokenizer) applyPreTokenizer(text string, pt *PreTokenizer) []string {
-	switch pt.Type {
-	case "BertPreTokenizer":
-		// Split on whitespace and punctuation
-		return bertPreTokenize(text)
-	case "Whitespace":
-		return strings.Fields(text)
-	case "WhitespaceSplit":
-		return strings.Fields(text)
-	case "ByteLevel":
-		// For BPE models like GPT-2
-		if pt.AddPrefixSpace && len(text) > 0 && text[0] != ' ' {
-			text = " " + text
-		}
-		return byteLevelPreTokenize(text)
-	case "Metaspace":
-		// Replace spaces with special character (used by some models)
-		return metaspacePreTokenize(text, pt.AddPrefixSpace)
-	case "Sequence":
-		result := []string{text}
-		for _, child := range pt.PreTokenizers {
-			var newResult []string
-			childCopy := child
-			for _, s := range result {
-				newResult = append(newResult, t.applyPreTokenizer(s, &childCopy)...)
-			}
-			result = newResult
-		}
-		return result
-	case "Split":
-		// Split based on pattern
-		return strings.Fields(text)
-	case "Punctuation":
-		return punctuationPreTokenize(text)
-	default:
-		return strings.Fields(text)
-	}
-}
-
-// tokenizeWord tokenizes a single word according to the model type.
-func (t *Tokenizer) tokenizeWord(word string) []int {
-	// First check if word is an added token
-	if id, ok := t.addedTokens[word]; ok {
-		return []int{id}
-	}
-
-	switch t.tokenizer.Model.Type {
-	case "WordPiece":
-		return t.wordPieceTokenize(word)
-	case "BPE":
-		return t.bpeTokenize(word)
-	case "Unigram":
-		return t.unigramTokenize(word)
-	default:
-		// Fallback: try to find word in vocab
-		if id, ok := t.tokenizer.Model.Vocab[word]; ok {
-			return []int{id}
-		}
-		if t.unkID >= 0 {
-			return []int{t.unkID}
-		}
-		return nil
-	}
-}
-
-// wordPieceTokenize implements WordPiece tokenization (used by BERT).
-func (t *Tokenizer) wordPieceTokenize(word string) []int {
-	if word == "" {
-		return nil
-	}
-
-	maxChars := t.tokenizer.Model.MaxInputCharsPerWord
-	if maxChars == 0 {
-		maxChars = 100
-	}
-	if len(word) > maxChars {
-		if t.unkID >= 0 {
-			return []int{t.unkID}
-		}
-		return nil
-	}
-
-	prefix := t.tokenizer.Model.ContinuingSubwordPrefix
-	if prefix == "" {
-		prefix = "##"
-	}
-
-	var tokens []int
-	start := 0
-
-	for start < len(word) {
-		end := len(word)
-		found := false
-
-		for start < end {
-			substr := word[start:end]
-			if start > 0 {
-				substr = prefix + substr
-			}
-
-			if id, ok := t.tokenizer.Model.Vocab[substr]; ok {
-				tokens = append(tokens, id)
-				found = true
-				break
-			}
-			end--
-		}
-
-		if !found {
-			if t.unkID >= 0 {
-				return []int{t.unkID}
-			}
-			return nil
-		}
-		start = end
-	}
-
-	return tokens
-}
-
-// bpeTokenize implements BPE tokenization (used by GPT-2, RoBERTa).
-func (t *Tokenizer) bpeTokenize(word string) []int {
-	if word == "" {
-		return nil
-	}
-
-	// Convert word to list of bytes/characters
-	// For byte-level BPE, we need to handle byte encoding
-	symbols := t.getInitialBPESymbols(word)
-
-	// If word is a single symbol that exists in vocab, return it
-	if len(symbols) == 1 {
-		if id, ok := t.tokenizer.Model.Vocab[symbols[0]]; ok {
-			return []int{id}
-		}
-	}
-
-	// Apply BPE merges
-	for len(symbols) > 1 {
-		// Find best pair to merge
-		bestPair := ""
-		bestRank := -1
-		bestIdx := -1
-
-		for i := 0; i < len(symbols)-1; i++ {
-			pair := symbols[i] + " " + symbols[i+1]
-			if rank, ok := t.mergeRanks[pair]; ok {
-				if bestRank == -1 || rank < bestRank {
-					bestPair = pair
-					bestRank = rank
-					bestIdx = i
-				}
-			}
-		}
-
-		if bestIdx == -1 {
-			break // No more merges possible
-		}
-
-		// Apply the merge
-		merged := strings.Replace(bestPair, " ", "", 1)
-		newSymbols := make([]string, 0, len(symbols)-1)
-		newSymbols = append(newSymbols, symbols[:bestIdx]...)
-		newSymbols = append(newSymbols, merged)
-		newSymbols = append(newSymbols, symbols[bestIdx+2:]...)
-		symbols = newSymbols
-	}
-
-	// Convert symbols to IDs
-	var ids []int
-	for _, sym := range symbols {
-		if id, ok := t.tokenizer.Model.Vocab[sym]; ok {
-			ids = append(ids, id)
-		} else if t.unkID >= 0 {
-			ids = append(ids, t.unkID)
-		}
-	}
-
-	return ids
-}
-
-// getInitialBPESymbols converts a word into initial BPE symbols.
-func (t *Tokenizer) getInitialBPESymbols(word string) []string {
-	// For byte-level BPE, each byte becomes a symbol
-	// The symbols use a special byte-to-unicode mapping
-	var symbols []string
-	for _, r := range word {
-		symbols = append(symbols, string(r))
-	}
-
-	// Add end-of-word suffix if configured
-	if t.tokenizer.Model.EndOfWordSuffix != "" && len(symbols) > 0 {
-		symbols[len(symbols)-1] += t.tokenizer.Model.EndOfWordSuffix
-	}
-
-	return symbols
-}
-
-// unigramTokenize implements Unigram tokenization.
-func (t *Tokenizer) unigramTokenize(word string) []int {
-	// Simplified Unigram: use greedy longest-match
-	// Full Unigram uses Viterbi algorithm with scores
-	var ids []int
-	runes := []rune(word)
-	start := 0
-
-	for start < len(runes) {
-		end := len(runes)
-		found := false
-
-		for end > start {
-			substr := string(runes[start:end])
-			if id, ok := t.tokenizer.Model.Vocab[substr]; ok {
-				ids = append(ids, id)
-				found = true
-				start = end
-				break
-			}
-			end--
-		}
-
-		if !found {
-			// Single character fallback
-			char := string(runes[start])
-			if id, ok := t.tokenizer.Model.Vocab[char]; ok {
-				ids = append(ids, id)
-			} else if t.unkID >= 0 {
-				ids = append(ids, t.unkID)
-			}
-			start++
-		}
-	}
-
-	return ids
 }
 
 // Decode converts a sequence of token IDs back to text.
@@ -842,57 +1444,6 @@ func removeAccents(text string) string {
 	return result.String()
 }
 
-func bertPreTokenize(text string) []string {
-	var tokens []string
-	var current strings.Builder
-
-	for _, r := range text {
-		if isWhitespace(r) {
-			if current.Len() > 0 {
-				tokens = append(tokens, current.String())
-				current.Reset()
-			}
-		} else if isPunctuation(r) {
-			if current.Len() > 0 {
-				tokens = append(tokens, current.String())
-				current.Reset()
-			}
-			tokens = append(tokens, string(r))
-		} else {
-			current.WriteRune(r)
-		}
-	}
-
-	if current.Len() > 0 {
-		tokens = append(tokens, current.String())
-	}
-
-	return tokens
-}
-
-func punctuationPreTokenize(text string) []string {
-	var tokens []string
-	var current strings.Builder
-
-	for _, r := range text {
-		if isPunctuation(r) {
-			if current.Len() > 0 {
-				tokens = append(tokens, current.String())
-				current.Reset()
-			}
-			tokens = append(tokens, string(r))
-		} else {
-			current.WriteRune(r)
-		}
-	}
-
-	if current.Len() > 0 {
-		tokens = append(tokens, current.String())
-	}
-
-	return tokens
-}
-
 // Byte-level BPE encoding/decoding
 // GPT-2 uses a specific byte-to-unicode mapping
 var byteToUnicode map[byte]rune
@@ -916,40 +1467,6 @@ func init() {
 	}
 }
 
-func byteLevelPreTokenize(text string) []string {
-	// Split on whitespace, keeping the delimiter attached to the following word
-	var tokens []string
-	var current strings.Builder
-	inWord := false
-
-	for i, r := range text {
-		if r == ' ' {
-			if inWord {
-				tokens = append(tokens, current.String())
-				current.Reset()
-			}
-			// Attach space to next token
-			if i == 0 || (i > 0 && text[i-1] == ' ') {
-				current.WriteRune(byteToUnicode[' '])
-			} else {
-				current.WriteRune(byteToUnicode[' '])
-			}
-			inWord = false
-		} else {
-			inWord = true
-			for _, b := range []byte(string(r)) {
-				current.WriteRune(byteToUnicode[b])
-			}
-		}
-	}
-
-	if current.Len() > 0 {
-		tokens = append(tokens, current.String())
-	}
-
-	return tokens
-}
-
 func byteLevelDecode(text string) string {
 	var result []byte
 	for _, r := range text {
@@ -961,32 +1478,6 @@ func byteLevelDecode(text string) string {
 		}
 	}
 	return string(result)
-}
-
-func metaspacePreTokenize(text string, addPrefixSpace bool) []string {
-	// Replace spaces with special metaspace character
-	if addPrefixSpace && len(text) > 0 && text[0] != ' ' {
-		text = " " + text
-	}
-	text = strings.ReplaceAll(text, " ", "\u2581")
-
-	// Split into words (where each word starts with metaspace)
-	var tokens []string
-	var current strings.Builder
-
-	for _, r := range text {
-		if r == '\u2581' && current.Len() > 0 {
-			tokens = append(tokens, current.String())
-			current.Reset()
-		}
-		current.WriteRune(r)
-	}
-
-	if current.Len() > 0 {
-		tokens = append(tokens, current.String())
-	}
-
-	return tokens
 }
 
 // GetTokenizerType returns the model type (WordPiece, BPE, Unigram).
