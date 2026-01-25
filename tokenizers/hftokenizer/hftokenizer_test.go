@@ -173,6 +173,186 @@ var testSimpleBPETokenizerJSON = []byte(`{
   }
 }`)
 
+// Test tokenizer.json content for a Unigram model (PEGASUS-style)
+// Note: Unigram vocab is an array of [token, score] pairs where:
+// - score is the log probability (float)
+// - ID is the array index (not the score!)
+var testUnigramTokenizerJSON = []byte(`{
+  "version": "1.0",
+  "truncation": null,
+  "padding": null,
+  "added_tokens": [
+    {"id": 0, "content": "<pad>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+    {"id": 1, "content": "</s>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+    {"id": 2, "content": "<unk>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true}
+  ],
+  "normalizer": null,
+  "pre_tokenizer": {
+    "type": "Metaspace",
+    "add_prefix_space": true
+  },
+  "post_processor": null,
+  "decoder": {
+    "type": "Metaspace"
+  },
+  "model": {
+    "type": "Unigram",
+    "unk_token": "<unk>",
+    "vocab": [
+      ["<pad>", 0.0],
+      ["</s>", 0.0],
+      ["<unk>", 0.0],
+      ["▁hello", -5.5],
+      ["▁world", -5.8],
+      ["▁test", -6.2],
+      ["▁", -2.1],
+      ["hello", -7.5],
+      ["world", -7.8],
+      ["test", -8.2],
+      ["ing", -4.5],
+      ["▁the", -3.2]
+    ]
+  }
+}`)
+
+func TestNewFromContent_Unigram(t *testing.T) {
+	tok, err := NewFromContent(nil, testUnigramTokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	if tok.GetTokenizerType() != "Unigram" {
+		t.Errorf("expected type Unigram, got %s", tok.GetTokenizerType())
+	}
+}
+
+// TestUnigram_VocabParsing verifies that Unigram vocab arrays are parsed correctly.
+// The second element is a score (log probability), NOT the ID.
+// The ID should be the array index.
+func TestUnigram_VocabParsing(t *testing.T) {
+	tok, err := NewFromContent(nil, testUnigramTokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	// Verify that tokens have the correct IDs (array index, not score)
+	tests := []struct {
+		token string
+		wantID int
+	}{
+		{"<pad>", 0},    // index 0, score 0.0
+		{"</s>", 1},     // index 1, score 0.0
+		{"<unk>", 2},    // index 2, score 0.0
+		{"▁hello", 3},   // index 3, score -5.5
+		{"▁world", 4},   // index 4, score -5.8
+		{"▁test", 5},    // index 5, score -6.2
+		{"▁", 6},        // index 6, score -2.1
+		{"hello", 7},    // index 7, score -7.5
+		{"world", 8},    // index 8, score -7.8
+		{"test", 9},     // index 9, score -8.2
+		{"ing", 10},     // index 10, score -4.5
+		{"▁the", 11},    // index 11, score -3.2
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.token, func(t *testing.T) {
+			gotID, ok := tok.TokenToID(tt.token)
+			if !ok {
+				t.Errorf("TokenToID(%q): token not found", tt.token)
+				return
+			}
+			if gotID != tt.wantID {
+				t.Errorf("TokenToID(%q) = %d, want %d", tt.token, gotID, tt.wantID)
+			}
+			// Also verify reverse lookup
+			gotToken, ok := tok.IDToToken(tt.wantID)
+			if !ok {
+				t.Errorf("IDToToken(%d): ID not found", tt.wantID)
+				return
+			}
+			if gotToken != tt.token {
+				t.Errorf("IDToToken(%d) = %q, want %q", tt.wantID, gotToken, tt.token)
+			}
+		})
+	}
+}
+
+func TestUnigram_Encode(t *testing.T) {
+	tok, err := NewFromContent(nil, testUnigramTokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		input string
+		want  []int
+	}{
+		{
+			name:  "single word hello",
+			input: "hello",
+			want:  []int{3}, // "▁hello" (metaspace adds prefix)
+		},
+		{
+			name:  "single word world",
+			input: "world",
+			want:  []int{4}, // "▁world"
+		},
+		{
+			name:  "two words",
+			input: "hello world",
+			want:  []int{3, 4}, // "▁hello" + "▁world"
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tok.Encode(tt.input)
+			if !intSliceEqual(got, tt.want) {
+				t.Errorf("Encode(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUnigram_Decode(t *testing.T) {
+	tok, err := NewFromContent(nil, testUnigramTokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		input []int
+		want  string
+	}{
+		{
+			name:  "single token hello",
+			input: []int{3}, // "▁hello"
+			want:  "hello",
+		},
+		{
+			name:  "single token world",
+			input: []int{4}, // "▁world"
+			want:  "world",
+		},
+		{
+			name:  "multiple tokens",
+			input: []int{3, 4}, // "▁hello" + "▁world"
+			want:  "hello world",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tok.Decode(tt.input)
+			if got != tt.want {
+				t.Errorf("Decode(%v) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBPE_Encode(t *testing.T) {
 	tok, err := NewFromContent(nil, testSimpleBPETokenizerJSON)
 	if err != nil {

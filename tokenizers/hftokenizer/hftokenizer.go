@@ -106,16 +106,71 @@ type Decoder struct {
 
 // Model represents the tokenizer model (WordPiece, BPE, or Unigram).
 type Model struct {
-	Type                     string            `json:"type"`
-	Vocab                    map[string]int    `json:"vocab"`
-	Merges                   []string          `json:"merges"`
-	UnkToken                 string            `json:"unk_token"`
-	ContinuingSubwordPrefix  string            `json:"continuing_subword_prefix"`
-	MaxInputCharsPerWord     int               `json:"max_input_chars_per_word"`
-	FuseUnk                  bool              `json:"fuse_unk"`
-	ByteFallback             bool              `json:"byte_fallback"`
-	Dropout                  *float64          `json:"dropout"`
-	EndOfWordSuffix          string            `json:"end_of_word_suffix"`
+	Type                    string         `json:"type"`
+	Vocab                   map[string]int `json:"-"` // Custom unmarshaling handles both map and array formats
+	Merges                  []string       `json:"merges"`
+	UnkToken                string         `json:"unk_token"`
+	ContinuingSubwordPrefix string         `json:"continuing_subword_prefix"`
+	MaxInputCharsPerWord    int            `json:"max_input_chars_per_word"`
+	FuseUnk                 bool           `json:"fuse_unk"`
+	ByteFallback            bool           `json:"byte_fallback"`
+	Dropout                 *float64       `json:"dropout"`
+	EndOfWordSuffix         string         `json:"end_of_word_suffix"`
+}
+
+// UnmarshalJSON implements custom unmarshaling to handle both vocab formats:
+// 1. Object format: {"token": id, ...} (WordPiece, BPE)
+// 2. Array format: [["token", score], ...] (Unigram) - ID is the array index
+func (m *Model) UnmarshalJSON(data []byte) error {
+	// Use an alias to avoid infinite recursion
+	type ModelAlias Model
+	type ModelWithRawVocab struct {
+		ModelAlias
+		Vocab json.RawMessage `json:"vocab"`
+	}
+
+	var raw ModelWithRawVocab
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	// Copy all fields except Vocab
+	*m = Model(raw.ModelAlias)
+
+	// Now handle Vocab which can be either map or array
+	if len(raw.Vocab) == 0 {
+		m.Vocab = make(map[string]int)
+		return nil
+	}
+
+	// Try to unmarshal as map first (most common format)
+	var vocabMap map[string]int
+	if err := json.Unmarshal(raw.Vocab, &vocabMap); err == nil {
+		m.Vocab = vocabMap
+		return nil
+	}
+
+	// Try array format: [["token", score], ...] (Unigram models)
+	// For Unigram, the second element is a score (log probability), not an ID.
+	// The token's ID is its index/position in the array.
+	var vocabArray [][]interface{}
+	if err := json.Unmarshal(raw.Vocab, &vocabArray); err == nil {
+		m.Vocab = make(map[string]int, len(vocabArray))
+		for idx, pair := range vocabArray {
+			if len(pair) >= 1 {
+				token, ok := pair[0].(string)
+				if ok {
+					// Use array index as the token ID
+					m.Vocab[token] = idx
+				}
+			}
+		}
+		return nil
+	}
+
+	// If neither format works, return empty vocab
+	m.Vocab = make(map[string]int)
+	return nil
 }
 
 // Tokenizer implements the api.Tokenizer interface for HuggingFace tokenizer.json files.
