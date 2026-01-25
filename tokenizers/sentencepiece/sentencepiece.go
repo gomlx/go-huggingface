@@ -48,7 +48,11 @@ var _ api.TokenizerWithSpans = &Tokenizer{}
 // It implements sampler.Vocabulary.
 func (p *Tokenizer) Encode(text string) []int {
 	tokens := p.Processor.Encode(text)
-	return sliceMap(tokens, func(t esentencepiece.Token) int { return t.ID })
+	ids := make([]int, len(tokens))
+	for i, t := range tokens {
+		ids[i] = t.ID
+	}
+	return ids
 }
 
 // EncodeWithSpans returns the text encoded into a sequence of ids along with their byte spans.
@@ -153,11 +157,3 @@ func (p *Tokenizer) SpecialTokenID(token api.SpecialToken) (int, error) {
 	}
 }
 
-// sliceMap executes the given function sequentially for every element on in, and returns a mapped slice.
-func sliceMap[In, Out any](in []In, fn func(e In) Out) (out []Out) {
-	out = make([]Out, len(in))
-	for ii, e := range in {
-		out[ii] = fn(e)
-	}
-	return
-}
