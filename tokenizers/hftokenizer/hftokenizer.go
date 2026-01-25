@@ -108,7 +108,7 @@ type Decoder struct {
 type Model struct {
 	Type                    string         `json:"type"`
 	Vocab                   map[string]int `json:"-"` // Custom unmarshaling handles both map and array formats
-	Merges                  []string       `json:"merges"`
+	Merges                  []string       `json:"-"` // Custom unmarshaling handles both string and array formats
 	UnkToken                string         `json:"unk_token"`
 	ContinuingSubwordPrefix string         `json:"continuing_subword_prefix"`
 	MaxInputCharsPerWord    int            `json:"max_input_chars_per_word"`
@@ -118,58 +118,83 @@ type Model struct {
 	EndOfWordSuffix         string         `json:"end_of_word_suffix"`
 }
 
-// UnmarshalJSON implements custom unmarshaling to handle both vocab formats:
-// 1. Object format: {"token": id, ...} (WordPiece, BPE)
-// 2. Array format: [["token", score], ...] (Unigram) - ID is the array index
+// UnmarshalJSON implements custom unmarshaling to handle both vocab and merges formats:
+// Vocab formats:
+//  1. Object format: {"token": id, ...} (WordPiece, BPE)
+//  2. Array format: [["token", score], ...] (Unigram) - ID is the array index
+//
+// Merges formats:
+//  1. Array of strings: ["token1 token2", ...] (standard BPE)
+//  2. Array of arrays: [["token1", "token2"], ...] (some models like embeddinggemma)
 func (m *Model) UnmarshalJSON(data []byte) error {
 	// Use an alias to avoid infinite recursion
 	type ModelAlias Model
-	type ModelWithRawVocab struct {
+	type ModelWithRawFields struct {
 		ModelAlias
-		Vocab json.RawMessage `json:"vocab"`
+		Vocab  json.RawMessage `json:"vocab"`
+		Merges json.RawMessage `json:"merges"`
 	}
 
-	var raw ModelWithRawVocab
+	var raw ModelWithRawFields
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
 
-	// Copy all fields except Vocab
+	// Copy all fields except Vocab and Merges
 	*m = Model(raw.ModelAlias)
+	m.Merges = nil // Clear since we'll handle it separately
 
-	// Now handle Vocab which can be either map or array
-	if len(raw.Vocab) == 0 {
+	// Handle Vocab which can be either map or array
+	if len(raw.Vocab) > 0 {
+		// Try to unmarshal as map first (most common format)
+		var vocabMap map[string]int
+		if err := json.Unmarshal(raw.Vocab, &vocabMap); err == nil {
+			m.Vocab = vocabMap
+		} else {
+			// Try array format: [["token", score], ...] (Unigram models)
+			// For Unigram, the second element is a score (log probability), not an ID.
+			// The token's ID is its index/position in the array.
+			var vocabArray [][]interface{}
+			if err := json.Unmarshal(raw.Vocab, &vocabArray); err == nil {
+				m.Vocab = make(map[string]int, len(vocabArray))
+				for idx, pair := range vocabArray {
+					if len(pair) >= 1 {
+						token, ok := pair[0].(string)
+						if ok {
+							// Use array index as the token ID
+							m.Vocab[token] = idx
+						}
+					}
+				}
+			} else {
+				m.Vocab = make(map[string]int)
+			}
+		}
+	} else {
 		m.Vocab = make(map[string]int)
-		return nil
 	}
 
-	// Try to unmarshal as map first (most common format)
-	var vocabMap map[string]int
-	if err := json.Unmarshal(raw.Vocab, &vocabMap); err == nil {
-		m.Vocab = vocabMap
-		return nil
-	}
-
-	// Try array format: [["token", score], ...] (Unigram models)
-	// For Unigram, the second element is a score (log probability), not an ID.
-	// The token's ID is its index/position in the array.
-	var vocabArray [][]interface{}
-	if err := json.Unmarshal(raw.Vocab, &vocabArray); err == nil {
-		m.Vocab = make(map[string]int, len(vocabArray))
-		for idx, pair := range vocabArray {
-			if len(pair) >= 1 {
-				token, ok := pair[0].(string)
-				if ok {
-					// Use array index as the token ID
-					m.Vocab[token] = idx
+	// Handle Merges which can be array of strings or array of arrays
+	if len(raw.Merges) > 0 {
+		// Try array of strings first (standard format): ["a b", "c d", ...]
+		var mergesStrings []string
+		if err := json.Unmarshal(raw.Merges, &mergesStrings); err == nil {
+			m.Merges = mergesStrings
+		} else {
+			// Try array of arrays: [["a", "b"], ["c", "d"], ...]
+			var mergesArrays [][]string
+			if err := json.Unmarshal(raw.Merges, &mergesArrays); err == nil {
+				m.Merges = make([]string, len(mergesArrays))
+				for i, pair := range mergesArrays {
+					if len(pair) == 2 {
+						// Join the pair with a space to match standard format
+						m.Merges[i] = pair[0] + " " + pair[1]
+					}
 				}
 			}
 		}
-		return nil
 	}
 
-	// If neither format works, return empty vocab
-	m.Vocab = make(map[string]int)
 	return nil
 }
 

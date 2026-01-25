@@ -452,6 +452,93 @@ func TestBPE_PartialMerge(t *testing.T) {
 	}
 }
 
+// Test tokenizer.json with BPE merges in array format (like embeddinggemma)
+var testArrayMergesBPETokenizerJSON = []byte(`{
+  "version": "1.0",
+  "truncation": null,
+  "padding": null,
+  "added_tokens": [],
+  "normalizer": null,
+  "pre_tokenizer": {"type": "Whitespace"},
+  "post_processor": null,
+  "decoder": null,
+  "model": {
+    "type": "BPE",
+    "vocab": {
+      "h": 0, "e": 1, "l": 2, "o": 3, "w": 4, "r": 5, "d": 6,
+      "he": 7, "ll": 8, "rl": 9, "hell": 10, "hello": 11,
+      "wo": 12, "worl": 13, "world": 14
+    },
+    "merges": [
+      ["h", "e"],
+      ["l", "l"],
+      ["r", "l"],
+      ["he", "ll"],
+      ["hell", "o"],
+      ["w", "o"],
+      ["wo", "rl"],
+      ["worl", "d"]
+    ]
+  }
+}`)
+
+func TestBPE_ArrayFormatMerges(t *testing.T) {
+	// Test that array-format merges (like embeddinggemma uses) are parsed correctly
+	tok, err := NewFromContent(nil, testArrayMergesBPETokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	if tok.GetTokenizerType() != "BPE" {
+		t.Errorf("expected type BPE, got %s", tok.GetTokenizerType())
+	}
+
+	// Test encoding works
+	tests := []struct {
+		name  string
+		input string
+		want  []int
+	}{
+		{
+			name:  "hello",
+			input: "hello",
+			want:  []int{11}, // fully merged
+		},
+		{
+			name:  "world",
+			input: "world",
+			want:  []int{14}, // fully merged
+		},
+		{
+			name:  "hello world",
+			input: "hello world",
+			want:  []int{11, 14}, // two separate tokens
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tok.Encode(tt.input)
+			if len(got) != len(tt.want) {
+				t.Errorf("Encode(%q) got %v, want %v", tt.input, got, tt.want)
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("Encode(%q) got %v, want %v", tt.input, got, tt.want)
+					return
+				}
+			}
+		})
+	}
+
+	// Test decode works
+	decoded := tok.Decode([]int{11, 14})
+	if decoded != "hello world" {
+		t.Errorf("Decode([11, 14]) = %q, want %q", decoded, "hello world")
+	}
+}
+
 func TestWordPiece_Encode(t *testing.T) {
 	tok, err := NewFromContent(nil, testWordPieceTokenizerJSON)
 	if err != nil {
