@@ -22,6 +22,7 @@ type RepoInfo struct {
 	ModelID     string          `json:"model_id"`
 	Author      string          `json:"author"`
 	CommitHash  string          `json:"sha"`
+	PipelineTag string          `json:"pipeline_tag"`
 	Tags        []string        `json:"tags"`
 	Siblings    []*FileInfo     `json:"siblings"`
 	SafeTensors SafeTensorsInfo `json:"safetensors"`
