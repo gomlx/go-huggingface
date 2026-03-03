@@ -7,24 +7,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/x448/float16"
 )
 
 // float32ToFloat16Bits converts a float32 to its IEEE 754 half-precision representation.
 // Used only in tests to construct known test vectors.
 func float32ToFloat16Bits(f float32) uint16 {
-	bits := math.Float32bits(f)
-	sign := (bits >> 16) & 0x8000
-	exp := int((bits>>23)&0xFF) - 127 + 15
-	mant := bits & 0x7FFFFF
-
-	switch {
-	case exp <= 0:
-		return uint16(sign)
-	case exp >= 31:
-		return uint16(sign | 0x7C00) // Inf
-	default:
-		return uint16(sign | uint32(exp)<<10 | (mant >> 13))
-	}
+	return float16.Fromfloat32(f).Bits()
 }
 
 func leUint16(v uint16) []byte {

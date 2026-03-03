@@ -3,42 +3,42 @@ package gguf
 import (
 	"fmt"
 	"io"
+	"os"
 	"unsafe"
 
 	"github.com/gomlx/gomlx/pkg/core/shapes"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
-	"golang.org/x/exp/mmap"
 )
 
-// MMapReader provides memory-mapped access to tensor data in a GGUF file.
-type MMapReader struct {
-	reader     *mmap.ReaderAt
-	file       *File
+// Reader provides random-access to tensor data in a GGUF file.
+type Reader struct {
+	file       *os.File
+	gguf       *File
 	dataOffset int64
 }
 
-// NewMMapReader opens a memory-mapped reader for the GGUF file.
-func NewMMapReader(path string, file *File) (*MMapReader, error) {
-	reader, err := mmap.Open(path)
+// NewReader opens a reader for the GGUF file at the given path.
+func NewReader(path string, gguf *File) (*Reader, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("gguf: mmap %s: %w", path, err)
+		return nil, fmt.Errorf("gguf: open %s: %w", path, err)
 	}
-	return &MMapReader{
-		reader:     reader,
-		file:       file,
-		dataOffset: file.DataOffset(),
+	return &Reader{
+		file:       f,
+		gguf:       gguf,
+		dataOffset: gguf.DataOffset(),
 	}, nil
 }
 
-// Close closes the underlying memory-mapped file.
-func (mr *MMapReader) Close() error {
-	return mr.reader.Close()
+// Close closes the underlying file.
+func (r *Reader) Close() error {
+	return r.file.Close()
 }
 
 // ReadTensor reads a tensor by name, dequantizing quantized data to Float32.
 // Native types (F32, F16, BF16, I8, etc.) are loaded directly.
-func (mr *MMapReader) ReadTensor(tensorName string) (*tensors.Tensor, error) {
-	info, ok := mr.file.GetTensorInfo(tensorName)
+func (r *Reader) ReadTensor(tensorName string) (*tensors.Tensor, error) {
+	info, ok := r.gguf.GetTensorInfo(tensorName)
 	if !ok {
 		return nil, fmt.Errorf("gguf: tensor %q not found", tensorName)
 	}
@@ -46,13 +46,13 @@ func (mr *MMapReader) ReadTensor(tensorName string) (*tensors.Tensor, error) {
 	dtype, dims := info.GoMLXShape()
 	t := tensors.FromShape(shapes.Make(dtype, dims...))
 
-	tensorOffset := mr.dataOffset + int64(info.Offset)
+	tensorOffset := r.dataOffset + int64(info.Offset)
 
 	if !info.Type.IsQuantized() {
 		// Native type: direct copy into tensor memory.
 		var readErr error
 		t.MutableBytes(func(data []byte) {
-			n, err := mr.reader.ReadAt(data, tensorOffset)
+			n, err := r.file.ReadAt(data, tensorOffset)
 			if err != nil && err != io.EOF {
 				readErr = err
 			} else if n != len(data) {
@@ -73,7 +73,7 @@ func (mr *MMapReader) ReadTensor(tensorName string) (*tensors.Tensor, error) {
 
 	rawSize := info.NumBytes()
 	rawBuf := make([]byte, rawSize)
-	n, err := mr.reader.ReadAt(rawBuf, tensorOffset)
+	n, err := r.file.ReadAt(rawBuf, tensorOffset)
 	if err != nil && err != io.EOF {
 		return nil, fmt.Errorf("gguf: read raw tensor %q: %w", tensorName, err)
 	}
@@ -111,16 +111,16 @@ func (mr *MMapReader) ReadTensor(tensorName string) (*tensors.Tensor, error) {
 }
 
 // ReadTensorRaw reads the raw bytes for a tensor without dequantization.
-func (mr *MMapReader) ReadTensorRaw(tensorName string) ([]byte, *TensorInfo, error) {
-	info, ok := mr.file.GetTensorInfo(tensorName)
+func (r *Reader) ReadTensorRaw(tensorName string) ([]byte, *TensorInfo, error) {
+	info, ok := r.gguf.GetTensorInfo(tensorName)
 	if !ok {
 		return nil, nil, fmt.Errorf("gguf: tensor %q not found", tensorName)
 	}
 
 	rawSize := info.NumBytes()
 	buf := make([]byte, rawSize)
-	tensorOffset := mr.dataOffset + int64(info.Offset)
-	n, err := mr.reader.ReadAt(buf, tensorOffset)
+	tensorOffset := r.dataOffset + int64(info.Offset)
+	n, err := r.file.ReadAt(buf, tensorOffset)
 	if err != nil && err != io.EOF {
 		return nil, nil, fmt.Errorf("gguf: read raw tensor %q: %w", tensorName, err)
 	}

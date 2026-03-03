@@ -196,8 +196,8 @@ func TestMetadataTypes(t *testing.T) {
 
 	kv, ok = f.GetKeyValue("llama.block_count")
 	assert.True(t, ok)
-	assert.Equal(t, uint64(32), kv.Uint())
-	assert.Equal(t, int64(32), kv.Int())
+	assert.Equal(t, uint64(32), kv.Uint64())
+	assert.Equal(t, int64(32), kv.Int64())
 
 	kv, ok = f.GetKeyValue("llama.use_parallel_residual")
 	assert.True(t, ok)

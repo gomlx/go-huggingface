@@ -3,7 +3,8 @@ package gguf
 import (
 	"encoding/binary"
 	"fmt"
-	"math"
+
+	"github.com/x448/float16"
 )
 
 // dequantFunc dequantizes a single block of quantized data.
@@ -42,35 +43,7 @@ func getDequantFunc(t TensorType) (dequantFunc, error) {
 
 // float16ToFloat32 converts a half-precision float (stored as uint16) to float32.
 func float16ToFloat32(bits uint16) float32 {
-	// IEEE 754 half-precision to single-precision conversion.
-	sign := uint32(bits>>15) & 1
-	exp := uint32(bits>>10) & 0x1F
-	mant := uint32(bits) & 0x3FF
-
-	var f uint32
-	switch {
-	case exp == 0:
-		if mant == 0 {
-			// Zero (positive or negative).
-			f = sign << 31
-		} else {
-			// Subnormal: normalize.
-			exp = 1
-			for mant&0x400 == 0 {
-				mant <<= 1
-				exp--
-			}
-			mant &= 0x3FF
-			f = (sign << 31) | ((exp + 127 - 15) << 23) | (mant << 13)
-		}
-	case exp == 0x1F:
-		// Inf or NaN.
-		f = (sign << 31) | (0xFF << 23) | (mant << 13)
-	default:
-		// Normal number.
-		f = (sign << 31) | ((exp + 127 - 15) << 23) | (mant << 13)
-	}
-	return math.Float32frombits(f)
+	return float16.Frombits(bits).Float32()
 }
 
 // dequantQ8_0 dequantizes a Q8_0 block (34 bytes → 32 float32 values).

@@ -15,7 +15,7 @@ type Model struct {
 	Repo *hub.Repo
 	File *File
 	path   string // Local path to the .gguf file.
-	reader *MMapReader
+	reader *Reader
 	mu     sync.Mutex
 }
 
@@ -84,7 +84,7 @@ func (m *Model) Load() error {
 	return nil
 }
 
-// Close releases resources held by the Model, including any cached mmap reader.
+// Close releases resources held by the Model, including any cached reader.
 func (m *Model) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -96,12 +96,12 @@ func (m *Model) Close() error {
 	return nil
 }
 
-// getReader returns a cached MMapReader, creating one if necessary.
-func (m *Model) getReader() (*MMapReader, error) {
+// getReader returns a cached Reader, creating one if necessary.
+func (m *Model) getReader() (*Reader, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.reader == nil {
-		r, err := NewMMapReader(m.path, m.File)
+		r, err := NewReader(m.path, m.File)
 		if err != nil {
 			return nil, err
 		}

@@ -51,9 +51,9 @@ func (v Value) Strings() []string {
 	return nil
 }
 
-// Int returns the value as an int64. Works for any signed or unsigned integer type.
+// Int64 returns the value as an int64. Works for any signed or unsigned integer type.
 // Returns 0 if the value is not an integer.
-func (v Value) Int() int64 {
+func (v Value) Int64() int64 {
 	switch n := v.data.(type) {
 	case int8:
 		return int64(n)
@@ -76,9 +76,9 @@ func (v Value) Int() int64 {
 	}
 }
 
-// Uint returns the value as a uint64. Works for any unsigned or signed integer type.
+// Uint64 returns the value as a uint64. Works for any unsigned or signed integer type.
 // Returns 0 if the value is not an integer.
-func (v Value) Uint() uint64 {
+func (v Value) Uint64() uint64 {
 	switch n := v.data.(type) {
 	case uint8:
 		return uint64(n)
@@ -101,9 +101,9 @@ func (v Value) Uint() uint64 {
 	}
 }
 
-// Float returns the value as a float64. Works for float32 and float64.
+// Float64 returns the value as a float64. Works for float32 and float64.
 // Returns 0 if the value is not a float.
-func (v Value) Float() float64 {
+func (v Value) Float64() float64 {
 	switch n := v.data.(type) {
 	case float32:
 		return float64(n)
@@ -114,8 +114,8 @@ func (v Value) Float() float64 {
 	}
 }
 
-// Floats returns the value as a float64 slice, or nil if it is not one.
-func (v Value) Floats() []float64 {
+// Float64s returns the value as a float64 slice, or nil if it is not one.
+func (v Value) Float64s() []float64 {
 	switch s := v.data.(type) {
 	case []float64:
 		return s
@@ -136,8 +136,8 @@ func (v Value) Bool() bool {
 	return b
 }
 
-// Ints returns the value as an int64 slice, or nil if it is not an integer array.
-func (v Value) Ints() []int64 {
+// Int64s returns the value as an int64 slice, or nil if it is not an integer array.
+func (v Value) Int64s() []int64 {
 	switch s := v.data.(type) {
 	case []int64:
 		return s
@@ -188,8 +188,8 @@ func (v Value) Ints() []int64 {
 	}
 }
 
-// Uints returns the value as a uint64 slice, or nil if it is not an integer array.
-func (v Value) Uints() []uint64 {
+// Uint64s returns the value as a uint64 slice, or nil if it is not an integer array.
+func (v Value) Uint64s() []uint64 {
 	switch s := v.data.(type) {
 	case []uint64:
 		return s

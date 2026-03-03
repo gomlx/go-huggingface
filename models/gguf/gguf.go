@@ -115,7 +115,7 @@ func Open(path string) (*File, error) {
 	// Compute aligned data offset.
 	file.Alignment = defaultAlignment
 	if kv, ok := file.getKV("general.alignment"); ok {
-		if a := kv.Uint(); a > 0 {
+		if a := kv.Uint64(); a > 0 {
 			file.Alignment = a
 		}
 	}
