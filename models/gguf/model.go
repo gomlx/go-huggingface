@@ -3,7 +3,6 @@ package gguf
 import (
 	"fmt"
 	"path/filepath"
-	"slices"
 	"sync"
 
 	"github.com/gomlx/go-huggingface/hub"
@@ -12,9 +11,8 @@ import (
 
 // Model represents a GGUF model, optionally backed by a HuggingFace repo.
 type Model struct {
-	Repo *hub.Repo
-	File *File
-	path   string // Local path to the .gguf file.
+	Repo   *hub.Repo
+	File   *File
 	reader *Reader
 	mu     sync.Mutex
 }
@@ -40,7 +38,7 @@ func NewFromFile(path string) (*Model, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Model{File: f, path: path}, nil
+	return &Model{File: f}, nil
 }
 
 // NewEmpty creates an empty Model for manual control. Call Load() to download and parse.
@@ -80,7 +78,6 @@ func (m *Model) Load() error {
 	}
 
 	m.File = f
-	m.path = localPath
 	return nil
 }
 
@@ -101,7 +98,7 @@ func (m *Model) getReader() (*Reader, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.reader == nil {
-		r, err := NewReader(m.path, m.File)
+		r, err := NewReader(m.File)
 		if err != nil {
 			return nil, err
 		}
@@ -167,20 +164,8 @@ func (m *Model) IterTensors() func(yield func(TensorAndName, error) bool) {
 			return
 		}
 
-		// Sort tensors by offset for sequential reading.
-		sorted := make([]TensorInfo, len(m.File.TensorInfos))
-		copy(sorted, m.File.TensorInfos)
-		slices.SortFunc(sorted, func(a, b TensorInfo) int {
-			if a.Offset < b.Offset {
-				return -1
-			}
-			if a.Offset > b.Offset {
-				return 1
-			}
-			return 0
-		})
-
-		for _, info := range sorted {
+		// TensorInfos are pre-sorted by offset in Open() for sequential I/O.
+		for _, info := range m.File.TensorInfos {
 			t, err := reader.ReadTensor(info.Name)
 			if err != nil {
 				yield(TensorAndName{}, err)

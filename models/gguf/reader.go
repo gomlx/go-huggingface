@@ -12,22 +12,17 @@ import (
 
 // Reader provides random-access to tensor data in a GGUF file.
 type Reader struct {
-	file       *os.File
-	gguf       *File
-	dataOffset int64
+	file *os.File
+	gguf *File
 }
 
-// NewReader opens a reader for the GGUF file at the given path.
-func NewReader(path string, gguf *File) (*Reader, error) {
-	f, err := os.Open(path)
+// NewReader opens a reader for the given parsed GGUF file.
+func NewReader(gguf *File) (*Reader, error) {
+	f, err := os.Open(gguf.Path())
 	if err != nil {
-		return nil, fmt.Errorf("gguf: open %s: %w", path, err)
+		return nil, fmt.Errorf("gguf: open %s: %w", gguf.Path(), err)
 	}
-	return &Reader{
-		file:       f,
-		gguf:       gguf,
-		dataOffset: gguf.DataOffset(),
-	}, nil
+	return &Reader{file: f, gguf: gguf}, nil
 }
 
 // Close closes the underlying file.
@@ -46,7 +41,7 @@ func (r *Reader) ReadTensor(tensorName string) (*tensors.Tensor, error) {
 	dtype, dims := info.GoMLXShape()
 	t := tensors.FromShape(shapes.Make(dtype, dims...))
 
-	tensorOffset := r.dataOffset + int64(info.Offset)
+	tensorOffset := r.gguf.DataOffset() + int64(info.Offset)
 
 	if !info.Type.IsQuantized() {
 		// Native type: direct copy into tensor memory.
@@ -119,7 +114,7 @@ func (r *Reader) ReadTensorRaw(tensorName string) ([]byte, *TensorInfo, error) {
 
 	rawSize := info.NumBytes()
 	buf := make([]byte, rawSize)
-	tensorOffset := r.dataOffset + int64(info.Offset)
+	tensorOffset := r.gguf.DataOffset() + int64(info.Offset)
 	n, err := r.file.ReadAt(buf, tensorOffset)
 	if err != nil && err != io.EOF {
 		return nil, nil, fmt.Errorf("gguf: read raw tensor %q: %w", tensorName, err)
@@ -133,6 +128,11 @@ func (r *Reader) ReadTensorRaw(tensorName string) ([]byte, *TensorInfo, error) {
 
 // bytesToFloat32 reinterprets a byte slice as a float32 slice.
 // The byte slice length must be a multiple of 4.
+//
+// Safety: This relies on Go's heap allocation guarantee of at least 8-byte alignment
+// for the backing array. The caller (tensors.MutableBytes) provides heap-allocated memory.
+// GGUF is a little-endian format; this reinterpretation is only correct on little-endian
+// architectures (x86-64, arm64), which covers all platforms Go currently targets.
 func bytesToFloat32(b []byte) []float32 {
 	if len(b) == 0 {
 		return nil

@@ -41,16 +41,17 @@ func getDequantFunc(t TensorType) (dequantFunc, error) {
 	}
 }
 
-// float16ToFloat32 converts a half-precision float (stored as uint16) to float32.
-func float16ToFloat32(bits uint16) float32 {
-	return float16.Frombits(bits).Float32()
+// f16 reads a little-endian IEEE 754 half-precision float from a 2-byte slice
+// and returns it as float32. Used throughout dequant functions for scale/min reads.
+func f16(src []byte) float32 {
+	return float16.Frombits(binary.LittleEndian.Uint16(src)).Float32()
 }
 
 // dequantQ8_0 dequantizes a Q8_0 block (34 bytes → 32 float32 values).
 // Format: f16 scale (2 bytes) + 32 int8 quant values.
 // Math: dst[i] = scale * int8(qs[i])
 func dequantQ8_0(src []byte, dst []float32) {
-	d := float16ToFloat32(binary.LittleEndian.Uint16(src[0:2]))
+	d := f16(src[0:2])
 	for j := range 32 {
 		dst[j] = d * float32(int8(src[2+j]))
 	}
@@ -60,7 +61,7 @@ func dequantQ8_0(src []byte, dst []float32) {
 // Format: f16 scale (2 bytes) + 16 bytes of packed nibbles.
 // Math: low nibble → first 16 values, high nibble → last 16, each offset by -8.
 func dequantQ4_0(src []byte, dst []float32) {
-	d := float16ToFloat32(binary.LittleEndian.Uint16(src[0:2]))
+	d := f16(src[0:2])
 	qs := src[2:]
 	for j := range 16 {
 		x0 := int(qs[j]&0x0F) - 8
@@ -74,8 +75,8 @@ func dequantQ4_0(src []byte, dst []float32) {
 // Format: f16 scale (2) + f16 min (2) + 16 bytes of packed nibbles.
 // Math: dst[i] = nibble * scale + min (asymmetric, no offset).
 func dequantQ4_1(src []byte, dst []float32) {
-	d := float16ToFloat32(binary.LittleEndian.Uint16(src[0:2]))
-	m := float16ToFloat32(binary.LittleEndian.Uint16(src[2:4]))
+	d := f16(src[0:2])
+	m := f16(src[2:4])
 	qs := src[4:]
 	for j := range 16 {
 		x0 := int(qs[j] & 0x0F)
@@ -89,7 +90,7 @@ func dequantQ4_1(src []byte, dst []float32) {
 // Format: f16 scale (2) + 4 bytes high bits (qh) + 16 bytes nibbles (qs).
 // Math: 5-bit value = low_nibble | (high_bit << 4), offset by -16.
 func dequantQ5_0(src []byte, dst []float32) {
-	d := float16ToFloat32(binary.LittleEndian.Uint16(src[0:2]))
+	d := f16(src[0:2])
 	qh := binary.LittleEndian.Uint32(src[2:6])
 	qs := src[6:]
 	for j := range 16 {
@@ -106,8 +107,8 @@ func dequantQ5_0(src []byte, dst []float32) {
 // Format: f16 scale (2) + f16 min (2) + 4 bytes high bits (qh) + 16 bytes nibbles (qs).
 // Math: 5-bit value = low_nibble | (high_bit << 4), then * scale + min.
 func dequantQ5_1(src []byte, dst []float32) {
-	d := float16ToFloat32(binary.LittleEndian.Uint16(src[0:2]))
-	m := float16ToFloat32(binary.LittleEndian.Uint16(src[2:4]))
+	d := f16(src[0:2])
+	m := f16(src[2:4])
 	qh := binary.LittleEndian.Uint32(src[4:8])
 	qs := src[8:]
 	for j := range 16 {
@@ -126,8 +127,8 @@ func dequantQ5_1(src []byte, dst []float32) {
 func dequantQ2_K(src []byte, dst []float32) {
 	scales := src[0:16]
 	qs := src[16:80]
-	d := float16ToFloat32(binary.LittleEndian.Uint16(src[80:82]))
-	dmin := float16ToFloat32(binary.LittleEndian.Uint16(src[82:84]))
+	d := f16(src[80:82])
+	dmin := f16(src[82:84])
 
 	var idx int
 	var is int
@@ -164,7 +165,7 @@ func dequantQ3_K(src []byte, dst []float32) {
 	hmask := src[0:32]
 	qs := src[32:96]
 	scaleBytes := src[96:108]
-	dAll := float16ToFloat32(binary.LittleEndian.Uint16(src[108:110]))
+	dAll := f16(src[108:110])
 
 	// Unpack 6-bit scales from 12-byte packed representation into 16 int8 values.
 	var aux [4]uint32
@@ -243,8 +244,8 @@ func getScaleMinK4(j int, scales []byte) (sc, m uint8) {
 // Format: f16 d (2) + f16 dmin (2) + 12 bytes scales + 128 bytes nibbles.
 // 8 sub-blocks of 32 values, each with 6-bit packed scale and min.
 func dequantQ4_K(src []byte, dst []float32) {
-	d := float16ToFloat32(binary.LittleEndian.Uint16(src[0:2]))
-	dmin := float16ToFloat32(binary.LittleEndian.Uint16(src[2:4]))
+	d := f16(src[0:2])
+	dmin := f16(src[2:4])
 	scales := src[4:16]
 	qs := src[16:]
 
@@ -276,8 +277,8 @@ func dequantQ4_K(src []byte, dst []float32) {
 // Format: f16 d (2) + f16 dmin (2) + 12 bytes scales + 32 bytes qh + 128 bytes qs.
 // Same as Q4_K but with a 5th bit per value stored in qh.
 func dequantQ5_K(src []byte, dst []float32) {
-	d := float16ToFloat32(binary.LittleEndian.Uint16(src[0:2]))
-	dmin := float16ToFloat32(binary.LittleEndian.Uint16(src[2:4]))
+	d := f16(src[0:2])
+	dmin := f16(src[2:4])
 	scales := src[4:16]
 	qh := src[16:48]
 	qs := src[48:]
@@ -326,7 +327,7 @@ func dequantQ6_K(src []byte, dst []float32) {
 	ql := src[0:128]
 	qh := src[128:192]
 	sc := src[192:208]
-	d := float16ToFloat32(binary.LittleEndian.Uint16(src[208:210]))
+	d := f16(src[208:210])
 
 	var idx int
 	var qlOff, qhOff, scOff int

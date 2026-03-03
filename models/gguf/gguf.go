@@ -1,16 +1,23 @@
 package gguf
 
 import (
+	"bufio"
+	"cmp"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
+	"slices"
 )
 
 const (
 	ggufMagic           = "GGUF"
 	defaultAlignment    = 32
 	minSupportedVersion = 2
+
+	// Well-known GGUF metadata keys from the specification.
+	KeyGeneralArchitecture = "general.architecture"
+	KeyGeneralAlignment    = "general.alignment"
 )
 
 // Sanity limits to prevent excessive allocations from malicious files.
@@ -48,7 +55,7 @@ func Open(path string) (*File, error) {
 	defer f.Close()
 
 	file := &File{path: path}
-	r := &countingReader{r: f}
+	r := &countingReader{r: bufio.NewReaderSize(f, 64*1024)}
 
 	// Read and validate magic number.
 	var magic [4]byte
@@ -112,9 +119,14 @@ func Open(path string) (*File, error) {
 		file.tensorByName[file.TensorInfos[i].Name] = &file.TensorInfos[i]
 	}
 
+	// Sort tensors by offset for optimal sequential I/O.
+	slices.SortFunc(file.TensorInfos, func(a, b TensorInfo) int {
+		return cmp.Compare(a.Offset, b.Offset)
+	})
+
 	// Compute aligned data offset.
 	file.Alignment = defaultAlignment
-	if kv, ok := file.getKV("general.alignment"); ok {
+	if kv, ok := file.GetKeyValue(KeyGeneralAlignment); ok {
 		if a := kv.Uint64(); a > 0 {
 			file.Alignment = a
 		}
@@ -138,10 +150,6 @@ func (f *File) DataOffset() int64 {
 
 // GetKeyValue looks up a metadata key-value pair by its key.
 func (f *File) GetKeyValue(key string) (KeyValue, bool) {
-	return f.getKV(key)
-}
-
-func (f *File) getKV(key string) (KeyValue, bool) {
 	kv, ok := f.kvByKey[key]
 	if !ok {
 		return KeyValue{}, false
@@ -161,7 +169,7 @@ func (f *File) GetTensorInfo(name string) (TensorInfo, bool) {
 // Architecture returns the model architecture string (e.g., "llama", "gemma"),
 // or "" if the metadata key "general.architecture" is not present.
 func (f *File) Architecture() string {
-	kv, ok := f.getKV("general.architecture")
+	kv, ok := f.GetKeyValue(KeyGeneralArchitecture)
 	if !ok {
 		return ""
 	}
@@ -330,13 +338,11 @@ func readArray(r io.Reader) (Value, error) {
 	}
 }
 
-// readArrayOf reads a typed numeric array using generics.
+// readArrayOf reads a typed numeric array in a single binary.Read call.
 func readArrayOf[T any](r io.Reader, count uint64) (Value, error) {
 	vals := make([]T, count)
-	for i := range count {
-		if err := binary.Read(r, binary.LittleEndian, &vals[i]); err != nil {
-			return Value{}, fmt.Errorf("read array element %d: %w", i, err)
-		}
+	if err := binary.Read(r, binary.LittleEndian, vals); err != nil {
+		return Value{}, fmt.Errorf("read array (%d elements): %w", count, err)
 	}
 	return Value{data: vals}, nil
 }

@@ -29,7 +29,7 @@ func TestReadTensorF32(t *testing.T) {
 	f, err := Open(path)
 	require.NoError(t, err)
 
-	reader, err := NewReader(path, f)
+	reader, err := NewReader(f)
 	require.NoError(t, err)
 	defer reader.Close()
 
@@ -69,7 +69,7 @@ func TestReadTensorF32_2D(t *testing.T) {
 	f, err := Open(path)
 	require.NoError(t, err)
 
-	reader, err := NewReader(path, f)
+	reader, err := NewReader(f)
 	require.NoError(t, err)
 	defer reader.Close()
 
@@ -90,7 +90,7 @@ func TestReadTensorNotFound(t *testing.T) {
 	f, err := Open(path)
 	require.NoError(t, err)
 
-	reader, err := NewReader(path, f)
+	reader, err := NewReader(f)
 	require.NoError(t, err)
 	defer reader.Close()
 
@@ -117,7 +117,7 @@ func TestReadTensorRaw(t *testing.T) {
 	f, err := Open(path)
 	require.NoError(t, err)
 
-	reader, err := NewReader(path, f)
+	reader, err := NewReader(f)
 	require.NoError(t, err)
 	defer reader.Close()
 
@@ -149,7 +149,7 @@ func TestReadTensorQ8_0(t *testing.T) {
 	f, err := Open(path)
 	require.NoError(t, err)
 
-	reader, err := NewReader(path, f)
+	reader, err := NewReader(f)
 	require.NoError(t, err)
 	defer reader.Close()
 
@@ -191,7 +191,7 @@ func TestReadMultipleTensors(t *testing.T) {
 	f, err := Open(path)
 	require.NoError(t, err)
 
-	reader, err := NewReader(path, f)
+	reader, err := NewReader(f)
 	require.NoError(t, err)
 	defer reader.Close()
 

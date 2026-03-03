@@ -16,13 +16,7 @@ func float32ToFloat16Bits(f float32) uint16 {
 	return float16.Fromfloat32(f).Bits()
 }
 
-func leUint16(v uint16) []byte {
-	b := make([]byte, 2)
-	binary.LittleEndian.PutUint16(b, v)
-	return b
-}
-
-func TestFloat16ToFloat32(t *testing.T) {
+func TestF16(t *testing.T) {
 	tests := []struct {
 		name string
 		bits uint16
@@ -40,7 +34,9 @@ func TestFloat16ToFloat32(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := float16ToFloat32(tt.bits)
+			buf := make([]byte, 2)
+			binary.LittleEndian.PutUint16(buf, tt.bits)
+			got := f16(buf)
 			if math.IsInf(float64(tt.want), 0) {
 				assert.True(t, math.IsInf(float64(got), int(math.Copysign(1, float64(tt.want)))))
 			} else {
@@ -50,12 +46,14 @@ func TestFloat16ToFloat32(t *testing.T) {
 	}
 }
 
-func TestFloat16Roundtrip(t *testing.T) {
-	// Verify our test helper produces correct fp16 bits that round-trip through dequant.
+func TestF16Roundtrip(t *testing.T) {
+	// Verify our test helper produces correct fp16 bits that round-trip through f16.
 	values := []float32{0.0, 1.0, -1.0, 0.5, 2.0, 0.25, 100.0}
 	for _, v := range values {
 		bits := float32ToFloat16Bits(v)
-		got := float16ToFloat32(bits)
+		buf := make([]byte, 2)
+		binary.LittleEndian.PutUint16(buf, bits)
+		got := f16(buf)
 		assert.InDelta(t, v, got, float64(math.Abs(float64(v))*0.001+1e-6),
 			"roundtrip failed for %v (bits=0x%04X, got=%v)", v, bits, got)
 	}

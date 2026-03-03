@@ -24,7 +24,6 @@ func (b *ggufBuilder) writeUint8(v uint8)   { b.buf = append(b.buf, v) }
 func (b *ggufBuilder) writeUint16(v uint16) { b.buf = binary.LittleEndian.AppendUint16(b.buf, v) }
 func (b *ggufBuilder) writeUint32(v uint32) { b.buf = binary.LittleEndian.AppendUint32(b.buf, v) }
 func (b *ggufBuilder) writeUint64(v uint64) { b.buf = binary.LittleEndian.AppendUint64(b.buf, v) }
-func (b *ggufBuilder) writeInt32(v int32)   { b.writeUint32(uint32(v)) }
 func (b *ggufBuilder) writeFloat32(v float32) {
 	b.writeUint32(math.Float32bits(v))
 }
@@ -46,18 +45,6 @@ func (b *ggufBuilder) writeKVUint32(key string, value uint32) {
 	b.writeUint32(value)
 }
 
-func (b *ggufBuilder) writeKVUint64(key string, value uint64) {
-	b.writeString(key)
-	b.writeUint32(uint32(valueTypeUint64))
-	b.writeUint64(value)
-}
-
-func (b *ggufBuilder) writeKVFloat32(key string, value float32) {
-	b.writeString(key)
-	b.writeUint32(uint32(valueTypeFloat32))
-	b.writeFloat32(value)
-}
-
 func (b *ggufBuilder) writeKVBool(key string, value bool) {
 	b.writeString(key)
 	b.writeUint32(uint32(valueTypeBool))
@@ -75,16 +62,6 @@ func (b *ggufBuilder) writeKVStringArray(key string, values []string) {
 	b.writeUint64(uint64(len(values)))
 	for _, v := range values {
 		b.writeString(v)
-	}
-}
-
-func (b *ggufBuilder) writeKVInt32Array(key string, values []int32) {
-	b.writeString(key)
-	b.writeUint32(uint32(valueTypeArray))
-	b.writeUint32(uint32(valueTypeInt32))
-	b.writeUint64(uint64(len(values)))
-	for _, v := range values {
-		b.writeInt32(v)
 	}
 }
 
