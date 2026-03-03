@@ -1,13 +1,10 @@
 package gguf
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
-	"math"
 	"unsafe"
 
-	"github.com/gomlx/gomlx/pkg/core/dtypes"
 	"github.com/gomlx/gomlx/pkg/core/shapes"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"golang.org/x/exp/mmap"
@@ -55,9 +52,11 @@ func (mr *MMapReader) ReadTensor(tensorName string) (*tensors.Tensor, error) {
 		// Native type: direct copy into tensor memory.
 		var readErr error
 		t.MutableBytes(func(data []byte) {
-			_, readErr = mr.reader.ReadAt(data, tensorOffset)
-			if readErr == io.EOF {
-				readErr = nil
+			n, err := mr.reader.ReadAt(data, tensorOffset)
+			if err != nil && err != io.EOF {
+				readErr = err
+			} else if n != len(data) {
+				readErr = fmt.Errorf("short read: got %d bytes, expected %d", n, len(data))
 			}
 		})
 		if readErr != nil {
@@ -74,8 +73,12 @@ func (mr *MMapReader) ReadTensor(tensorName string) (*tensors.Tensor, error) {
 
 	rawSize := info.NumBytes()
 	rawBuf := make([]byte, rawSize)
-	if _, err := mr.reader.ReadAt(rawBuf, tensorOffset); err != nil && err != io.EOF {
+	n, err := mr.reader.ReadAt(rawBuf, tensorOffset)
+	if err != nil && err != io.EOF {
 		return nil, fmt.Errorf("gguf: read raw tensor %q: %w", tensorName, err)
+	}
+	if n != len(rawBuf) {
+		return nil, fmt.Errorf("gguf: read raw tensor %q: short read: got %d bytes, expected %d", tensorName, n, len(rawBuf))
 	}
 
 	blockSize := info.Type.BlockSize()
@@ -117,8 +120,12 @@ func (mr *MMapReader) ReadTensorRaw(tensorName string) ([]byte, *TensorInfo, err
 	rawSize := info.NumBytes()
 	buf := make([]byte, rawSize)
 	tensorOffset := mr.dataOffset + int64(info.Offset)
-	if _, err := mr.reader.ReadAt(buf, tensorOffset); err != nil && err != io.EOF {
+	n, err := mr.reader.ReadAt(buf, tensorOffset)
+	if err != nil && err != io.EOF {
 		return nil, nil, fmt.Errorf("gguf: read raw tensor %q: %w", tensorName, err)
+	}
+	if n != len(buf) {
+		return nil, nil, fmt.Errorf("gguf: read raw tensor %q: short read: got %d bytes, expected %d", tensorName, n, len(buf))
 	}
 
 	return buf, &info, nil
@@ -131,39 +138,4 @@ func bytesToFloat32(b []byte) []float32 {
 		return nil
 	}
 	return unsafe.Slice((*float32)(unsafe.Pointer(&b[0])), len(b)/4)
-}
-
-// nativeTensorTypeToDType maps non-quantized GGUF tensor types to GoMLX dtypes.
-// Returns dtypes.InvalidDType for quantized types.
-func nativeTensorTypeToDType(t TensorType) dtypes.DType {
-	switch t {
-	case TensorTypeF32:
-		return dtypes.Float32
-	case TensorTypeF16:
-		return dtypes.Float16
-	case TensorTypeBF16:
-		return dtypes.BFloat16
-	case TensorTypeF64:
-		return dtypes.Float64
-	case TensorTypeI8:
-		return dtypes.Int8
-	case TensorTypeI16:
-		return dtypes.Int16
-	case TensorTypeI32:
-		return dtypes.Int32
-	case TensorTypeI64:
-		return dtypes.Int64
-	default:
-		return dtypes.InvalidDType
-	}
-}
-
-// bfloat16ToFloat32Slice converts a []byte of BF16 values to []float32 in place.
-// This is unused currently (BF16 is handled natively by GoMLX) but available
-// for users who need explicit conversion.
-func bfloat16ToFloat32Slice(src []byte, dst []float32) {
-	for i := range dst {
-		bits := binary.LittleEndian.Uint16(src[i*2 : i*2+2])
-		dst[i] = math.Float32frombits(uint32(bits) << 16)
-	}
 }

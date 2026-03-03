@@ -8,9 +8,17 @@ import (
 )
 
 const (
-	ggufMagic          = "GGUF"
-	defaultAlignment   = 32
+	ggufMagic           = "GGUF"
+	defaultAlignment    = 32
 	minSupportedVersion = 2
+)
+
+// Sanity limits to prevent excessive allocations from malicious files.
+const (
+	maxKVCount     = 1 << 16 // 65536 metadata pairs.
+	maxTensorCount = 1 << 20 // ~1 million tensors.
+	maxArrayCount  = 1 << 24 // ~16 million array elements.
+	maxTensorDims  = 8       // Maximum number of tensor dimensions.
 )
 
 // File represents a parsed GGUF file. Create one with Open.
@@ -67,6 +75,12 @@ func Open(path string) (*File, error) {
 	if err := binary.Read(r, binary.LittleEndian, &kvCount); err != nil {
 		return nil, fmt.Errorf("gguf: read kv count: %w", err)
 	}
+	if tensorCount > maxTensorCount {
+		return nil, fmt.Errorf("gguf: tensor count %d exceeds limit %d", tensorCount, maxTensorCount)
+	}
+	if kvCount > maxKVCount {
+		return nil, fmt.Errorf("gguf: kv count %d exceeds limit %d", kvCount, maxKVCount)
+	}
 
 	// Read all key-value pairs.
 	file.KeyValues = make([]KeyValue, 0, kvCount)
@@ -88,6 +102,16 @@ func Open(path string) (*File, error) {
 		file.TensorInfos = append(file.TensorInfos, ti)
 	}
 
+	// Build indexes (needed before alignment lookup).
+	file.kvByKey = make(map[string]*KeyValue, len(file.KeyValues))
+	for i := range file.KeyValues {
+		file.kvByKey[file.KeyValues[i].Key] = &file.KeyValues[i]
+	}
+	file.tensorByName = make(map[string]*TensorInfo, len(file.TensorInfos))
+	for i := range file.TensorInfos {
+		file.tensorByName[file.TensorInfos[i].Name] = &file.TensorInfos[i]
+	}
+
 	// Compute aligned data offset.
 	file.Alignment = defaultAlignment
 	if kv, ok := file.getKV("general.alignment"); ok {
@@ -98,16 +122,6 @@ func Open(path string) (*File, error) {
 	offset := uint64(r.n)
 	alignment := file.Alignment
 	file.dataOffset = int64(offset + (alignment-offset%alignment)%alignment)
-
-	// Build indexes.
-	file.kvByKey = make(map[string]*KeyValue, len(file.KeyValues))
-	for i := range file.KeyValues {
-		file.kvByKey[file.KeyValues[i].Key] = &file.KeyValues[i]
-	}
-	file.tensorByName = make(map[string]*TensorInfo, len(file.TensorInfos))
-	for i := range file.TensorInfos {
-		file.tensorByName[file.TensorInfos[i].Name] = &file.TensorInfos[i]
-	}
 
 	return file, nil
 }
@@ -282,6 +296,9 @@ func readArray(r io.Reader) (Value, error) {
 	if err := binary.Read(r, binary.LittleEndian, &count); err != nil {
 		return Value{}, fmt.Errorf("read array count: %w", err)
 	}
+	if count > maxArrayCount {
+		return Value{}, fmt.Errorf("array count %d exceeds limit %d", count, maxArrayCount)
+	}
 
 	switch ggufValueType(elemType) {
 	case valueTypeUint8:
@@ -360,6 +377,9 @@ func readTensorInfo(r io.Reader) (TensorInfo, error) {
 	var nDims uint32
 	if err := binary.Read(r, binary.LittleEndian, &nDims); err != nil {
 		return TensorInfo{}, fmt.Errorf("read tensor dims count for %q: %w", name, err)
+	}
+	if nDims > maxTensorDims {
+		return TensorInfo{}, fmt.Errorf("tensor %q has %d dimensions, exceeds limit %d", name, nDims, maxTensorDims)
 	}
 
 	shape := make([]uint64, nDims)

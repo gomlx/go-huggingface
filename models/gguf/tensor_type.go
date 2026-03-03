@@ -28,6 +28,7 @@ package gguf
 
 import (
 	"fmt"
+	"math"
 	"slices"
 
 	"github.com/gomlx/gomlx/pkg/core/dtypes"
@@ -284,6 +285,7 @@ func (ti *TensorInfo) NumElements() uint64 {
 }
 
 // NumBytes returns the total number of bytes the tensor data occupies in the file.
+// Returns 0 if the result would overflow int64.
 func (ti *TensorInfo) NumBytes() int64 {
 	bs := ti.Type.BlockSize()
 	ts := ti.Type.TypeSize()
@@ -292,6 +294,9 @@ func (ti *TensorInfo) NumBytes() int64 {
 	}
 	nElements := ti.NumElements()
 	nBlocks := nElements / uint64(bs)
+	if nBlocks > uint64(math.MaxInt64)/uint64(ts) {
+		return 0
+	}
 	return int64(nBlocks) * int64(ts)
 }
 

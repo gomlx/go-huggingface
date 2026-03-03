@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"sync"
 
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
@@ -13,7 +14,9 @@ import (
 type Model struct {
 	Repo *hub.Repo
 	File *File
-	path string // Local path to the .gguf file.
+	path   string // Local path to the .gguf file.
+	reader *MMapReader
+	mu     sync.Mutex
 }
 
 // TensorAndName holds a tensor name and its GoMLX tensor data.
@@ -81,6 +84,32 @@ func (m *Model) Load() error {
 	return nil
 }
 
+// Close releases resources held by the Model, including any cached mmap reader.
+func (m *Model) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.reader != nil {
+		err := m.reader.Close()
+		m.reader = nil
+		return err
+	}
+	return nil
+}
+
+// getReader returns a cached MMapReader, creating one if necessary.
+func (m *Model) getReader() (*MMapReader, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.reader == nil {
+		r, err := NewMMapReader(m.path, m.File)
+		if err != nil {
+			return nil, err
+		}
+		m.reader = r
+	}
+	return m.reader, nil
+}
+
 // ListTensorNames returns all tensor names in the model.
 func (m *Model) ListTensorNames() []string {
 	if m.File == nil {
@@ -111,11 +140,10 @@ func (m *Model) GetTensor(tensorName string) (*TensorAndName, error) {
 		return nil, fmt.Errorf("gguf: model not loaded, call Load() first")
 	}
 
-	reader, err := NewMMapReader(m.path, m.File)
+	reader, err := m.getReader()
 	if err != nil {
 		return nil, err
 	}
-	defer reader.Close()
 
 	t, err := reader.ReadTensor(tensorName)
 	if err != nil {
@@ -133,12 +161,11 @@ func (m *Model) IterTensors() func(yield func(TensorAndName, error) bool) {
 			return
 		}
 
-		reader, err := NewMMapReader(m.path, m.File)
+		reader, err := m.getReader()
 		if err != nil {
 			yield(TensorAndName{}, err)
 			return
 		}
-		defer reader.Close()
 
 		// Sort tensors by offset for sequential reading.
 		sorted := make([]TensorInfo, len(m.File.TensorInfos))
@@ -174,6 +201,7 @@ func IterTensorsFromRepo(repo *hub.Repo) func(yield func(TensorAndName, error) b
 			yield(TensorAndName{}, err)
 			return
 		}
+		defer m.Close()
 		for tn, err := range m.IterTensors() {
 			if err != nil {
 				yield(TensorAndName{}, err)
