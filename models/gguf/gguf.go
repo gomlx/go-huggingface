@@ -349,12 +349,13 @@ func readArrayOf[T any](r io.Reader, count uint64) (Value, error) {
 
 // readBoolArray reads an array of bools (each stored as a single byte).
 func readBoolArray(r io.Reader, count uint64) (Value, error) {
+	buf := make([]byte, count)
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return Value{}, fmt.Errorf("read bool array: %w", err)
+	}
+
 	vals := make([]bool, count)
-	for i := range count {
-		var b uint8
-		if err := binary.Read(r, binary.LittleEndian, &b); err != nil {
-			return Value{}, fmt.Errorf("read bool array element %d: %w", i, err)
-		}
+	for i, b := range buf {
 		vals[i] = b != 0
 	}
 	return Value{data: vals}, nil
