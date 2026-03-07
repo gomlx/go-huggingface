@@ -1,7 +1,6 @@
 package gguf
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"unsafe"
@@ -21,7 +20,7 @@ type Reader struct {
 func NewReader(gguf *File) (*Reader, error) {
 	f, err := os.Open(gguf.Path())
 	if err != nil {
-		return nil, fmt.Errorf("gguf: open %s: %w", gguf.Path(), err)
+		return nil, errors.Wrapf(err, "gguf: open %s", gguf.Path())
 	}
 	return &Reader{file: f, gguf: gguf}, nil
 }
@@ -122,7 +121,7 @@ func (r *Reader) readQuantizedTensor(info TensorInfo, tensorOffset int64, output
 func (r *Reader) ReadTensorRaw(tensorName string) ([]byte, *TensorInfo, error) {
 	info, ok := r.gguf.GetTensorInfo(tensorName)
 	if !ok {
-		return nil, nil, fmt.Errorf("gguf: tensor %q not found", tensorName)
+		return nil, nil, errors.Errorf("gguf: tensor %q not found", tensorName)
 	}
 
 	rawSize := info.NumBytes()
@@ -130,10 +129,10 @@ func (r *Reader) ReadTensorRaw(tensorName string) ([]byte, *TensorInfo, error) {
 	tensorOffset := r.gguf.DataOffset() + int64(info.Offset)
 	n, err := r.file.ReadAt(buf, tensorOffset)
 	if err != nil && err != io.EOF {
-		return nil, nil, fmt.Errorf("gguf: read raw tensor %q: %w", tensorName, err)
+		return nil, nil, errors.Wrapf(err, "gguf: read raw tensor %q", tensorName)
 	}
 	if n != len(buf) {
-		return nil, nil, fmt.Errorf("gguf: read raw tensor %q: short read: got %d bytes, expected %d", tensorName, n, len(buf))
+		return nil, nil, errors.Errorf("gguf: read raw tensor %q: short read: got %d bytes, expected %d", tensorName, n, len(buf))
 	}
 
 	return buf, &info, nil

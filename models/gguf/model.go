@@ -1,12 +1,12 @@
 package gguf
 
 import (
-	"fmt"
 	"path/filepath"
 	"sync"
 
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
+	"github.com/pkg/errors"
 )
 
 // Model represents a GGUF model, optionally backed by a HuggingFace repo.
@@ -49,14 +49,14 @@ func NewEmpty(repo *hub.Repo) *Model {
 // Load downloads the first .gguf file from the repo and parses it.
 func (m *Model) Load() error {
 	if m.Repo == nil {
-		return fmt.Errorf("gguf: repo is nil")
+		return errors.Errorf("gguf: repo is nil")
 	}
 
 	// Find the first .gguf file in the repo.
 	var ggufFile string
 	for filename, err := range m.Repo.IterFileNames() {
 		if err != nil {
-			return fmt.Errorf("gguf: list repo files: %w", err)
+			return errors.Wrapf(err, "gguf: list repo files")
 		}
 		if filepath.Ext(filename) == ".gguf" {
 			ggufFile = filename
@@ -64,17 +64,17 @@ func (m *Model) Load() error {
 		}
 	}
 	if ggufFile == "" {
-		return fmt.Errorf("gguf: no .gguf file found in repository")
+		return errors.Errorf("gguf: no .gguf file found in repository")
 	}
 
 	localPath, err := m.Repo.DownloadFile(ggufFile)
 	if err != nil {
-		return fmt.Errorf("gguf: download %s: %w", ggufFile, err)
+		return errors.Wrapf(err, "gguf: download %s", ggufFile)
 	}
 
 	f, err := Open(localPath)
 	if err != nil {
-		return fmt.Errorf("gguf: parse %s: %w", ggufFile, err)
+		return errors.Wrapf(err, "gguf: parse %s", ggufFile)
 	}
 
 	m.File = f
@@ -134,7 +134,7 @@ func (m *Model) Architecture() string {
 // GetTensor loads a single tensor by name, dequantizing if needed.
 func (m *Model) GetTensor(tensorName string) (*TensorAndName, error) {
 	if m.File == nil {
-		return nil, fmt.Errorf("gguf: model not loaded, call Load() first")
+		return nil, errors.Errorf("gguf: model not loaded, call Load() first")
 	}
 
 	reader, err := m.getReader()
@@ -154,7 +154,7 @@ func (m *Model) GetTensor(tensorName string) (*TensorAndName, error) {
 func (m *Model) IterTensors() func(yield func(TensorAndName, error) bool) {
 	return func(yield func(TensorAndName, error) bool) {
 		if m.File == nil {
-			yield(TensorAndName{}, fmt.Errorf("gguf: model not loaded, call Load() first"))
+			yield(TensorAndName{}, errors.Errorf("gguf: model not loaded, call Load() first"))
 			return
 		}
 
