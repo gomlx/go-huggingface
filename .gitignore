@@ -21,8 +21,12 @@
 go.work
 go.work.sum
 
-# IDEs
+# IDEs, AI agents, etc.
 .idea/
+.crush/
+.cursor/
+/GEMINI.md
+/CLAUDE.md
 
 # Notebooks temporary files.
 .ipynb_checkpoints
