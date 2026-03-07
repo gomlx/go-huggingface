@@ -43,16 +43,16 @@ const (
 	TensorTypeQ4_0 TensorType = 2
 	TensorTypeQ4_1 TensorType = 3
 	// 4, 5 are unused/removed types.
-	TensorTypeQ5_0 TensorType = 6
-	TensorTypeQ5_1 TensorType = 7
-	TensorTypeQ8_0 TensorType = 8
-	TensorTypeQ8_1 TensorType = 9
-	TensorTypeQ2_K TensorType = 10
-	TensorTypeQ3_K TensorType = 11
-	TensorTypeQ4_K TensorType = 12
-	TensorTypeQ5_K TensorType = 13
-	TensorTypeQ6_K TensorType = 14
-	TensorTypeQ8_K TensorType = 15
+	TensorTypeQ5_0    TensorType = 6
+	TensorTypeQ5_1    TensorType = 7
+	TensorTypeQ8_0    TensorType = 8
+	TensorTypeQ8_1    TensorType = 9
+	TensorTypeQ2_K    TensorType = 10
+	TensorTypeQ3_K    TensorType = 11
+	TensorTypeQ4_K    TensorType = 12
+	TensorTypeQ5_K    TensorType = 13
+	TensorTypeQ6_K    TensorType = 14
+	TensorTypeQ8_K    TensorType = 15
 	TensorTypeIQ2_XXS TensorType = 16
 	TensorTypeIQ2_XS  TensorType = 17
 	TensorTypeIQ3_XXS TensorType = 18
@@ -61,13 +61,13 @@ const (
 	TensorTypeIQ3_S   TensorType = 21
 	TensorTypeIQ2_S   TensorType = 22
 	TensorTypeIQ4_XS  TensorType = 23
-	TensorTypeI8  TensorType = 24
-	TensorTypeI16 TensorType = 25
-	TensorTypeI32 TensorType = 26
-	TensorTypeI64 TensorType = 27
-	TensorTypeF64 TensorType = 28
-	TensorTypeIQ1_M TensorType = 29
-	TensorTypeBF16  TensorType = 30
+	TensorTypeI8      TensorType = 24
+	TensorTypeI16     TensorType = 25
+	TensorTypeI32     TensorType = 26
+	TensorTypeI64     TensorType = 27
+	TensorTypeF64     TensorType = 28
+	TensorTypeIQ1_M   TensorType = 29
+	TensorTypeBF16    TensorType = 30
 	// 31-33 are unused.
 	TensorTypeTQ1_0 TensorType = 34
 	TensorTypeTQ2_0 TensorType = 35
@@ -267,9 +267,9 @@ func (t TensorType) GoMLXDType() dtypes.DType {
 // TensorInfo holds parsed information about a single tensor in a GGUF file.
 type TensorInfo struct {
 	Name   string
-	Shape  []uint64   // Dimensions in GGUF native order (innermost first).
+	Shape  []uint64 // Dimensions in GGUF native order (innermost first).
 	Type   TensorType
-	Offset uint64     // Byte offset within the tensor data section.
+	Offset uint64 // Byte offset within the tensor data section.
 }
 
 // NumElements returns the total number of elements in the tensor.
@@ -303,6 +303,8 @@ func (ti *TensorInfo) NumBytes() int64 {
 // GoMLXShape returns the GoMLX dtype and dimensions for this tensor.
 // GGUF stores dimensions innermost-first; this reverses them to the
 // outermost-first convention used by GoMLX and HuggingFace.
+//
+// Quantized dtypes get converted to dtypes.Float32.
 func (ti *TensorInfo) GoMLXShape() (dtypes.DType, []int) {
 	dtype := ti.Type.GoMLXDType()
 	dims := make([]int, len(ti.Shape))
