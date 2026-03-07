@@ -2,8 +2,8 @@ package gguf
 
 import (
 	"encoding/binary"
-	"fmt"
 
+	"github.com/pkg/errors"
 	"github.com/x448/float16"
 )
 
@@ -37,7 +37,7 @@ func getDequantFunc(t TensorType) (dequantFunc, error) {
 	case TensorTypeQ6_K:
 		return dequantQ6_K, nil
 	default:
-		return nil, fmt.Errorf("unsupported quantization type %s (%d)", t, t)
+		return nil, errors.Errorf("unsupported quantization type %s (%d)", t, t)
 	}
 }
 
@@ -95,7 +95,7 @@ func dequantQ5_0(src []byte, dst []float32) {
 	qs := src[6:]
 	for j := range 16 {
 		xh0 := ((qh >> uint(j)) << 4) & 0x10
-		xh1 := ((qh >> uint(j+12))) & 0x10
+		xh1 := (qh >> uint(j+12)) & 0x10
 		x0 := int32((uint32(qs[j]&0x0F) | xh0)) - 16
 		x1 := int32((uint32(qs[j]>>4) | xh1)) - 16
 		dst[j] = float32(x0) * d
@@ -113,7 +113,7 @@ func dequantQ5_1(src []byte, dst []float32) {
 	qs := src[8:]
 	for j := range 16 {
 		xh0 := ((qh >> uint(j)) << 4) & 0x10
-		xh1 := ((qh >> uint(j+12))) & 0x10
+		xh1 := (qh >> uint(j+12)) & 0x10
 		x0 := uint32(qs[j]&0x0F) | xh0
 		x1 := uint32(qs[j]>>4) | xh1
 		dst[j] = float32(x0)*d + m

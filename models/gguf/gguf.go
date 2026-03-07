@@ -4,10 +4,11 @@ import (
 	"bufio"
 	"cmp"
 	"encoding/binary"
-	"fmt"
 	"io"
 	"os"
 	"slices"
+
+	"github.com/pkg/errors"
 )
 
 const (
@@ -50,7 +51,7 @@ type File struct {
 func Open(path string) (*File, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("gguf: open %s: %w", path, err)
+		return nil, errors.Wrapf(err, "gguf: open %s", path)
 	}
 	defer f.Close()
 
@@ -60,33 +61,33 @@ func Open(path string) (*File, error) {
 	// Read and validate magic number.
 	var magic [4]byte
 	if err := binary.Read(r, binary.LittleEndian, &magic); err != nil {
-		return nil, fmt.Errorf("gguf: read magic: %w", err)
+		return nil, errors.Wrapf(err, "gguf: read magic")
 	}
 	if string(magic[:]) != ggufMagic {
-		return nil, fmt.Errorf("gguf: invalid magic %q, expected %q", magic[:], ggufMagic)
+		return nil, errors.Errorf("gguf: invalid magic %q, expected %q", magic[:], ggufMagic)
 	}
 
 	// Read version.
 	if err := binary.Read(r, binary.LittleEndian, &file.Version); err != nil {
-		return nil, fmt.Errorf("gguf: read version: %w", err)
+		return nil, errors.Wrapf(err, "gguf: read version")
 	}
 	if file.Version < minSupportedVersion {
-		return nil, fmt.Errorf("gguf: unsupported version %d (minimum %d)", file.Version, minSupportedVersion)
+		return nil, errors.Errorf("gguf: unsupported version %d (minimum %d)", file.Version, minSupportedVersion)
 	}
 
 	// Read counts.
 	var tensorCount, kvCount uint64
 	if err := binary.Read(r, binary.LittleEndian, &tensorCount); err != nil {
-		return nil, fmt.Errorf("gguf: read tensor count: %w", err)
+		return nil, errors.Wrapf(err, "gguf: read tensor count")
 	}
 	if err := binary.Read(r, binary.LittleEndian, &kvCount); err != nil {
-		return nil, fmt.Errorf("gguf: read kv count: %w", err)
+		return nil, errors.Wrapf(err, "gguf: read kv count")
 	}
 	if tensorCount > maxTensorCount {
-		return nil, fmt.Errorf("gguf: tensor count %d exceeds limit %d", tensorCount, maxTensorCount)
+		return nil, errors.Errorf("gguf: tensor count %d exceeds limit %d", tensorCount, maxTensorCount)
 	}
 	if kvCount > maxKVCount {
-		return nil, fmt.Errorf("gguf: kv count %d exceeds limit %d", kvCount, maxKVCount)
+		return nil, errors.Errorf("gguf: kv count %d exceeds limit %d", kvCount, maxKVCount)
 	}
 
 	// Read all key-value pairs.
@@ -94,7 +95,7 @@ func Open(path string) (*File, error) {
 	for range kvCount {
 		kv, err := readKeyValue(r)
 		if err != nil {
-			return nil, fmt.Errorf("gguf: read kv pair %d/%d: %w", len(file.KeyValues), kvCount, err)
+			return nil, errors.Wrapf(err, "gguf: read kv pair %d/%d", len(file.KeyValues), kvCount)
 		}
 		file.KeyValues = append(file.KeyValues, kv)
 	}
@@ -104,7 +105,7 @@ func Open(path string) (*File, error) {
 	for range tensorCount {
 		ti, err := readTensorInfo(r)
 		if err != nil {
-			return nil, fmt.Errorf("gguf: read tensor info %d/%d: %w", len(file.TensorInfos), tensorCount, err)
+			return nil, errors.Wrapf(err, "gguf: read tensor info %d/%d", len(file.TensorInfos), tensorCount)
 		}
 		file.TensorInfos = append(file.TensorInfos, ti)
 	}
@@ -203,14 +204,14 @@ func (cr *countingReader) Read(p []byte) (int, error) {
 func readString(r io.Reader) (string, error) {
 	var length uint64
 	if err := binary.Read(r, binary.LittleEndian, &length); err != nil {
-		return "", fmt.Errorf("read string length: %w", err)
+		return "", errors.Wrapf(err, "read string length")
 	}
 	if length > 1<<20 { // 1MB sanity check for a single string.
-		return "", fmt.Errorf("string length %d exceeds 1MB limit", length)
+		return "", errors.Errorf("string length %d exceeds 1MB limit", length)
 	}
 	buf := make([]byte, length)
 	if _, err := io.ReadFull(r, buf); err != nil {
-		return "", fmt.Errorf("read string data: %w", err)
+		return "", errors.Wrapf(err, "read string data")
 	}
 	return string(buf), nil
 }
@@ -219,17 +220,17 @@ func readString(r io.Reader) (string, error) {
 func readKeyValue(r io.Reader) (KeyValue, error) {
 	key, err := readString(r)
 	if err != nil {
-		return KeyValue{}, fmt.Errorf("read key: %w", err)
+		return KeyValue{}, errors.Wrapf(err, "read key")
 	}
 
 	var typeTag uint32
 	if err := binary.Read(r, binary.LittleEndian, &typeTag); err != nil {
-		return KeyValue{}, fmt.Errorf("read value type for %q: %w", key, err)
+		return KeyValue{}, errors.Wrapf(err, "read value type for %q", key)
 	}
 
 	val, err := readValue(r, ggufValueType(typeTag))
 	if err != nil {
-		return KeyValue{}, fmt.Errorf("read value for %q (type %d): %w", key, typeTag, err)
+		return KeyValue{}, errors.Wrapf(err, "read value for %q (type %d)", key, typeTag)
 	}
 
 	return KeyValue{Key: key, Value: val}, nil
@@ -290,7 +291,7 @@ func readValue(r io.Reader, vtype ggufValueType) (Value, error) {
 	case valueTypeArray:
 		return readArray(r)
 	default:
-		return Value{}, fmt.Errorf("unknown value type %d", vtype)
+		return Value{}, errors.Errorf("unknown value type %d", vtype)
 	}
 }
 
@@ -298,14 +299,14 @@ func readValue(r io.Reader, vtype ggufValueType) (Value, error) {
 func readArray(r io.Reader) (Value, error) {
 	var elemType uint32
 	if err := binary.Read(r, binary.LittleEndian, &elemType); err != nil {
-		return Value{}, fmt.Errorf("read array element type: %w", err)
+		return Value{}, errors.Wrapf(err, "read array element type")
 	}
 	var count uint64
 	if err := binary.Read(r, binary.LittleEndian, &count); err != nil {
-		return Value{}, fmt.Errorf("read array count: %w", err)
+		return Value{}, errors.Wrapf(err, "read array count")
 	}
 	if count > maxArrayCount {
-		return Value{}, fmt.Errorf("array count %d exceeds limit %d", count, maxArrayCount)
+		return Value{}, errors.Errorf("array count %d exceeds limit %d", count, maxArrayCount)
 	}
 
 	switch ggufValueType(elemType) {
@@ -334,7 +335,7 @@ func readArray(r io.Reader) (Value, error) {
 	case valueTypeString:
 		return readStringArray(r, count)
 	default:
-		return Value{}, fmt.Errorf("unsupported array element type %d", elemType)
+		return Value{}, errors.Errorf("unsupported array element type %d", elemType)
 	}
 }
 
@@ -342,19 +343,20 @@ func readArray(r io.Reader) (Value, error) {
 func readArrayOf[T any](r io.Reader, count uint64) (Value, error) {
 	vals := make([]T, count)
 	if err := binary.Read(r, binary.LittleEndian, vals); err != nil {
-		return Value{}, fmt.Errorf("read array (%d elements): %w", count, err)
+		return Value{}, errors.Wrapf(err, "read array (%d elements)", count)
 	}
 	return Value{data: vals}, nil
 }
 
 // readBoolArray reads an array of bools (each stored as a single byte).
 func readBoolArray(r io.Reader, count uint64) (Value, error) {
+	buf := make([]byte, count)
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return Value{}, errors.Wrapf(err, "read bool array")
+	}
+
 	vals := make([]bool, count)
-	for i := range count {
-		var b uint8
-		if err := binary.Read(r, binary.LittleEndian, &b); err != nil {
-			return Value{}, fmt.Errorf("read bool array element %d: %w", i, err)
-		}
+	for i, b := range buf {
 		vals[i] = b != 0
 	}
 	return Value{data: vals}, nil
@@ -366,7 +368,7 @@ func readStringArray(r io.Reader, count uint64) (Value, error) {
 	for i := range count {
 		s, err := readString(r)
 		if err != nil {
-			return Value{}, fmt.Errorf("read string array element %d: %w", i, err)
+			return Value{}, errors.Wrapf(err, "read string array element %d", i)
 		}
 		vals[i] = s
 	}
@@ -377,32 +379,32 @@ func readStringArray(r io.Reader, count uint64) (Value, error) {
 func readTensorInfo(r io.Reader) (TensorInfo, error) {
 	name, err := readString(r)
 	if err != nil {
-		return TensorInfo{}, fmt.Errorf("read tensor name: %w", err)
+		return TensorInfo{}, errors.Wrapf(err, "read tensor name")
 	}
 
 	var nDims uint32
 	if err := binary.Read(r, binary.LittleEndian, &nDims); err != nil {
-		return TensorInfo{}, fmt.Errorf("read tensor dims count for %q: %w", name, err)
+		return TensorInfo{}, errors.Wrapf(err, "read tensor dims count for %q", name)
 	}
 	if nDims > maxTensorDims {
-		return TensorInfo{}, fmt.Errorf("tensor %q has %d dimensions, exceeds limit %d", name, nDims, maxTensorDims)
+		return TensorInfo{}, errors.Errorf("tensor %q has %d dimensions, exceeds limit %d", name, nDims, maxTensorDims)
 	}
 
 	shape := make([]uint64, nDims)
 	for i := range nDims {
 		if err := binary.Read(r, binary.LittleEndian, &shape[i]); err != nil {
-			return TensorInfo{}, fmt.Errorf("read tensor dim %d for %q: %w", i, name, err)
+			return TensorInfo{}, errors.Wrapf(err, "read tensor dim %d for %q", i, name)
 		}
 	}
 
 	var ttype uint32
 	if err := binary.Read(r, binary.LittleEndian, &ttype); err != nil {
-		return TensorInfo{}, fmt.Errorf("read tensor type for %q: %w", name, err)
+		return TensorInfo{}, errors.Wrapf(err, "read tensor type for %q", name)
 	}
 
 	var offset uint64
 	if err := binary.Read(r, binary.LittleEndian, &offset); err != nil {
-		return TensorInfo{}, fmt.Errorf("read tensor offset for %q: %w", name, err)
+		return TensorInfo{}, errors.Wrapf(err, "read tensor offset for %q", name)
 	}
 
 	return TensorInfo{
