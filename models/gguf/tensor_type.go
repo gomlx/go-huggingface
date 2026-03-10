@@ -31,6 +31,7 @@ import (
 	"math"
 	"slices"
 
+	"github.com/gomlx/gomlx/backends"
 	"github.com/gomlx/gomlx/pkg/core/dtypes"
 )
 
@@ -235,6 +236,32 @@ func (t TensorType) IsQuantized() bool {
 		return false
 	default:
 		return true
+	}
+}
+
+// ToGGMLQuantType maps a quantized TensorType to the corresponding GoMLX GGMLQuantType.
+// Returns the GGMLQuantType and true if the type is a supported GGML quantization format,
+// or (0, false) for non-quantized or unsupported types.
+func (t TensorType) ToGGMLQuantType() (backends.GGMLQuantType, bool) {
+	switch t {
+	case TensorTypeQ4_0:
+		return backends.GGMLQ4_0, true
+	case TensorTypeQ8_0:
+		return backends.GGMLQ8_0, true
+	case TensorTypeIQ4_NL:
+		return backends.GGMLIQ4NL, true
+	case TensorTypeQ2_K:
+		return backends.GGMLQ2_K, true
+	case TensorTypeQ3_K:
+		return backends.GGMLQ3_K, true
+	case TensorTypeQ4_K:
+		return backends.GGMLQ4_K, true
+	case TensorTypeQ5_K:
+		return backends.GGMLQ5_K, true
+	case TensorTypeQ6_K:
+		return backends.GGMLQ6_K, true
+	default:
+		return 0, false
 	}
 }
 

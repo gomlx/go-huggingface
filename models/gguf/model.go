@@ -149,6 +149,21 @@ func (m *Model) GetTensor(tensorName string) (*TensorAndName, error) {
 	return &TensorAndName{Name: tensorName, Tensor: t}, nil
 }
 
+// GetTensorRaw loads raw bytes for a tensor without dequantization.
+// Returns the raw bytes and tensor info. Useful for keeping quantized weights in their native format.
+func (m *Model) GetTensorRaw(tensorName string) ([]byte, *TensorInfo, error) {
+	if m.File == nil {
+		return nil, nil, errors.Errorf("gguf: model not loaded, call Load() first")
+	}
+
+	reader, err := m.getReader()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return reader.ReadTensorRaw(tensorName)
+}
+
 // IterTensors returns an iterator over all tensors as GoMLX tensors.
 // Tensors are read sequentially sorted by offset for optimal I/O.
 func (m *Model) IterTensors() func(yield func(TensorAndName, error) bool) {
