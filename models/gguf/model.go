@@ -10,11 +10,21 @@ import (
 )
 
 // Model represents a GGUF model, optionally backed by a HuggingFace repo.
+// For multimodal models (e.g., LLaVA), extras holds additional GGUF files
+// (such as the vision encoder/projector). File is the primary file used for
+// config metadata; tensors are looked up across all files.
 type Model struct {
 	Repo   *hub.Repo
 	File   *File
+	extras []extraEntry
 	reader *Reader
 	mu     sync.Mutex
+}
+
+// extraEntry pairs an extra GGUF file with its lazily-initialized reader.
+type extraEntry struct {
+	file   *File
+	reader *Reader
 }
 
 // TensorAndName holds a tensor name and its GoMLX tensor data.
@@ -48,52 +58,108 @@ func NewEmpty(repo *hub.Repo) *Model {
 
 // Load downloads the first .gguf file from the repo and parses it.
 func (m *Model) Load() error {
+	files, err := m.ggufFileNames()
+	if err != nil {
+		return err
+	}
+	if len(files) == 0 {
+		return errors.Errorf("gguf: no .gguf file found in repository")
+	}
+	return m.loadFiles(files[:1])
+}
+
+// LoadAll downloads all .gguf files from the repo.
+// The first file becomes File (primary, used for config metadata);
+// additional files are stored as extras and searched for tensors.
+// This is needed for multimodal models like LLaVA that split the text
+// model and vision encoder into separate GGUF files.
+func (m *Model) LoadAll() error {
+	files, err := m.ggufFileNames()
+	if err != nil {
+		return err
+	}
+	if len(files) == 0 {
+		return errors.Errorf("gguf: no .gguf files found in repository")
+	}
+	return m.loadFiles(files)
+}
+
+// LoadFiles downloads specific .gguf files from the repo by name.
+// The first file becomes File (primary); additional files become extras.
+func (m *Model) LoadFiles(filenames ...string) error {
 	if m.Repo == nil {
 		return errors.Errorf("gguf: repo is nil")
 	}
+	if len(filenames) == 0 {
+		return errors.Errorf("gguf: no filenames specified")
+	}
+	return m.loadFiles(filenames)
+}
 
-	// Find the first .gguf file in the repo.
-	var ggufFile string
+// ListGGUFFiles returns the names of all .gguf files in the repo.
+func (m *Model) ListGGUFFiles() ([]string, error) {
+	return m.ggufFileNames()
+}
+
+// ggufFileNames returns the names of all .gguf files in the repo.
+func (m *Model) ggufFileNames() ([]string, error) {
+	if m.Repo == nil {
+		return nil, errors.Errorf("gguf: repo is nil")
+	}
+	var files []string
 	for filename, err := range m.Repo.IterFileNames() {
 		if err != nil {
-			return errors.Wrapf(err, "gguf: list repo files")
+			return nil, errors.Wrapf(err, "gguf: list repo files")
 		}
 		if filepath.Ext(filename) == ".gguf" {
-			ggufFile = filename
-			break
+			files = append(files, filename)
 		}
 	}
-	if ggufFile == "" {
-		return errors.Errorf("gguf: no .gguf file found in repository")
-	}
+	return files, nil
+}
 
-	localPath, err := m.Repo.DownloadFile(ggufFile)
-	if err != nil {
-		return errors.Wrapf(err, "gguf: download %s", ggufFile)
-	}
+func (m *Model) loadFiles(filenames []string) error {
+	for i, filename := range filenames {
+		localPath, err := m.Repo.DownloadFile(filename)
+		if err != nil {
+			return errors.Wrapf(err, "gguf: download %s", filename)
+		}
 
-	f, err := Open(localPath)
-	if err != nil {
-		return errors.Wrapf(err, "gguf: parse %s", ggufFile)
-	}
+		f, err := Open(localPath)
+		if err != nil {
+			return errors.Wrapf(err, "gguf: parse %s", filename)
+		}
 
-	m.File = f
+		if i == 0 {
+			m.File = f
+		} else {
+			m.extras = append(m.extras, extraEntry{file: f})
+		}
+	}
 	return nil
 }
 
-// Close releases resources held by the Model, including any cached reader.
+// Close releases resources held by the Model, including any cached readers.
 func (m *Model) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	var firstErr error
 	if m.reader != nil {
-		err := m.reader.Close()
+		firstErr = m.reader.Close()
 		m.reader = nil
-		return err
 	}
-	return nil
+	for i := range m.extras {
+		if r := m.extras[i].reader; r != nil {
+			if err := r.Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
+			m.extras[i].reader = nil
+		}
+	}
+	return firstErr
 }
 
-// getReader returns a cached Reader, creating one if necessary.
+// getReader returns a cached Reader for the primary file, creating one if necessary.
 func (m *Model) getReader() (*Reader, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -107,12 +173,61 @@ func (m *Model) getReader() (*Reader, error) {
 	return m.reader, nil
 }
 
-// ListTensorNames returns all tensor names in the model.
+// getExtraReader returns a cached Reader for the extra file at the given index, creating one if necessary.
+func (m *Model) getExtraReader(i int) (*Reader, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.extras[i].reader == nil {
+		r, err := NewReader(m.extras[i].file)
+		if err != nil {
+			return nil, err
+		}
+		m.extras[i].reader = r
+	}
+	return m.extras[i].reader, nil
+}
+
+// findTensorFile returns the index of the file containing the named tensor
+// (0=primary, 1+=extra). Returns -1 if not found.
+func (m *Model) findTensorFile(name string) int {
+	if _, ok := m.File.GetTensorInfo(name); ok {
+		return 0
+	}
+	for i := range m.extras {
+		if _, ok := m.extras[i].file.GetTensorInfo(name); ok {
+			return i + 1
+		}
+	}
+	return -1
+}
+
+// fileForIndex returns the File at the given index (0=primary, 1+=extra).
+func (m *Model) fileForIndex(idx int) *File {
+	if idx == 0 {
+		return m.File
+	}
+	return m.extras[idx-1].file
+}
+
+// GetTensorInfo looks up tensor info by name across all files.
+func (m *Model) GetTensorInfo(name string) (TensorInfo, bool) {
+	idx := m.findTensorFile(name)
+	if idx < 0 {
+		return TensorInfo{}, false
+	}
+	return m.fileForIndex(idx).GetTensorInfo(name)
+}
+
+// ListTensorNames returns all tensor names across all files.
 func (m *Model) ListTensorNames() []string {
 	if m.File == nil {
 		return nil
 	}
-	return m.File.ListTensorNames()
+	names := m.File.ListTensorNames()
+	for i := range m.extras {
+		names = append(names, m.extras[i].file.ListTensorNames()...)
+	}
+	return names
 }
 
 // GetKeyValue looks up a metadata key-value pair.
@@ -132,12 +247,13 @@ func (m *Model) Architecture() string {
 }
 
 // GetTensor loads a single tensor by name, dequantizing if needed.
+// Searches the primary file first, then extra files.
 func (m *Model) GetTensor(tensorName string) (*TensorAndName, error) {
 	if m.File == nil {
 		return nil, errors.Errorf("gguf: model not loaded, call Load() first")
 	}
 
-	reader, err := m.getReader()
+	reader, err := m.readerForTensor(tensorName)
 	if err != nil {
 		return nil, err
 	}
@@ -150,13 +266,13 @@ func (m *Model) GetTensor(tensorName string) (*TensorAndName, error) {
 }
 
 // GetTensorRaw loads raw bytes for a tensor without dequantization.
-// Returns the raw bytes and tensor info. Useful for keeping quantized weights in their native format.
+// Searches the primary file first, then extra files.
 func (m *Model) GetTensorRaw(tensorName string) ([]byte, *TensorInfo, error) {
 	if m.File == nil {
 		return nil, nil, errors.Errorf("gguf: model not loaded, call Load() first")
 	}
 
-	reader, err := m.getReader()
+	reader, err := m.readerForTensor(tensorName)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -164,7 +280,19 @@ func (m *Model) GetTensorRaw(tensorName string) ([]byte, *TensorInfo, error) {
 	return reader.ReadTensorRaw(tensorName)
 }
 
-// IterTensors returns an iterator over all tensors as GoMLX tensors.
+// readerForTensor returns the reader for the file containing the named tensor.
+func (m *Model) readerForTensor(name string) (*Reader, error) {
+	idx := m.findTensorFile(name)
+	if idx < 0 {
+		return nil, errors.Errorf("gguf: tensor %q not found", name)
+	}
+	if idx == 0 {
+		return m.getReader()
+	}
+	return m.getExtraReader(idx - 1)
+}
+
+// IterTensors returns an iterator over all tensors across all files as GoMLX tensors.
 // Tensors are read sequentially sorted by offset for optimal I/O.
 func (m *Model) IterTensors() func(yield func(TensorAndName, error) bool) {
 	return func(yield func(TensorAndName, error) bool) {
@@ -173,13 +301,12 @@ func (m *Model) IterTensors() func(yield func(TensorAndName, error) bool) {
 			return
 		}
 
+		// Iterate primary file.
 		reader, err := m.getReader()
 		if err != nil {
 			yield(TensorAndName{}, err)
 			return
 		}
-
-		// TensorInfos are pre-sorted by offset in Open() for sequential I/O.
 		for _, info := range m.File.TensorInfos {
 			t, err := reader.ReadTensor(info.Name)
 			if err != nil {
@@ -188,6 +315,25 @@ func (m *Model) IterTensors() func(yield func(TensorAndName, error) bool) {
 			}
 			if !yield(TensorAndName{Name: info.Name, Tensor: t}, nil) {
 				return
+			}
+		}
+
+		// Iterate extra files.
+		for i := range m.extras {
+			r, err := m.getExtraReader(i)
+			if err != nil {
+				yield(TensorAndName{}, err)
+				return
+			}
+			for _, info := range m.extras[i].file.TensorInfos {
+				t, err := r.ReadTensor(info.Name)
+				if err != nil {
+					yield(TensorAndName{}, err)
+					return
+				}
+				if !yield(TensorAndName{Name: info.Name, Tensor: t}, nil) {
+					return
+				}
 			}
 		}
 	}
