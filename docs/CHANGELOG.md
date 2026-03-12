@@ -1,5 +1,11 @@
 # `go-huggingface` Changelog
 
+## v0.3.2
+
+- Added `safetensors` support.
+- Added support for GGUF file format.
+- Tokenizer API improvements.
+
 ## v0.3.1
 
 - Fixed go.mod/go.sum.
