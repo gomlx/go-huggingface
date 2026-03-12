@@ -230,6 +230,16 @@ func (m *Model) ListTensorNames() []string {
 	return names
 }
 
+// ExtraFiles returns the parsed File objects for any additional GGUF files
+// beyond the primary (e.g., mmproj files for multimodal models).
+func (m *Model) ExtraFiles() []*File {
+	files := make([]*File, len(m.extras))
+	for i := range m.extras {
+		files[i] = m.extras[i].file
+	}
+	return files
+}
+
 // GetKeyValue looks up a metadata key-value pair.
 func (m *Model) GetKeyValue(key string) (KeyValue, bool) {
 	if m.File == nil {
