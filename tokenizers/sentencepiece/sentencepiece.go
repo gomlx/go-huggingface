@@ -47,6 +47,13 @@ var _ api.TokenizerWithSpans = &Tokenizer{}
 // Encode returns the text encoded into a sequence of ids.
 // It implements sampler.Vocabulary.
 func (p *Tokenizer) Encode(text string) []int {
+	return p.EncodeWithOptions(text, true)
+}
+
+// EncodeWithOptions returns the text encoded into a sequence of ids.
+// The addSpecialTokens parameter is accepted for interface compatibility but
+// has no effect — SentencePiece models do not have a post-processor.
+func (p *Tokenizer) EncodeWithOptions(text string, _ bool) []int {
 	tokens := p.Processor.Encode(text)
 	ids := make([]int, len(tokens))
 	for i, t := range tokens {
