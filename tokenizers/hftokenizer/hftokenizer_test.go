@@ -1174,6 +1174,142 @@ func intSliceEqual(a, b []int) bool {
 	return true
 }
 
+// Test that special/added tokens in the input are recognized as single tokens
+// rather than being split by pre-tokenization (e.g., <bos> → "<", "bos", ">").
+func TestEncodeSpecialTokens(t *testing.T) {
+	// Tokenizer with special tokens similar to Gemma/LLaMA style
+	specialTokenizerJSON := []byte(`{
+		"version": "1.0",
+		"added_tokens": [
+			{"id": 0, "content": "<pad>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+			{"id": 1, "content": "<bos>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+			{"id": 2, "content": "<eos>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+			{"id": 3, "content": "<start_of_turn>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+			{"id": 4, "content": "<end_of_turn>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true}
+		],
+		"normalizer": null,
+		"pre_tokenizer": {"type": "Whitespace"},
+		"decoder": null,
+		"model": {
+			"type": "WordPiece",
+			"unk_token": "",
+			"continuing_subword_prefix": "##",
+			"vocab": {
+				"<pad>": 0,
+				"<bos>": 1,
+				"<eos>": 2,
+				"<start_of_turn>": 3,
+				"<end_of_turn>": 4,
+				"hello": 10,
+				"world": 11,
+				"user": 12,
+				"model": 13
+			}
+		}
+	}`)
+
+	tok, err := NewFromContent(nil, specialTokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		input   string
+		wantIDs []int
+	}{
+		{
+			name:    "bos token alone",
+			input:   "<bos>",
+			wantIDs: []int{1},
+		},
+		{
+			name:    "bos then text",
+			input:   "<bos>hello",
+			wantIDs: []int{1, 10},
+		},
+		{
+			name:    "chat template style",
+			input:   "<bos><start_of_turn>user\nhello world<end_of_turn>\n<start_of_turn>model\n",
+			wantIDs: []int{1, 3, 12, 10, 11, 4, 3, 13},
+		},
+		{
+			name:    "multiple special tokens",
+			input:   "<bos><eos>",
+			wantIDs: []int{1, 2},
+		},
+		{
+			name:    "special token with surrounding text",
+			input:   "hello<eos>world",
+			wantIDs: []int{10, 2, 11},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tok.Encode(tt.input)
+			if !intSliceEqual(got, tt.wantIDs) {
+				t.Errorf("Encode(%q) = %v, want %v", tt.input, got, tt.wantIDs)
+			}
+		})
+	}
+}
+
+// Test that multi-byte Unicode characters adjacent to special tokens don't
+// cause mid-rune matching issues.
+func TestEncodeSpecialTokens_Unicode(t *testing.T) {
+	specialTokenizerJSON := []byte(`{
+		"version": "1.0",
+		"added_tokens": [
+			{"id": 1, "content": "<eos>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true}
+		],
+		"normalizer": null,
+		"pre_tokenizer": {"type": "Whitespace"},
+		"decoder": null,
+		"model": {
+			"type": "WordPiece",
+			"unk_token": "",
+			"continuing_subword_prefix": "##",
+			"vocab": {
+				"<eos>": 1,
+				"日本": 10,
+				"世界": 11
+			}
+		}
+	}`)
+
+	tok, err := NewFromContent(nil, specialTokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		input   string
+		wantIDs []int
+	}{
+		{
+			name:    "unicode before special token",
+			input:   "日本<eos>世界",
+			wantIDs: []int{10, 1, 11},
+		},
+		{
+			name:    "special token between unicode",
+			input:   "世界<eos>日本",
+			wantIDs: []int{11, 1, 10},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tok.Encode(tt.input)
+			if !intSliceEqual(got, tt.wantIDs) {
+				t.Errorf("Encode(%q) = %v, want %v", tt.input, got, tt.wantIDs)
+			}
+		})
+	}
+}
+
 // Benchmarks for offset tracking overhead
 
 func BenchmarkEncode(b *testing.B) {

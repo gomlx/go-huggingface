@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/tokenizers/api"
@@ -216,6 +217,10 @@ type Tokenizer struct {
 
 	// Added tokens lookup (content -> id)
 	addedTokens map[string]int
+
+	// addedTokensSorted lists added tokens sorted longest-first for greedy
+	// matching when splitting input text. Derived from addedTokens at construction.
+	addedTokensSorted []addedTokenEntry
 }
 
 // Compile time assert that Tokenizer implements api.Tokenizer interface.
@@ -272,11 +277,16 @@ func NewFromContent(config *api.Config, content []byte) (*Tokenizer, error) {
 		t.idToToken[id] = token
 	}
 
-	// Build added tokens map
+	// Build added tokens map and sorted list for splitting
 	for _, at := range tj.AddedTokens {
 		t.addedTokens[at.Content] = at.ID
 		t.idToToken[at.ID] = at.Content
+		t.addedTokensSorted = append(t.addedTokensSorted, addedTokenEntry{content: at.Content, id: at.ID})
 	}
+	// Sort longest-first for greedy matching
+	sort.Slice(t.addedTokensSorted, func(i, j int) bool {
+		return len(t.addedTokensSorted[i].content) > len(t.addedTokensSorted[j].content)
+	})
 
 	// Build merge ranks for BPE
 	if tj.Model.Type == "BPE" {
@@ -390,26 +400,104 @@ type wordWithOffset struct {
 
 // EncodeWithSpans converts text to a sequence of token IDs along with their byte spans.
 func (t *Tokenizer) EncodeWithSpans(text string) api.EncodingResult {
-	// Apply normalization with span tracking
-	normalized, normSpans := t.normalizeWithSpans(text)
+	// Split input on added tokens (special tokens like <bos>, <eos>, etc.)
+	// before normalization/pre-tokenization, matching HuggingFace behavior.
+	segments := t.splitOnAddedTokens(text)
 
-	// Apply pre-tokenization with span tracking
-	words := t.preTokenizeWithSpans(normalized, normSpans)
-
-	// Tokenize each word according to the model type
 	var ids []int
 	var spans []api.TokenSpan
 
-	for _, word := range words {
-		wordIDs, wordSpans := t.tokenizeWordWithSpans(word)
-		ids = append(ids, wordIDs...)
-		spans = append(spans, wordSpans...)
+	for _, seg := range segments {
+		if seg.isAddedToken {
+			ids = append(ids, seg.tokenID)
+			spans = append(spans, api.TokenSpan{Start: seg.start, End: seg.end})
+			continue
+		}
+
+		// Normal text segment: normalize → pre-tokenize → tokenize
+		segText := text[seg.start:seg.end]
+
+		normalized, normSpans := t.normalizeWithSpans(segText)
+		// Shift normalization offsets to be relative to the original full text
+		for i := range normSpans {
+			normSpans[i] += seg.start
+		}
+
+		words := t.preTokenizeWithSpans(normalized, normSpans)
+
+		for _, word := range words {
+			wordIDs, wordSpans := t.tokenizeWordWithSpans(word)
+			ids = append(ids, wordIDs...)
+			spans = append(spans, wordSpans...)
+		}
 	}
 
 	return api.EncodingResult{
 		IDs:   ids,
 		Spans: spans,
 	}
+}
+
+// addedTokenEntry pairs a token string with its ID for efficient matching.
+type addedTokenEntry struct {
+	content string
+	id      int
+}
+
+// textSegment represents a piece of input text, either an added token or regular text.
+type textSegment struct {
+	start        int  // byte offset in original text
+	end          int  // byte offset in original text
+	isAddedToken bool // true if this segment matches an added token
+	tokenID      int  // only valid if isAddedToken is true
+}
+
+// splitOnAddedTokens splits text into segments of added tokens and regular text.
+// Added tokens are matched greedily (longest first).
+func (t *Tokenizer) splitOnAddedTokens(text string) []textSegment {
+	if len(text) == 0 {
+		return nil
+	}
+	if len(t.addedTokensSorted) == 0 {
+		return []textSegment{{start: 0, end: len(text)}}
+	}
+
+	var segments []textSegment
+	regularStart := 0 // start of current regular text run
+	pos := 0
+
+	for pos < len(text) {
+		matched := false
+		for _, entry := range t.addedTokensSorted {
+			if pos+len(entry.content) <= len(text) && text[pos:pos+len(entry.content)] == entry.content {
+				// Flush any preceding regular text
+				if regularStart < pos {
+					segments = append(segments, textSegment{start: regularStart, end: pos})
+				}
+				segments = append(segments, textSegment{
+					start:        pos,
+					end:          pos + len(entry.content),
+					isAddedToken: true,
+					tokenID:      entry.id,
+				})
+				pos += len(entry.content)
+				regularStart = pos
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			_, size := utf8.DecodeRuneInString(text[pos:])
+			pos += size
+		}
+	}
+
+	// Flush any trailing regular text
+	if regularStart < len(text) {
+		segments = append(segments, textSegment{start: regularStart, end: len(text)})
+	}
+
+	return segments
 }
 
 // normalizeWithSpans applies normalization and returns the normalized text along with
