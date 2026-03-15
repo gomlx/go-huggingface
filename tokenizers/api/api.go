@@ -29,8 +29,7 @@ type Tokenizer interface {
 	Encode(text string) []int
 
 	// EncodeWithOptions converts text to token IDs. When addSpecialTokens is true,
-	// post-processing is applied (e.g., [CLS]/[SEP] for BERT). When false, only
-	// tokenization is performed without wrapping.
+	// post-processing is applied (e.g., [CLS]/[SEP] for BERT).
 	EncodeWithOptions(text string, addSpecialTokens bool) []int
 
 	Decode([]int) string
