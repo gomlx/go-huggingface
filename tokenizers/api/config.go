@@ -15,6 +15,28 @@ type TokensDecoder struct {
 	Special    bool   `json:"special"`
 }
 
+// FlexToken handles HuggingFace token fields that can be either a plain string
+// (e.g., "<s>") or an object with a "content" field (e.g., {"content": "<s>", ...}).
+type FlexToken string
+
+func (t *FlexToken) UnmarshalJSON(data []byte) error {
+	// Try string first.
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		*t = FlexToken(s)
+		return nil
+	}
+	// Try object with "content" field.
+	var obj struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return err
+	}
+	*t = FlexToken(obj.Content)
+	return nil
+}
+
 // Config struct to hold HuggingFace's tokenizer_config.json contents.
 // There is no formal schema for this file, but these are some common fields that may be of use.
 // Specific tokenizer classes are free to implement additional features as they see fit.
@@ -31,13 +53,13 @@ type Config struct {
 	MaxLength      float64        `json:"max_length"`
 	SpModelKwargs  map[string]any `json:"sp_model_kwargs"`
 
-	ClsToken  string `json:"cls_token"`
-	UnkToken  string `json:"unk_token"`
-	SepToken  string `json:"sep_token"`
-	MaskToken string `json:"mask_token"`
-	BosToken  string `json:"bos_token"`
-	EosToken  string `json:"eos_token"`
-	PadToken  string `json:"pad_token"`
+	ClsToken  FlexToken `json:"cls_token"`
+	UnkToken  FlexToken `json:"unk_token"`
+	SepToken  FlexToken `json:"sep_token"`
+	MaskToken FlexToken `json:"mask_token"`
+	BosToken  FlexToken `json:"bos_token"`
+	EosToken  FlexToken `json:"eos_token"`
+	PadToken  FlexToken `json:"pad_token"`
 
 	AddBosToken             bool                  `json:"add_bos_token"`
 	AddEosToken             bool                  `json:"add_eos_token"`

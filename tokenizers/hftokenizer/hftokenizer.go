@@ -335,50 +335,34 @@ func (t *Tokenizer) resolveSpecialTokens() {
 		}
 		// Also check for BOS/EOS
 		if t.config != nil {
-			if content == t.config.BosToken {
+			if content == string(t.config.BosToken) {
 				t.bosID = at.ID
 			}
-			if content == t.config.EosToken {
+			if content == string(t.config.EosToken) {
 				t.eosID = at.ID
 			}
 		}
 	}
 
-	// Fall back to config special tokens if available
+	// Fall back to config special tokens if available.
 	if t.config != nil {
-		if t.unkID == -1 && t.config.UnkToken != "" {
-			if id, ok := t.tokenizer.Model.Vocab[t.config.UnkToken]; ok {
-				t.unkID = id
-			}
+		configFallbacks := []struct {
+			id    *int
+			token api.FlexToken
+		}{
+			{&t.unkID, t.config.UnkToken},
+			{&t.padID, t.config.PadToken},
+			{&t.clsID, t.config.ClsToken},
+			{&t.sepID, t.config.SepToken},
+			{&t.maskID, t.config.MaskToken},
+			{&t.bosID, t.config.BosToken},
+			{&t.eosID, t.config.EosToken},
 		}
-		if t.padID == -1 && t.config.PadToken != "" {
-			if id, ok := t.tokenizer.Model.Vocab[t.config.PadToken]; ok {
-				t.padID = id
-			}
-		}
-		if t.clsID == -1 && t.config.ClsToken != "" {
-			if id, ok := t.tokenizer.Model.Vocab[t.config.ClsToken]; ok {
-				t.clsID = id
-			}
-		}
-		if t.sepID == -1 && t.config.SepToken != "" {
-			if id, ok := t.tokenizer.Model.Vocab[t.config.SepToken]; ok {
-				t.sepID = id
-			}
-		}
-		if t.maskID == -1 && t.config.MaskToken != "" {
-			if id, ok := t.tokenizer.Model.Vocab[t.config.MaskToken]; ok {
-				t.maskID = id
-			}
-		}
-		if t.bosID == -1 && t.config.BosToken != "" {
-			if id, ok := t.tokenizer.Model.Vocab[t.config.BosToken]; ok {
-				t.bosID = id
-			}
-		}
-		if t.eosID == -1 && t.config.EosToken != "" {
-			if id, ok := t.tokenizer.Model.Vocab[t.config.EosToken]; ok {
-				t.eosID = id
+		for _, fb := range configFallbacks {
+			if *fb.id == -1 && fb.token != "" {
+				if id, ok := t.tokenizer.Model.Vocab[string(fb.token)]; ok {
+					*fb.id = id
+				}
 			}
 		}
 	}
