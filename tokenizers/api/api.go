@@ -24,7 +24,14 @@ type EncodingResult struct {
 // It also allows mapping of special tokens: tokens with a common semantic (like padding) but that
 // may map to different ids (int) for different tokenizers.
 type Tokenizer interface {
+	// Encode converts text to token IDs with post-processing (e.g., [CLS]/[SEP]).
+	// Equivalent to EncodeWithOptions(text, true).
 	Encode(text string) []int
+
+	// EncodeWithOptions converts text to token IDs. When addSpecialTokens is true,
+	// post-processing is applied (e.g., [CLS]/[SEP] for BERT).
+	EncodeWithOptions(text string, addSpecialTokens bool) []int
+
 	Decode([]int) string
 
 	// SpecialTokenID returns ID for given special token if registered, or an error if not.

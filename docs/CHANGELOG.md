@@ -1,5 +1,10 @@
 # `go-huggingface` Changelog
 
+## v0.3.3
+
+- Added `PostProcessor` support and `EncodeWithOptions` to the tokenizer API.
+- Split on added tokens before pre-tokenization in `hftokenizer`.
+
 ## v0.3.2
 
 - Added `safetensors` support.

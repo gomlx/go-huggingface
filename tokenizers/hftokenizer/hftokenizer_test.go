@@ -1174,6 +1174,416 @@ func intSliceEqual(a, b []int) bool {
 	return true
 }
 
+// Test that special/added tokens in the input are recognized as single tokens
+// rather than being split by pre-tokenization (e.g., <bos> → "<", "bos", ">").
+func TestEncodeSpecialTokens(t *testing.T) {
+	// Tokenizer with special tokens similar to Gemma/LLaMA style
+	specialTokenizerJSON := []byte(`{
+		"version": "1.0",
+		"added_tokens": [
+			{"id": 0, "content": "<pad>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+			{"id": 1, "content": "<bos>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+			{"id": 2, "content": "<eos>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+			{"id": 3, "content": "<start_of_turn>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+			{"id": 4, "content": "<end_of_turn>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true}
+		],
+		"normalizer": null,
+		"pre_tokenizer": {"type": "Whitespace"},
+		"decoder": null,
+		"model": {
+			"type": "WordPiece",
+			"unk_token": "",
+			"continuing_subword_prefix": "##",
+			"vocab": {
+				"<pad>": 0,
+				"<bos>": 1,
+				"<eos>": 2,
+				"<start_of_turn>": 3,
+				"<end_of_turn>": 4,
+				"hello": 10,
+				"world": 11,
+				"user": 12,
+				"model": 13
+			}
+		}
+	}`)
+
+	tok, err := NewFromContent(nil, specialTokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		input   string
+		wantIDs []int
+	}{
+		{
+			name:    "bos token alone",
+			input:   "<bos>",
+			wantIDs: []int{1},
+		},
+		{
+			name:    "bos then text",
+			input:   "<bos>hello",
+			wantIDs: []int{1, 10},
+		},
+		{
+			name:    "chat template style",
+			input:   "<bos><start_of_turn>user\nhello world<end_of_turn>\n<start_of_turn>model\n",
+			wantIDs: []int{1, 3, 12, 10, 11, 4, 3, 13},
+		},
+		{
+			name:    "multiple special tokens",
+			input:   "<bos><eos>",
+			wantIDs: []int{1, 2},
+		},
+		{
+			name:    "special token with surrounding text",
+			input:   "hello<eos>world",
+			wantIDs: []int{10, 2, 11},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tok.Encode(tt.input)
+			if !intSliceEqual(got, tt.wantIDs) {
+				t.Errorf("Encode(%q) = %v, want %v", tt.input, got, tt.wantIDs)
+			}
+		})
+	}
+}
+
+// Test that multi-byte Unicode characters adjacent to special tokens don't
+// cause mid-rune matching issues.
+func TestEncodeSpecialTokens_Unicode(t *testing.T) {
+	specialTokenizerJSON := []byte(`{
+		"version": "1.0",
+		"added_tokens": [
+			{"id": 1, "content": "<eos>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true}
+		],
+		"normalizer": null,
+		"pre_tokenizer": {"type": "Whitespace"},
+		"decoder": null,
+		"model": {
+			"type": "WordPiece",
+			"unk_token": "",
+			"continuing_subword_prefix": "##",
+			"vocab": {
+				"<eos>": 1,
+				"日本": 10,
+				"世界": 11
+			}
+		}
+	}`)
+
+	tok, err := NewFromContent(nil, specialTokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		input   string
+		wantIDs []int
+	}{
+		{
+			name:    "unicode before special token",
+			input:   "日本<eos>世界",
+			wantIDs: []int{10, 1, 11},
+		},
+		{
+			name:    "special token between unicode",
+			input:   "世界<eos>日本",
+			wantIDs: []int{11, 1, 10},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tok.Encode(tt.input)
+			if !intSliceEqual(got, tt.wantIDs) {
+				t.Errorf("Encode(%q) = %v, want %v", tt.input, got, tt.wantIDs)
+			}
+		})
+	}
+}
+
+// Test that TemplateProcessing post-processor adds [CLS] and [SEP] tokens.
+func TestPostProcessor_TemplateProcessing(t *testing.T) {
+	// WordPiece tokenizer with BERT-style TemplateProcessing post-processor
+	bertTokenizerJSON := []byte(`{
+		"version": "1.0",
+		"added_tokens": [
+			{"id": 0, "content": "[PAD]", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+			{"id": 100, "content": "[UNK]", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+			{"id": 101, "content": "[CLS]", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+			{"id": 102, "content": "[SEP]", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true}
+		],
+		"normalizer": {"type": "BertNormalizer", "lowercase": true},
+		"pre_tokenizer": {"type": "BertPreTokenizer"},
+		"post_processor": {
+			"type": "TemplateProcessing",
+			"single": [
+				{"SpecialToken": {"id": "[CLS]", "type_id": 0}},
+				{"Sequence": {"id": "A", "type_id": 0}},
+				{"SpecialToken": {"id": "[SEP]", "type_id": 0}}
+			],
+			"pair": [
+				{"SpecialToken": {"id": "[CLS]", "type_id": 0}},
+				{"Sequence": {"id": "A", "type_id": 0}},
+				{"SpecialToken": {"id": "[SEP]", "type_id": 0}},
+				{"Sequence": {"id": "B", "type_id": 1}},
+				{"SpecialToken": {"id": "[SEP]", "type_id": 1}}
+			],
+			"special_tokens": {
+				"[CLS]": {"id": "[CLS]", "ids": [101], "tokens": ["[CLS]"]},
+				"[SEP]": {"id": "[SEP]", "ids": [102], "tokens": ["[SEP]"]}
+			}
+		},
+		"decoder": {"type": "WordPiece", "prefix": "##"},
+		"model": {
+			"type": "WordPiece",
+			"unk_token": "[UNK]",
+			"continuing_subword_prefix": "##",
+			"max_input_chars_per_word": 100,
+			"vocab": {
+				"[PAD]": 0, "hello": 1, "world": 2, "test": 3,
+				"[UNK]": 100, "[CLS]": 101, "[SEP]": 102
+			}
+		}
+	}`)
+
+	tok, err := NewFromContent(nil, bertTokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		input   string
+		wantIDs []int
+	}{
+		{
+			name:    "single word gets CLS and SEP",
+			input:   "hello",
+			wantIDs: []int{101, 1, 102}, // [CLS] hello [SEP]
+		},
+		{
+			name:    "two words get CLS and SEP",
+			input:   "hello world",
+			wantIDs: []int{101, 1, 2, 102}, // [CLS] hello world [SEP]
+		},
+		{
+			name:    "empty input gets only CLS and SEP",
+			input:   "",
+			wantIDs: []int{101, 102}, // [CLS] [SEP]
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tok.Encode(tt.input)
+			if !intSliceEqual(got, tt.wantIDs) {
+				t.Errorf("Encode(%q) = %v, want %v", tt.input, got, tt.wantIDs)
+			}
+		})
+	}
+}
+
+// Test that post-processor span tracking works correctly.
+func TestPostProcessor_Spans(t *testing.T) {
+	bertTokenizerJSON := []byte(`{
+		"version": "1.0",
+		"added_tokens": [
+			{"id": 101, "content": "[CLS]", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+			{"id": 102, "content": "[SEP]", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true}
+		],
+		"normalizer": {"type": "BertNormalizer", "lowercase": true},
+		"pre_tokenizer": {"type": "BertPreTokenizer"},
+		"post_processor": {
+			"type": "TemplateProcessing",
+			"single": [
+				{"SpecialToken": {"id": "[CLS]", "type_id": 0}},
+				{"Sequence": {"id": "A", "type_id": 0}},
+				{"SpecialToken": {"id": "[SEP]", "type_id": 0}}
+			],
+			"special_tokens": {
+				"[CLS]": {"id": "[CLS]", "ids": [101], "tokens": ["[CLS]"]},
+				"[SEP]": {"id": "[SEP]", "ids": [102], "tokens": ["[SEP]"]}
+			}
+		},
+		"decoder": {"type": "WordPiece", "prefix": "##"},
+		"model": {
+			"type": "WordPiece",
+			"unk_token": "",
+			"continuing_subword_prefix": "##",
+			"vocab": {"hello": 1, "world": 2, "[CLS]": 101, "[SEP]": 102}
+		}
+	}`)
+
+	tok, err := NewFromContent(nil, bertTokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	result := tok.EncodeWithSpans("hello world")
+
+	// Expect: [CLS] hello world [SEP]
+	wantIDs := []int{101, 1, 2, 102}
+	if !intSliceEqual(result.IDs, wantIDs) {
+		t.Fatalf("IDs = %v, want %v", result.IDs, wantIDs)
+	}
+
+	// [CLS] and [SEP] spans should be {-1, -1} (synthetic tokens)
+	if result.Spans[0].Start != -1 || result.Spans[0].End != -1 {
+		t.Errorf("[CLS] span = %v, want {-1, -1}", result.Spans[0])
+	}
+	if result.Spans[3].Start != -1 || result.Spans[3].End != -1 {
+		t.Errorf("[SEP] span = %v, want {-1, -1}", result.Spans[3])
+	}
+
+	// "hello" and "world" should have valid spans
+	if result.Spans[1].Start != 0 || result.Spans[1].End != 5 {
+		t.Errorf("hello span = %v, want {0, 5}", result.Spans[1])
+	}
+	if result.Spans[2].Start != 6 || result.Spans[2].End != 11 {
+		t.Errorf("world span = %v, want {6, 11}", result.Spans[2])
+	}
+}
+
+// Test that null post_processor doesn't add anything (existing behavior preserved).
+func TestPostProcessor_Null(t *testing.T) {
+	tok, err := NewFromContent(nil, testWordPieceTokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	// With null post_processor, no [CLS]/[SEP] should be added
+	got := tok.Encode("hello world")
+	want := []int{1, 2}
+	if !intSliceEqual(got, want) {
+		t.Errorf("Encode with null post_processor = %v, want %v", got, want)
+	}
+}
+
+// Test BertProcessing post-processor (used by bert-base-uncased, etc.)
+func TestPostProcessor_BertProcessing(t *testing.T) {
+	bertTokenizerJSON := []byte(`{
+		"version": "1.0",
+		"added_tokens": [
+			{"id": 101, "content": "[CLS]", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+			{"id": 102, "content": "[SEP]", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true}
+		],
+		"normalizer": {"type": "BertNormalizer", "lowercase": true},
+		"pre_tokenizer": {"type": "BertPreTokenizer"},
+		"post_processor": {
+			"type": "BertProcessing",
+			"sep": ["[SEP]", 102],
+			"cls": ["[CLS]", 101]
+		},
+		"decoder": {"type": "WordPiece", "prefix": "##"},
+		"model": {
+			"type": "WordPiece",
+			"unk_token": "",
+			"continuing_subword_prefix": "##",
+			"vocab": {"hello": 1, "world": 2, "[CLS]": 101, "[SEP]": 102}
+		}
+	}`)
+
+	tok, err := NewFromContent(nil, bertTokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	got := tok.Encode("hello world")
+	want := []int{101, 1, 2, 102} // [CLS] hello world [SEP]
+	if !intSliceEqual(got, want) {
+		t.Errorf("Encode = %v, want %v", got, want)
+	}
+}
+
+// Test RobertaProcessing post-processor.
+func TestPostProcessor_RobertaProcessing(t *testing.T) {
+	robertaTokenizerJSON := []byte(`{
+		"version": "1.0",
+		"added_tokens": [
+			{"id": 0, "content": "<s>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+			{"id": 2, "content": "</s>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true}
+		],
+		"normalizer": null,
+		"pre_tokenizer": {"type": "Whitespace"},
+		"post_processor": {
+			"type": "RobertaProcessing",
+			"sep": ["</s>", 2],
+			"cls": ["<s>", 0]
+		},
+		"decoder": null,
+		"model": {
+			"type": "WordPiece",
+			"unk_token": "",
+			"continuing_subword_prefix": "##",
+			"vocab": {"hello": 1, "world": 3, "<s>": 0, "</s>": 2}
+		}
+	}`)
+
+	tok, err := NewFromContent(nil, robertaTokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	got := tok.Encode("hello world")
+	want := []int{0, 1, 3, 2} // <s> hello world </s>
+	if !intSliceEqual(got, want) {
+		t.Errorf("Encode = %v, want %v", got, want)
+	}
+}
+
+// Test EncodeWithOptions(text, false) skips post-processing.
+func TestEncodeWithOptions(t *testing.T) {
+	bertTokenizerJSON := []byte(`{
+		"version": "1.0",
+		"added_tokens": [
+			{"id": 101, "content": "[CLS]", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+			{"id": 102, "content": "[SEP]", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true}
+		],
+		"normalizer": {"type": "BertNormalizer", "lowercase": true},
+		"pre_tokenizer": {"type": "BertPreTokenizer"},
+		"post_processor": {
+			"type": "BertProcessing",
+			"sep": ["[SEP]", 102],
+			"cls": ["[CLS]", 101]
+		},
+		"decoder": {"type": "WordPiece", "prefix": "##"},
+		"model": {
+			"type": "WordPiece",
+			"unk_token": "",
+			"continuing_subword_prefix": "##",
+			"vocab": {"hello": 1, "world": 2, "[CLS]": 101, "[SEP]": 102}
+		}
+	}`)
+
+	tok, err := NewFromContent(nil, bertTokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	// EncodeWithOptions(text, true) includes [CLS]/[SEP]
+	full := tok.EncodeWithOptions("hello world", true)
+	wantFull := []int{101, 1, 2, 102}
+	if !intSliceEqual(full, wantFull) {
+		t.Errorf("EncodeWithOptions(true) = %v, want %v", full, wantFull)
+	}
+
+	// EncodeWithOptions(text, false) skips post-processing
+	raw := tok.EncodeWithOptions("hello world", false)
+	wantRaw := []int{1, 2}
+	if !intSliceEqual(raw, wantRaw) {
+		t.Errorf("EncodeWithOptions(false) = %v, want %v", raw, wantRaw)
+	}
+}
+
 // Benchmarks for offset tracking overhead
 
 func BenchmarkEncode(b *testing.B) {
