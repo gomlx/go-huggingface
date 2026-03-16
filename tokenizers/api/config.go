@@ -30,17 +30,11 @@ func (t *FlexToken) UnmarshalJSON(data []byte) error {
 	var obj struct {
 		Content string `json:"content"`
 	}
-	if err := json.Unmarshal(data, &obj); err == nil {
-		*t = FlexToken(obj.Content)
-		return nil
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return err
 	}
-	// Fall back to empty.
-	*t = ""
+	*t = FlexToken(obj.Content)
 	return nil
-}
-
-func (t FlexToken) String() string {
-	return string(t)
 }
 
 // Config struct to hold HuggingFace's tokenizer_config.json contents.

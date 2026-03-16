@@ -187,35 +187,24 @@ func (m *Model) getExtraReader(i int) (*Reader, error) {
 	return m.extras[i].reader, nil
 }
 
-// findTensorFile returns the index of the file containing the named tensor
-// (0=primary, 1+=extra). Returns -1 if not found.
-func (m *Model) findTensorFile(name string) int {
-	if _, ok := m.File.GetTensorInfo(name); ok {
-		return 0
+// findTensor searches all files for the named tensor, returning its info
+// and file index (0=primary, 1+=extra). Returns -1 if not found.
+func (m *Model) findTensor(name string) (TensorInfo, int) {
+	if info, ok := m.File.GetTensorInfo(name); ok {
+		return info, 0
 	}
 	for i := range m.extras {
-		if _, ok := m.extras[i].file.GetTensorInfo(name); ok {
-			return i + 1
+		if info, ok := m.extras[i].file.GetTensorInfo(name); ok {
+			return info, i + 1
 		}
 	}
-	return -1
-}
-
-// fileForIndex returns the File at the given index (0=primary, 1+=extra).
-func (m *Model) fileForIndex(idx int) *File {
-	if idx == 0 {
-		return m.File
-	}
-	return m.extras[idx-1].file
+	return TensorInfo{}, -1
 }
 
 // GetTensorInfo looks up tensor info by name across all files.
 func (m *Model) GetTensorInfo(name string) (TensorInfo, bool) {
-	idx := m.findTensorFile(name)
-	if idx < 0 {
-		return TensorInfo{}, false
-	}
-	return m.fileForIndex(idx).GetTensorInfo(name)
+	info, idx := m.findTensor(name)
+	return info, idx >= 0
 }
 
 // ListTensorNames returns all tensor names across all files.
@@ -256,9 +245,9 @@ func (m *Model) Architecture() string {
 	return m.File.Architecture()
 }
 
-// GetTensor loads a single tensor by name, dequantizing if needed.
+// ReadTensor loads a single tensor by name, dequantizing if needed.
 // Searches the primary file first, then extra files.
-func (m *Model) GetTensor(tensorName string) (*TensorAndName, error) {
+func (m *Model) ReadTensor(tensorName string) (*TensorAndName, error) {
 	if m.File == nil {
 		return nil, errors.Errorf("gguf: model not loaded, call Load() first")
 	}
@@ -275,9 +264,9 @@ func (m *Model) GetTensor(tensorName string) (*TensorAndName, error) {
 	return &TensorAndName{Name: tensorName, Tensor: t}, nil
 }
 
-// GetTensorRaw loads raw bytes for a tensor without dequantization.
+// ReadTensorBytes loads raw bytes for a tensor without dequantization.
 // Searches the primary file first, then extra files.
-func (m *Model) GetTensorRaw(tensorName string) ([]byte, *TensorInfo, error) {
+func (m *Model) ReadTensorBytes(tensorName string) ([]byte, *TensorInfo, error) {
 	if m.File == nil {
 		return nil, nil, errors.Errorf("gguf: model not loaded, call Load() first")
 	}
@@ -292,7 +281,7 @@ func (m *Model) GetTensorRaw(tensorName string) ([]byte, *TensorInfo, error) {
 
 // readerForTensor returns the reader for the file containing the named tensor.
 func (m *Model) readerForTensor(name string) (*Reader, error) {
-	idx := m.findTensorFile(name)
+	_, idx := m.findTensor(name)
 	if idx < 0 {
 		return nil, errors.Errorf("gguf: tensor %q not found", name)
 	}
