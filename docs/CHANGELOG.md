@@ -1,5 +1,16 @@
 # `go-huggingface` Changelog
 
+## v0.3.3
+
+- Added `PostProcessor` support and `EncodeWithOptions` to the tokenizer API.
+- Split on added tokens before pre-tokenization in `hftokenizer`.
+
+## v0.3.2
+
+- Added `safetensors` support.
+- Added support for GGUF file format.
+- Tokenizer API improvements.
+
 ## v0.3.1
 
 - Fixed go.mod/go.sum.

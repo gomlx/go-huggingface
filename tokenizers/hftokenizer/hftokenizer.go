@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/tokenizers/api"
@@ -66,17 +67,21 @@ type PreTokenizer struct {
 }
 
 // PostProcessor represents the post-processor configuration.
+// Supports TemplateProcessing, BertProcessing, and RobertaProcessing types.
 type PostProcessor struct {
-	Type          string         `json:"type"`
-	Single        []PostProcItem `json:"single"`
-	Pair          []PostProcItem `json:"pair"`
+	Type          string                          `json:"type"`
+	Single        []PostProcItem                  `json:"single"`
+	Pair          []PostProcItem                  `json:"pair"`
 	SpecialTokens map[string]PostProcSpecialToken `json:"special_tokens"`
+	// Sep and Cls are used by BertProcessing and RobertaProcessing.
+	// Format in JSON: ["[SEP]", 102] — a [token_string, token_id] tuple.
+	Sep json.RawMessage `json:"sep"`
+	Cls json.RawMessage `json:"cls"`
 }
 
-// PostProcItem is an item in post-processing.
+// PostProcItem is a tagged union item in TemplateProcessing templates.
+// Exactly one of SpecialToken or Sequence is non-nil.
 type PostProcItem struct {
-	ID           string `json:"id,omitempty"`
-	TypeID       int    `json:"type_id"`
 	SpecialToken *struct {
 		ID     string `json:"id"`
 		TypeID int    `json:"type_id"`
@@ -87,7 +92,7 @@ type PostProcItem struct {
 	} `json:"Sequence,omitempty"`
 }
 
-// PostProcSpecialToken defines a special token for post-processing.
+// PostProcSpecialToken defines a special token for TemplateProcessing.
 type PostProcSpecialToken struct {
 	ID     string   `json:"id"`
 	IDs    []int    `json:"ids"`
@@ -216,6 +221,10 @@ type Tokenizer struct {
 
 	// Added tokens lookup (content -> id)
 	addedTokens map[string]int
+
+	// addedTokensSorted lists added tokens sorted longest-first for greedy
+	// matching when splitting input text. Derived from addedTokens at construction.
+	addedTokensSorted []addedTokenEntry
 }
 
 // Compile time assert that Tokenizer implements api.Tokenizer interface.
@@ -272,11 +281,16 @@ func NewFromContent(config *api.Config, content []byte) (*Tokenizer, error) {
 		t.idToToken[id] = token
 	}
 
-	// Build added tokens map
+	// Build added tokens map and sorted list for splitting
 	for _, at := range tj.AddedTokens {
 		t.addedTokens[at.Content] = at.ID
 		t.idToToken[at.ID] = at.Content
+		t.addedTokensSorted = append(t.addedTokensSorted, addedTokenEntry{content: at.Content, id: at.ID})
 	}
+	// Sort longest-first for greedy matching
+	sort.Slice(t.addedTokensSorted, func(i, j int) bool {
+		return len(t.addedTokensSorted[i].content) > len(t.addedTokensSorted[j].content)
+	})
 
 	// Build merge ranks for BPE
 	if tj.Model.Type == "BPE" {
@@ -354,14 +368,22 @@ func (t *Tokenizer) resolveSpecialTokens() {
 	}
 }
 
-// Encode converts text to a sequence of token IDs.
-//
-// Note: This delegates to EncodeWithSpans for simplicity. The overhead of computing
-// spans is minimal (just tracking byte positions during tokenization), so we avoid
-// maintaining duplicate code paths. If profiling shows this to be a bottleneck for
-// your use case, please open an issue.
+// Encode converts text to a sequence of token IDs, including post-processing
+// (e.g., [CLS]/[SEP] wrapping for BERT-style models).
+// This matches Python's tokenizer(text) default behavior.
 func (t *Tokenizer) Encode(text string) []int {
-	result := t.EncodeWithSpans(text)
+	return t.EncodeWithOptions(text, true)
+}
+
+// EncodeWithOptions converts text to a sequence of token IDs.
+// When addSpecialTokens is true, post-processing is applied (e.g., [CLS]/[SEP]
+// for BERT-style models). When false, only tokenization is performed.
+// This matches the Rust HuggingFace tokenizer's EncodeWithOptions signature.
+func (t *Tokenizer) EncodeWithOptions(text string, addSpecialTokens bool) []int {
+	result := t.encodeCore(text)
+	if addSpecialTokens {
+		result.IDs, _ = t.applyPostProcessor(result.IDs, result.Spans)
+	}
 	return result.IDs
 }
 
@@ -372,28 +394,205 @@ type wordWithOffset struct {
 	end   int // end position in original text (exclusive)
 }
 
-// EncodeWithSpans converts text to a sequence of token IDs along with their byte spans.
+// EncodeWithSpans converts text to a sequence of token IDs along with their byte spans,
+// including post-processing.
 func (t *Tokenizer) EncodeWithSpans(text string) api.EncodingResult {
-	// Apply normalization with span tracking
-	normalized, normSpans := t.normalizeWithSpans(text)
+	result := t.encodeCore(text)
+	result.IDs, result.Spans = t.applyPostProcessor(result.IDs, result.Spans)
+	return result
+}
 
-	// Apply pre-tokenization with span tracking
-	words := t.preTokenizeWithSpans(normalized, normSpans)
+// encodeCore runs the core tokenization pipeline (split added tokens → normalize →
+// pre-tokenize → tokenize) without post-processing.
+func (t *Tokenizer) encodeCore(text string) api.EncodingResult {
+	segments := t.splitOnAddedTokens(text)
 
-	// Tokenize each word according to the model type
 	var ids []int
 	var spans []api.TokenSpan
 
-	for _, word := range words {
-		wordIDs, wordSpans := t.tokenizeWordWithSpans(word)
-		ids = append(ids, wordIDs...)
-		spans = append(spans, wordSpans...)
+	for _, seg := range segments {
+		if seg.isAddedToken {
+			ids = append(ids, seg.tokenID)
+			spans = append(spans, api.TokenSpan{Start: seg.start, End: seg.end})
+			continue
+		}
+
+		segText := text[seg.start:seg.end]
+
+		normalized, normSpans := t.normalizeWithSpans(segText)
+		for i := range normSpans {
+			normSpans[i] += seg.start
+		}
+
+		words := t.preTokenizeWithSpans(normalized, normSpans)
+
+		for _, word := range words {
+			wordIDs, wordSpans := t.tokenizeWordWithSpans(word)
+			ids = append(ids, wordIDs...)
+			spans = append(spans, wordSpans...)
+		}
 	}
 
 	return api.EncodingResult{
 		IDs:   ids,
 		Spans: spans,
 	}
+}
+
+// applyPostProcessor applies the post_processor to add special tokens
+// (e.g., [CLS] prefix and [SEP] suffix for BERT-style models).
+// This matches the Rust tokenizer's addSpecialTokens=true behavior.
+//
+// Supported types: TemplateProcessing, BertProcessing, RobertaProcessing.
+func (t *Tokenizer) applyPostProcessor(ids []int, spans []api.TokenSpan) ([]int, []api.TokenSpan) {
+	pp := t.tokenizer.PostProcessor
+	if pp == nil {
+		return ids, spans
+	}
+
+	switch pp.Type {
+	case "TemplateProcessing":
+		return t.applyTemplateProcessing(pp, ids, spans)
+	case "BertProcessing", "RobertaProcessing":
+		return t.applyBertProcessing(pp, ids, spans)
+	default:
+		return ids, spans
+	}
+}
+
+// applyTemplateProcessing handles TemplateProcessing post-processors.
+func (t *Tokenizer) applyTemplateProcessing(pp *PostProcessor, ids []int, spans []api.TokenSpan) ([]int, []api.TokenSpan) {
+	if len(pp.Single) == 0 {
+		return ids, spans
+	}
+
+	var outIDs []int
+	var outSpans []api.TokenSpan
+
+	for _, item := range pp.Single {
+		if item.SpecialToken != nil {
+			st, ok := pp.SpecialTokens[item.SpecialToken.ID]
+			if ok && len(st.IDs) > 0 {
+				outIDs = append(outIDs, st.IDs...)
+				for range st.IDs {
+					outSpans = append(outSpans, api.TokenSpan{Start: -1, End: -1})
+				}
+			}
+		} else if item.Sequence != nil {
+			outIDs = append(outIDs, ids...)
+			outSpans = append(outSpans, spans...)
+		}
+	}
+
+	return outIDs, outSpans
+}
+
+// parseTokenIDTuple parses a JSON [string, int] tuple (e.g., ["[CLS]", 101])
+// used by BertProcessing and RobertaProcessing.
+func parseTokenIDTuple(raw json.RawMessage) (int, bool) {
+	if len(raw) == 0 {
+		return 0, false
+	}
+	var tuple [2]json.RawMessage
+	if err := json.Unmarshal(raw, &tuple); err != nil {
+		return 0, false
+	}
+	var id int
+	if err := json.Unmarshal(tuple[1], &id); err != nil {
+		return 0, false
+	}
+	return id, true
+}
+
+// applyBertProcessing handles BertProcessing and RobertaProcessing post-processors.
+// Format: {"type": "BertProcessing", "sep": ["[SEP]", 102], "cls": ["[CLS]", 101]}
+func (t *Tokenizer) applyBertProcessing(pp *PostProcessor, ids []int, spans []api.TokenSpan) ([]int, []api.TokenSpan) {
+	clsID, hasCLS := parseTokenIDTuple(pp.Cls)
+	sepID, hasSEP := parseTokenIDTuple(pp.Sep)
+
+	if !hasCLS && !hasSEP {
+		return ids, spans
+	}
+
+	syntheticSpan := api.TokenSpan{Start: -1, End: -1}
+
+	outIDs := make([]int, 0, len(ids)+2)
+	outSpans := make([]api.TokenSpan, 0, len(ids)+2)
+
+	if hasCLS {
+		outIDs = append(outIDs, clsID)
+		outSpans = append(outSpans, syntheticSpan)
+	}
+	outIDs = append(outIDs, ids...)
+	outSpans = append(outSpans, spans...)
+	if hasSEP {
+		outIDs = append(outIDs, sepID)
+		outSpans = append(outSpans, syntheticSpan)
+	}
+
+	return outIDs, outSpans
+}
+
+// addedTokenEntry pairs a token string with its ID for efficient matching.
+type addedTokenEntry struct {
+	content string
+	id      int
+}
+
+// textSegment represents a piece of input text, either an added token or regular text.
+type textSegment struct {
+	start        int  // byte offset in original text
+	end          int  // byte offset in original text
+	isAddedToken bool // true if this segment matches an added token
+	tokenID      int  // only valid if isAddedToken is true
+}
+
+// splitOnAddedTokens splits text into segments of added tokens and regular text.
+// Added tokens are matched greedily (longest first).
+func (t *Tokenizer) splitOnAddedTokens(text string) []textSegment {
+	if len(text) == 0 {
+		return nil
+	}
+	if len(t.addedTokensSorted) == 0 {
+		return []textSegment{{start: 0, end: len(text)}}
+	}
+
+	var segments []textSegment
+	regularStart := 0 // start of current regular text run
+	pos := 0
+
+	for pos < len(text) {
+		matched := false
+		for _, entry := range t.addedTokensSorted {
+			if pos+len(entry.content) <= len(text) && text[pos:pos+len(entry.content)] == entry.content {
+				// Flush any preceding regular text
+				if regularStart < pos {
+					segments = append(segments, textSegment{start: regularStart, end: pos})
+				}
+				segments = append(segments, textSegment{
+					start:        pos,
+					end:          pos + len(entry.content),
+					isAddedToken: true,
+					tokenID:      entry.id,
+				})
+				pos += len(entry.content)
+				regularStart = pos
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			_, size := utf8.DecodeRuneInString(text[pos:])
+			pos += size
+		}
+	}
+
+	// Flush any trailing regular text
+	if regularStart < len(text) {
+		segments = append(segments, textSegment{start: regularStart, end: len(text)})
+	}
+
+	return segments
 }
 
 // normalizeWithSpans applies normalization and returns the normalized text along with
