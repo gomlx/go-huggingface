@@ -1,5 +1,10 @@
 # `go-huggingface` Changelog
 
+## Next
+
+- Added `models/transformer` package for loading HuggingFace transformer models.
+  (Tested with tencent/KaLM-Embedding-Gemma3-12B-2511)
+
 ## v0.3.3
 
 - Added `PostProcessor` support and `EncodeWithOptions` to the tokenizer API.
