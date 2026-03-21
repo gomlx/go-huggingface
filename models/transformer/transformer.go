@@ -15,12 +15,25 @@ import (
 
 // WithCausalMask sets whether to use a causal mask in the attention layers.
 //
-// The KaLM paper says that the model is trained without a causal mask, but HuggingFace transformer
-// leaves that on by default. We default to off, but we make it configurable.
-// When porting to generic transformer package, causal mask handling depends on the model.
+// Some models are trained with a causal mask, others without, but it is not documented
+// in the usual model configuration.
+//
+//	The default is to use a causal mask.
 func (m *Model) WithCausalMask(useCausalMask bool) *Model {
 	m.useCausalMask = useCausalMask
 	return m
+}
+
+// BuildGraph takes the input tokens and creates the GoMLX graph for the model.
+// It returns the final sentence embeddings if appropriate, otherwise just final hidden states.
+func (m *Model) BuildGraph(ctx *context.Context, tokens *graph.Node) *graph.Node {
+	if len(m.Modules) > 0 || m.PoolingConfig != nil {
+		return m.SentenceEmbeddingGraph(ctx, tokens)
+	}
+
+	// Default to just getting the final hidden state of all layers
+	outputs := m.BuildAllLayersGraph(ctx, tokens)
+	return outputs[len(outputs)-1]
 }
 
 // BuildAllLayersGraph takes the input tokens and creates the GoMLX graph for the embedding layer.
@@ -88,7 +101,7 @@ func (m *Model) BuildAllLayersGraph(ctx *context.Context, tokens *graph.Node) (o
 		WithCausalMask(m.useCausalMask)
 
 	x := embeddings
-	for layerIdx := 0; layerIdx < m.Config.NumHiddenLayers; layerIdx++ {
+	for layerIdx := range m.Config.NumHiddenLayers {
 		layerCtx := ctx.In(fmt.Sprintf("layer_%d", layerIdx))
 		x = tm.ForwardLayer(layerCtx, x, layerIdx, false, 0)
 
@@ -99,7 +112,6 @@ func (m *Model) BuildAllLayersGraph(ctx *context.Context, tokens *graph.Node) (o
 
 		outputs = append(outputs, x)
 	}
-
 	return outputs
 }
 
@@ -183,16 +195,4 @@ func (m *Model) ApplySentencePooling(ctx *context.Context, hiddenStates, tokens 
 
 	exceptions.Panicf("no supported pooling mode enabled in PoolingConfig: %+v", cfg)
 	return nil
-}
-
-// BuildGraph takes the input tokens and creates the GoMLX graph for the model.
-// It returns the final sentence embeddings if appropriate, otherwise just final hidden states.
-func (m *Model) BuildGraph(ctx *context.Context, tokens *graph.Node) *graph.Node {
-	if len(m.Modules) > 0 || m.PoolingConfig != nil {
-		return m.SentenceEmbeddingGraph(ctx, tokens)
-	}
-	
-	// Default to just getting the final hidden state of all layers
-	outputs := m.BuildAllLayersGraph(ctx, tokens)
-	return outputs[len(outputs)-1]
 }
