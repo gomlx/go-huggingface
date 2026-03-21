@@ -1,8 +1,8 @@
 # `go-huggingface` Changelog
 
-## Next
+## v0.3.4
 
-- Added `models/transformer` package for loading HuggingFace transformer models.
+- Added `models/transformer` package for loading HuggingFace transformer models (Experimental).
   (Tested with tencent/KaLM-Embedding-Gemma3-12B-2511)
 
 ## v0.3.3
