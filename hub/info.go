@@ -89,7 +89,7 @@ func (r *Repo) DownloadInfo(forceDownload bool) error {
 
 	// Download info file if needed.
 	if !files.Exists(infoFilePath) || forceDownload {
-		err := r.lockedDownload(context.Background(), r.infoURL(), infoFilePath, forceDownload, nil)
+		err := r.GetDownloadManager().LockedDownload(context.Background(), r.infoURL(), infoFilePath, forceDownload, nil)
 		if err != nil {
 			return errors.WithMessagef(err, "failed to download repository info")
 		}
