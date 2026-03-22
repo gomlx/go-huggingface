@@ -1,6 +1,7 @@
 package datasets
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"testing"
@@ -19,7 +20,10 @@ func TestDatasetInfo(t *testing.T) {
 	// Test creating the dataset properly inherited the Repo ID and Type
 	assert.Equal(t, "microsoft/ms_marco", ds.ID)
 
-	info := ds.Info()
+	info, err := ds.Info()
+	require.NoError(t, err)
+	err = ds.DownloadParquetFilesInfo(context.Background(), false)
+	require.NoError(t, err)
 
 	require.NotNil(t, info, "Dataset info should not be nil")
 	require.NotNil(t, info.DatasetInfo, "DatasetInfo block should not be nil")
@@ -30,7 +34,6 @@ func TestDatasetInfo(t *testing.T) {
 
 	require.NotEmpty(t, configInfo.Features, "Features should not be empty")
 
-	fmt.Printf("Info for %q:\n%s\n", ds.ID, info)
-
+	fmt.Printf("%s\n", ds)
 	fmt.Printf("\nGenerated Struct for Config v1.1:\n%s", configInfo.GenerateGoStruct("MsMarcoRecord"))
 }

@@ -1,5 +1,10 @@
 # `go-huggingface` Changelog
 
+## Next
+
+- Added `datasets` package for loading and using datasets from the HuggingFace Hub.
+- Added `cmd/generate_dataset_structs` for generating Go structs for dataset records.
+
 ## v0.3.4
 
 - Added `models/transformer` package for loading HuggingFace transformer models (Experimental).
