@@ -37,3 +37,21 @@ func TestDatasetInfo(t *testing.T) {
 	fmt.Printf("%s\n", ds)
 	fmt.Printf("\nGenerated Struct for Config v1.1:\n%s", configInfo.GenerateGoStruct("MsMarcoRecord"))
 }
+
+func TestListFiles(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		t.Skip("Skipping network tests in CI")
+	}
+
+	ds := New("microsoft/ms_marco")
+	files, err := ds.ListFiles("v1.1", "test")
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+
+	for _, f := range files {
+		assert.Equal(t, "v1.1", f.Config)
+		assert.Equal(t, "test", f.Split)
+		assert.NotEmpty(t, f.Filename)
+		assert.NotEmpty(t, f.URL)
+	}
+}
