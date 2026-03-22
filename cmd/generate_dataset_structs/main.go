@@ -13,7 +13,7 @@ import (
 
 var (
 	datasetFlag = flag.String("dataset", "", "dataset name to extract the info from, e.g.: \"microsoft/ms_marco\"")
-	versionFlag = flag.String("version", "", "version of the dataset to use, e.g.: \"v2.1\". If empty, it will be automatically chosen if only one exists. If multiple versions exist, lists them and exits.")
+	subsetFlag  = flag.String("subset", "", "subset of the dataset to use. This is sometimes used for versioning, e.g.: \"v2.1\". If empty, it will be automatically chosen if only one exists. If multiple subsets exist, lists them and exits.")
 	outputFlag  = flag.String("output", "", "file name where to output the generated Go code. If empty, the structs are output to stdout. It requires -package to be set also.")
 	packageFlag = flag.String("package", "", "name of the package to use when outputting a .go file with output")
 )
@@ -36,28 +36,29 @@ func main() {
 		log.Fatal("Failed to retrieve dataset info or dataset has no configurations")
 	}
 
-	version := *versionFlag
-	if version == "" {
+	subset := *subsetFlag
+	if subset == "" {
 		if len(info.DatasetInfo) == 1 {
-			// Choose the only version
+			// Choose the only subset
 			for k := range info.DatasetInfo {
-				version = k
+				subset = k
 			}
-			log.Printf("Automatically selected the only available version: %q", version)
+			log.Printf("Automatically selected the only available subset: %q", subset)
 		} else {
-			// List available versions
-			var versions []string
+			// List available subsets
+			var subsets []string
 			for k := range info.DatasetInfo {
-				versions = append(versions, k)
+				subsets = append(subsets, k)
 			}
-			sort.Strings(versions)
-			log.Fatalf("Multiple versions available: %s. Please specify one using -version flag.", strings.Join(versions, ", "))
+			sort.Strings(subsets)
+			fmt.Printf("Multiple subsets available: \"%s\"\nPlease specify one using -subset flag.\n", strings.Join(subsets, "\", \""))
+			os.Exit(1)
 		}
 	}
 
-	configInfo, ok := info.DatasetInfo[version]
+	configInfo, ok := info.DatasetInfo[subset]
 	if !ok {
-		log.Fatalf("Version %q not found in dataset info.", version)
+		log.Fatalf("Version %q not found in dataset info.", subset)
 	}
 
 	// Generate a root struct name from the dataset name
