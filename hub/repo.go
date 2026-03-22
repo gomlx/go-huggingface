@@ -158,6 +158,12 @@ func (r *Repo) repoCacheDir() (string, error) {
 	return dir, nil
 }
 
+// CacheDir returns the cache subdirectory for the repository.
+// It creates the directory if it doesn't exist.
+func (r *Repo) CacheDir() (string, error) {
+	return r.repoCacheDir()
+}
+
 // FileURL returns the URL from which to download the file from HuggingFace.
 //
 // Usually, not used directly (use DownloadFile instead), but in case someone needs for debugging.

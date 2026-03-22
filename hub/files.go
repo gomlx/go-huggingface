@@ -114,7 +114,7 @@ func (r *Repo) DownloadFilesCtx(ctx context.Context, repoFiles ...string) (downl
 	}
 
 	// Create download manager, if one hasn't been created yet.
-	downloadManager := r.getDownloadManager()
+	downloadManager := r.GetDownloadManager()
 
 	// Get/create repoCacheDir.
 	var repoCacheDir string
@@ -229,7 +229,7 @@ func (r *Repo) DownloadFilesCtx(ctx context.Context, repoFiles ...string) (downl
 			blobPath := path.Join(repoCacheDir, "blobs", etag)
 			if !files.Exists(blobPath) {
 				requireDownload++ // This file require download.
-				err := r.lockedDownload(ctx, fileURL, blobPath, false, func(downloadedBytes, totalBytes int64) {
+				err := r.GetDownloadManager().LockedDownload(ctx, fileURL, blobPath, false, func(downloadedBytes, totalBytes int64) {
 					// Execute at every report of download.
 					downloadingMu.Lock()
 					defer downloadingMu.Unlock()
