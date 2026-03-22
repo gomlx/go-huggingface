@@ -8,6 +8,7 @@ import (
 
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/models/safetensors"
+	"github.com/gomlx/go-huggingface/tokenizers"
 	"github.com/gomlx/gomlx/pkg/ml/context"
 )
 
@@ -28,6 +29,8 @@ type Model struct {
 	// Cached parameter count and bytes for Description
 	totalParameters *int64
 	totalBytes      *int64
+
+	tokenizer tokenizers.Tokenizer
 }
 
 // LoadModel loads the configurations into the Model struct.
@@ -246,4 +249,19 @@ func mapTensorName(safetensorsName string) (scopePath []string, varName string, 
 	}
 
 	return nil, "", false
+}
+
+// SetTokenizer sets the tokenizer of the Model.
+func (m *Model) SetTokenizer(tok tokenizers.Tokenizer) {
+	m.tokenizer = tok
+}
+
+// GetTokenizer returns the tokenizer for the model if it exists, or if it hasn't been set yet, attempts to create the default tokenizer for the repo.
+func (m *Model) GetTokenizer() (tokenizers.Tokenizer, error) {
+	if m.tokenizer != nil {
+		return m.tokenizer, nil
+	}
+	var err error
+	m.tokenizer, err = tokenizers.New(m.Repo)
+	return m.tokenizer, err
 }
