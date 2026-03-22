@@ -54,13 +54,13 @@ func TestGenerateGoStruct(t *testing.T) {
 		"\tAnswers []string `json:\"answers\" parquet:\"answers\"`\n" +
 		"\tPassages []PassagesItem `json:\"passages\" parquet:\"passages\"`\n" +
 		"\tQuery string `json:\"query\" parquet:\"query\"`\n" +
-		"\tQueryId int32 `json:\"query_id\" parquet:\"query_id\"`\n" +
+		"\tQueryID int32 `json:\"query_id\" parquet:\"query_id\"`\n" +
 		"}"
 
 	expected2 := "type PassagesItem struct {\n" +
 		"\tIsSelected int32 `json:\"is_selected\" parquet:\"is_selected\"`\n" +
 		"\tPassageText string `json:\"passage_text\" parquet:\"passage_text\"`\n" +
-		"\tUrl string `json:\"url\" parquet:\"url\"`\n" +
+		"\tURL string `json:\"url\" parquet:\"url\"`\n" +
 		"}"
 
 	// Ensure the builder included both structs precisely as formatted
@@ -82,7 +82,7 @@ func TestGenerateGoStructNoParquet(t *testing.T) {
 	generated := config.GenerateGoStruct("SimpleRecord")
 	
 	expected := "type SimpleRecord struct {\n" +
-		"\tQueryId int32 `json:\"query_id\"`\n" +
+		"\tQueryID int32 `json:\"query_id\"`\n" +
 		"}"
 
 	assert.True(t, strings.Contains(generated, expected), "Expected json-only annotations on non-parquet builders")

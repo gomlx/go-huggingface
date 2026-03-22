@@ -7,6 +7,24 @@ import (
 	"strings"
 )
 
+// Acronyms is a map of common abbreviations that should be fully capitalized when generating Go structs.
+// For example, "id" becomes "ID" instead of "Id".
+var Acronyms = map[string]struct{}{
+	"id":    {},
+	"html":  {},
+	"url":   {},
+	"http":  {},
+	"api":   {},
+	"ascii": {},
+	"css":   {},
+	"dns":   {},
+	"https": {},
+	"json":  {},
+	"ip":    {},
+	"uri":   {},
+	"tcp":   {},
+}
+
 // GenerateGoStruct returns Go source code defining the structures to hold records
 // for this dataset configuration.
 // It parses the ConfigInfo.Features into type-safe Go structs.
@@ -123,7 +141,12 @@ func toCamelCase(s string) string {
 	parts := strings.Split(s, "_")
 	for i := range parts {
 		if len(parts[i]) > 0 {
-			parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
+			lower := strings.ToLower(parts[i])
+			if _, ok := Acronyms[lower]; ok {
+				parts[i] = strings.ToUpper(parts[i])
+			} else {
+				parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
+			}
 		}
 	}
 	return strings.Join(parts, "")
