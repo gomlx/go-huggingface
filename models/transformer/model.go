@@ -10,6 +10,7 @@ import (
 	"github.com/gomlx/go-huggingface/models/safetensors"
 	"github.com/gomlx/go-huggingface/tokenizers"
 	"github.com/gomlx/gomlx/pkg/ml/context"
+	"github.com/pkg/errors"
 )
 
 // Model holds all the configuration loaded about the model.
@@ -90,13 +91,13 @@ func LoadModel(repo *hub.Repo) (*Model, error) {
 }
 
 // LoadContext uses models/safetensors to load the variables of the model to a context.
-func (m *Model) LoadContext(ctx *context.Context) {
+func (m *Model) LoadContext(ctx *context.Context) error {
 	var totalParams int64
 	var totalBytes int64
 
 	for tensorAndName, err := range safetensors.IterTensorsFromRepo(m.Repo) {
 		if err != nil {
-			panic(fmt.Errorf("failed to iterate tensors: %w", err))
+			return errors.WithMessagef(err, "failed loading variables of models %q", m.Repo.ID)
 		}
 		scopePath, varName, ok := mapTensorName(tensorAndName.Name)
 		if !ok {
@@ -121,6 +122,7 @@ func (m *Model) LoadContext(ctx *context.Context) {
 
 	m.totalParameters = &totalParams
 	m.totalBytes = &totalBytes
+	return nil
 }
 
 // Description returns a string summarizing the model architecture, size, and loaded configurations.
