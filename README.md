@@ -318,7 +318,7 @@ func main() {
     // You can break early, but the initial download request might still be large.
     // For manual samples, you can also use datasets.IterParquetFromFile(localFile).
     ii := 0
-    for row, err := range datasets.IterParquetFromDataset[FinewebRecord](ds) {
+    for row, err := range datasets.IterParquetFromDataset[FinewebRecord](ds, "sample-10BT", "train") {
         if err != nil {
             panic(err)
         }
