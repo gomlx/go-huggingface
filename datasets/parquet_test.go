@@ -1,6 +1,7 @@
 package datasets
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
@@ -36,4 +37,45 @@ func TestIterParquetFromFile(t *testing.T) {
 		}
 	}
 	assert.Greater(t, count, 0)
+}
+
+func TestParquetFixListSchema(t *testing.T) {
+	// Based on HuggingFace dataset "microsoft/ms_marco", config "v2.1", split "validation"
+	type PassagesItem struct {
+		IsSelected  []int32  `json:"is_selected" parquet:"is_selected,list"`
+		PassageText []string `json:"passage_text" parquet:"passage_text,list"`
+		URL         []string `json:"url" parquet:"url,list"`
+	}
+
+	type MsMarcoRecord struct {
+		Answers           []string     `json:"answers" parquet:"answers,list"`
+		Passages          PassagesItem `json:"passages" parquet:"passages"`
+		Query             string       `json:"query" parquet:"query"`
+		QueryID           int32        `json:"query_id" parquet:"query_id"`
+		QueryType         string       `json:"query_type" parquet:"query_type"`
+		WellFormedAnswers []string     `json:"wellFormedAnswers" parquet:"wellFormedAnswers,list"`
+	}
+
+	count := 0
+	limit := 12
+	for record, err := range IterParquetFromFile[MsMarcoRecord]("ms_marco_v2.1_validation_10.parquet") {
+		require.NoError(t, err)
+		fmt.Printf("Record #%02d: %+v\n", count, record)
+		assert.NotEmpty(t, record.Query)
+		assert.NotEmpty(t, record.Answers)
+		assert.NotEmpty(t, record.Answers[0])
+		assert.NotEmpty(t, record.Passages)
+		assert.NotEmpty(t, record.Passages.IsSelected)
+		assert.NotEmpty(t, record.Passages.PassageText)
+		assert.NotEmpty(t, record.Passages.PassageText[0])
+		assert.NotEmpty(t, record.Passages.URL)
+		assert.NotEmpty(t, record.Passages.URL[0])
+		assert.NotEmpty(t, record.QueryID)
+		assert.NotEmpty(t, record.QueryType)
+		count++
+		if count >= limit {
+			break
+		}
+	}
+	assert.Equal(t, count, 10) // There are only 10 records in the file, it should yield exactly 10.
 }

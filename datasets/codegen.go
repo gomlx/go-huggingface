@@ -2,9 +2,13 @@ package datasets
 
 import (
 	"bytes"
+	"context"
 	"fmt"
-	"sort"
+	"os"
 	"strings"
+
+	"github.com/parquet-go/parquet-go"
+	"github.com/pkg/errors"
 )
 
 // Acronyms is a map of common abbreviations that should be fully capitalized when generating Go structs.
@@ -25,53 +29,55 @@ var Acronyms = map[string]struct{}{
 	"tcp":   {},
 }
 
-// GenerateGoStruct returns Go source code defining the structures to hold records
-// for this dataset configuration.
-// It parses the ConfigInfo.Features into type-safe Go structs.
-// It uses "json" and "parquet" mappings based on the configuration builder name.
-func (c *ConfigInfo) GenerateGoStruct(rootStructName string) string {
+// GenerateGoStructFromParquet reads the schema of a local Parquet file and generates Go source code
+// defining the structures to hold its records.
+func GenerateGoStructFromParquet(parquetFilePath, rootStructName string) (string, error) {
+	f, err := os.Open(parquetFilePath)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to open %q", parquetFilePath)
+	}
+	defer f.Close()
+
+	stat, err := f.Stat()
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to stat %q", parquetFilePath)
+	}
+
+	pf, err := parquet.OpenFile(f, stat.Size())
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to open parquet file %q", parquetFilePath)
+	}
+
 	var defs []StructDef
-
+	schema := pf.Schema()
 	var mainFields []FieldDef
-	var keys []string
-	for k := range c.Features {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	for _, k := range keys {
-		f := c.Features[k]
-		mainFields = append(mainFields, FieldDef{
-			GoName:   toCamelCase(k),
-			GoType:   c.resolveType(k, f, &defs),
-			JSONName: k,
-			Parquet:  c.BuilderName == "parquet",
-		})
+	for _, field := range schema.Fields() {
+		mainFields = append(mainFields, resolveParquetField(field, &defs))
 	}
 
-	// Insert main struct at the beginning
 	defs = append([]StructDef{{Name: rootStructName, Fields: mainFields}}, defs...)
 
 	var buf bytes.Buffer
 	for _, d := range defs {
 		buf.WriteString(fmt.Sprintf("type %s struct {\n", d.Name))
 		for _, f := range d.Fields {
-			tags := []string{fmt.Sprintf(`json:"%s"`, f.JSONName)}
-			if f.Parquet {
-				tags = append(tags, fmt.Sprintf(`parquet:"%s"`, f.JSONName))
+			parquetTag := f.JSONName
+			if f.IsList {
+				parquetTag += ",list"
 			}
+			tags := []string{fmt.Sprintf(`json:"%s"`, f.JSONName), fmt.Sprintf(`parquet:"%s"`, parquetTag)}
 			buf.WriteString(fmt.Sprintf("\t%s %s `%s`\n", f.GoName, f.GoType, strings.Join(tags, " ")))
 		}
 		buf.WriteString("}\n\n")
 	}
-	return buf.String()
+	return buf.String(), nil
 }
 
 type FieldDef struct {
 	GoName   string
 	GoType   string
 	JSONName string
-	Parquet  bool
+	IsList   bool
 }
 
 type StructDef struct {
@@ -79,62 +85,90 @@ type StructDef struct {
 	Fields []FieldDef
 }
 
-func (c *ConfigInfo) resolveType(featName string, feat Feature, defs *[]StructDef) string {
-	if feat.Type == "Value" {
-		return mapDTypeToGoType(feat.DType)
-	} else if feat.Type == "ClassLabel" {
-		return "int"
-	} else if feat.Type == "Sequence" {
-		if single, ok := feat.SubFeature[""]; ok && len(feat.SubFeature) == 1 {
-			return "[]" + c.resolveType(featName, single, defs)
-		} else if len(feat.SubFeature) > 0 {
-			subStructName := toCamelCase(featName) + "Item"
-			var fields []FieldDef
-			var keys []string
-			for k := range feat.SubFeature {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
+func resolveParquetField(field parquet.Field, defs *[]StructDef) FieldDef {
+	goName := toCamelCase(field.Name())
+	jsonName := field.Name()
+	var goType string
+	var isList bool
 
-			for _, k := range keys {
-				f := feat.SubFeature[k]
-				fields = append(fields, FieldDef{
-					GoName:   toCamelCase(k),
-					GoType:   c.resolveType(k, f, defs),
-					JSONName: k,
-					Parquet:  c.BuilderName == "parquet",
-				})
+	if field.Leaf() {
+		goType = mapParquetTypeToGoType(field.Type().Kind())
+	} else if field.Type().LogicalType() != nil && field.Type().LogicalType().List != nil {
+		isList = true
+		subfields := field.Fields()
+		if len(subfields) > 0 {
+			elementFields := subfields[0].Fields()
+			if len(elementFields) > 0 {
+				elementDef := resolveParquetField(elementFields[0], defs)
+				goType = "[]" + elementDef.GoType
+			} else {
+				goType = "[]any"
 			}
-			*defs = append(*defs, StructDef{Name: subStructName, Fields: fields})
-			return "[]" + subStructName
+		} else {
+			goType = "[]any"
 		}
-	} else if feat.Type == "Translation" {
-		return "map[string]string"
+	} else {
+		subStructName := goName + "Item"
+		var fields []FieldDef
+		for _, sub := range field.Fields() {
+			fields = append(fields, resolveParquetField(sub, defs))
+		}
+		*defs = append(*defs, StructDef{Name: subStructName, Fields: fields})
+		goType = subStructName
 	}
-	return "any"
+
+	return FieldDef{
+		GoName:   goName,
+		GoType:   goType,
+		JSONName: jsonName,
+		IsList:   isList,
+	}
 }
 
-func mapDTypeToGoType(dtype string) string {
-	switch dtype {
-	case "string", "large_string":
-		return "string"
-	case "int8":
-		return "int8"
-	case "int16":
-		return "int16"
-	case "int32":
-		return "int32"
-	case "int64":
-		return "int64"
-	case "float32":
-		return "float32"
-	case "float64":
-		return "float64"
-	case "bool":
+func mapParquetTypeToGoType(kind parquet.Kind) string {
+	switch kind {
+	case parquet.Boolean:
 		return "bool"
+	case parquet.Int32:
+		return "int32"
+	case parquet.Int64:
+		return "int64"
+	case parquet.Float:
+		return "float32"
+	case parquet.Double:
+		return "float64"
+	case parquet.ByteArray, parquet.FixedLenByteArray:
+		return "string"
 	default:
 		return "any"
 	}
+}
+
+// GenerateGoStruct lists files for the given config and split, downloads one parquet file
+// to inspect its schema, and returns Go source code defining the structures to hold its records.
+func (d *Dataset) GenerateGoStruct(config, split string) (string, error) {
+	filesSelection, err := d.ListFiles(config, split)
+	if err != nil {
+		return "", errors.WithMessage(err, "failed to get parquet files info for dataset")
+	}
+	if len(filesSelection) == 0 {
+		return "", errors.New("no files found for the given config and split")
+	}
+
+	// Just download the first file to get the schema
+	downloadedPaths, err := d.DownloadCtx(context.Background(), filesSelection[0])
+	if err != nil {
+		return "", errors.WithMessage(err, "failed to download parquet file for dataset")
+	}
+	if len(downloadedPaths) == 0 {
+		return "", errors.New("no files downloaded")
+	}
+
+	parts := strings.Split(d.ID, "/")
+	namePart := parts[len(parts)-1]
+	rootStructName := toCamelCase(namePart) + "Record"
+
+	return GenerateGoStructFromParquet(downloadedPaths[0], rootStructName)
 }
 
 func toCamelCase(s string) string {

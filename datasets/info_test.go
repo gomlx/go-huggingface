@@ -35,7 +35,8 @@ func TestDatasetInfo(t *testing.T) {
 	require.NotEmpty(t, configInfo.Features, "Features should not be empty")
 
 	fmt.Printf("%s\n", ds)
-	fmt.Printf("\nGenerated Struct for Config v1.1:\n%s", configInfo.GenerateGoStruct("MsMarcoRecord"))
+	gen, _ := ds.GenerateGoStruct("v1.1", "test")
+	fmt.Printf("\nGenerated Struct for Config v1.1:\n%s", gen)
 }
 
 func TestListFiles(t *testing.T) {
