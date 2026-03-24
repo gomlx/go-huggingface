@@ -2,9 +2,11 @@ package datasets
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"iter"
 	"os"
+	"reflect"
 
 	"github.com/parquet-go/parquet-go"
 	"github.com/pkg/errors"
@@ -14,6 +16,15 @@ import (
 // Yields the records of type T mapped from the underlying parquet columns.
 func IterParquetFromFile[T any](filePath string) iter.Seq2[T, error] {
 	return func(yield func(T, error) bool) {
+		// Fix the schema first
+		fixedSchema, err := FixListSchema[T](filePath)
+		if err != nil {
+			var zero T
+			yield(zero, err)
+			return
+		}
+		fmt.Printf("Fixed schema: %s\n\n", fixedSchema)
+
 		f, err := os.Open(filePath)
 		var zero T
 		if err != nil {
@@ -21,8 +32,7 @@ func IterParquetFromFile[T any](filePath string) iter.Seq2[T, error] {
 			return
 		}
 		defer f.Close()
-
-		reader := parquet.NewGenericReader[T](f)
+		reader := parquet.NewGenericReader[T](f, fixedSchema)
 
 		batch := make([]T, 100)
 
@@ -76,3 +86,95 @@ func IterParquetFromDataset[T any](ds *Dataset, config, split string) iter.Seq2[
 		}
 	}
 }
+
+// FixListSchema recursively transforms a struct-based schema to match a file's naming.
+func FixListSchema[T any](filePath string) (*parquet.Schema, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	stat, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	pf, err := parquet.OpenFile(f, stat.Size())
+	if err != nil {
+		return nil, err
+	}
+
+	structSchema := parquet.SchemaOf(new(T))
+	fixedRoot := transformToMatchFile(structSchema, pf.Schema())
+
+	return parquet.NewSchema(structSchema.Name(), fixedRoot), nil
+}
+
+func transformToMatchFile(sNode, fNode parquet.Node) parquet.Node {
+	if sNode.Leaf() {
+		return sNode
+	}
+
+	// Detect if sNode is a LIST logical type (3-level structure)
+	if lt := sNode.Type().LogicalType(); lt != nil && lt.List != nil {
+		sFields := sNode.Fields()
+		fFields := fNode.Fields()
+
+		if len(sFields) > 0 && len(fFields) > 0 {
+			// sRepeated is usually named "list"
+			// sElement is usually named "element"
+			sRepeated := sFields[0].(parquet.Node)
+			sElement := sRepeated.Fields()[0].(parquet.Node)
+
+			fRepeated := fFields[0].(parquet.Node)
+			fElement := fRepeated.Fields()[0].(parquet.Node)
+
+			// Recursively transform the element (e.g., if it's a list of structs)
+			transformedElement := transformToMatchFile(sElement, fElement)
+
+			// Use parquet.List to wrap the new element node with the file's names.
+			// This returns a Node that knows it maps to a Go slice/array.
+			listNode := parquet.List(parquet.Group{
+				fElement.Name(): transformedElement,
+			})
+
+			// If the file used a name other than "list" for the repeated group:
+			if fRepeated.Name() != "list" {
+				listNode = parquet.Group{
+					fRepeated.Name(): parquet.Repeated(parquet.Group{
+						fElement.Name(): transformedElement,
+					}),
+				}
+			}
+
+			return &typedNode{Node: listNode, gotype: sNode.GoType()}
+		}
+	}
+
+	// For standard groups, map children by name and preserve GoType
+	fields := sNode.Fields()
+	newGroup := parquet.Group{}
+	fFieldMap := make(map[string]parquet.Node)
+	for _, f := range fNode.Fields() {
+		fFieldMap[f.Name()] = f.(parquet.Node)
+	}
+
+	for _, f := range fields {
+		sChild := f.(parquet.Node)
+		if fChild, ok := fFieldMap[f.Name()]; ok {
+			newGroup[f.Name()] = transformToMatchFile(sChild, fChild)
+		} else {
+			newGroup[f.Name()] = sChild
+		}
+	}
+
+	return &typedNode{Node: newGroup, gotype: sNode.GoType()}
+}
+
+type typedNode struct {
+	parquet.Node
+	gotype reflect.Type
+}
+
+func (t *typedNode) GoType() reflect.Type { return t.gotype }
