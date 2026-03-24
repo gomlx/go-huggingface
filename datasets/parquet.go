@@ -2,7 +2,6 @@ package datasets
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"iter"
 	"os"
@@ -23,7 +22,6 @@ func IterParquetFromFile[T any](filePath string) iter.Seq2[T, error] {
 			yield(zero, err)
 			return
 		}
-		fmt.Printf("Fixed schema: %s\n\n", fixedSchema)
 
 		f, err := os.Open(filePath)
 		var zero T
