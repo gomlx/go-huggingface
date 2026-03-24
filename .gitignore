@@ -27,6 +27,7 @@ go.work.sum
 .cursor/
 /GEMINI.md
 /CLAUDE.md
+/*.code-workspace
 
 # Notebooks temporary files.
 .ipynb_checkpoints

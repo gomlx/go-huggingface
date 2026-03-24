@@ -2,7 +2,6 @@ package datasets
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"iter"
 	"os"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/parquet-go/parquet-go"
 	"github.com/pkg/errors"
+	"k8s.io/klog/v2"
 )
 
 // IterParquetFromFile iterates over the records of a local Parquet file.
@@ -23,7 +23,9 @@ func IterParquetFromFile[T any](filePath string) iter.Seq2[T, error] {
 			yield(zero, err)
 			return
 		}
-		fmt.Printf("Fixed schema: %s\n\n", fixedSchema)
+		if klog.V(1).Enabled() {
+			klog.Infof("Fixed schema: %s\n\n", fixedSchema)
+		}
 
 		f, err := os.Open(filePath)
 		var zero T
