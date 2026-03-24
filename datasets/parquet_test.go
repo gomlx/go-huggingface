@@ -40,15 +40,7 @@ func TestIterParquetFromFile(t *testing.T) {
 }
 
 func TestParquetFixListSchema(t *testing.T) {
-
-	const (
-		ID              = "microsoft/ms_marco"
-		Config          = "v2.1"
-		TrainSplit      = "train"
-		TestSplit       = "test"
-		ValidationSplit = "validation"
-	)
-
+	// Based on HuggingFace dataset "microsoft/ms_marco", config "v2.1", split "validation"
 	type PassagesGroup struct {
 		IsSelected  []int32  `parquet:"is_selected,list"`
 		PassageText []string `parquet:"passage_text,list"`
@@ -64,10 +56,9 @@ func TestParquetFixListSchema(t *testing.T) {
 		WellFormedAnswers []string      `parquet:"wellFormedAnswers,list"`
 	}
 
-	ds := New(ID)
 	count := 0
-	limit := 10
-	for record, err := range IterParquetFromDataset[MsMarcoRecord](ds, Config, ValidationSplit) {
+	limit := 12
+	for record, err := range IterParquetFromFile[MsMarcoRecord]("ms_marco_v2.1_validation_10.parquet") {
 		require.NoError(t, err)
 		fmt.Printf("Record #%02d: %+v\n", count, record)
 		assert.NotEmpty(t, record.Query)
@@ -86,5 +77,5 @@ func TestParquetFixListSchema(t *testing.T) {
 			break
 		}
 	}
-	assert.Greater(t, count, 0)
+	assert.Equal(t, count, 10) // There are only 10 records in the file, it should yield exactly 10.
 }
