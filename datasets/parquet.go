@@ -17,7 +17,7 @@ import (
 func IterParquetFromFile[T any](filePath string) iter.Seq2[T, error] {
 	return func(yield func(T, error) bool) {
 		// Fix the schema first
-		fixedSchema, err := FixListSchema[T](filePath)
+		fixedSchema, err := ParquetFixListSchema[T](filePath)
 		if err != nil {
 			var zero T
 			yield(zero, err)
@@ -87,8 +87,8 @@ func IterParquetFromDataset[T any](ds *Dataset, config, split string) iter.Seq2[
 	}
 }
 
-// FixListSchema recursively transforms a struct-based schema to match a file's naming.
-func FixListSchema[T any](filePath string) (*parquet.Schema, error) {
+// ParquetFixListSchema recursively transforms a struct-based schema to match a file's naming.
+func ParquetFixListSchema[T any](filePath string) (*parquet.Schema, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -124,28 +124,22 @@ func transformToMatchFile(sNode, fNode parquet.Node) parquet.Node {
 		if len(sFields) > 0 && len(fFields) > 0 {
 			// sRepeated is usually named "list"
 			// sElement is usually named "element"
-			sRepeated := sFields[0].(parquet.Node)
-			sElement := sRepeated.Fields()[0].(parquet.Node)
+			sRepeated := sFields[0]
+			sElement := sRepeated.Fields()[0]
 
-			fRepeated := fFields[0].(parquet.Node)
-			fElement := fRepeated.Fields()[0].(parquet.Node)
+			fRepeated := fFields[0]
+			fElement := fRepeated.Fields()[0]
 
-			// Recursively transform the element (e.g., if it's a list of structs)
 			transformedElement := transformToMatchFile(sElement, fElement)
 
-			// Use parquet.List to wrap the new element node with the file's names.
-			// This returns a Node that knows it maps to a Go slice/array.
-			listNode := parquet.List(parquet.Group{
-				fElement.Name(): transformedElement,
-			})
+			// Create standard 3-level list structure but with standard names "list" and "element".
+			listNode := parquet.List(transformedElement)
 
-			// If the file used a name other than "list" for the repeated group:
-			if fRepeated.Name() != "list" {
-				listNode = parquet.Group{
-					fRepeated.Name(): parquet.Repeated(parquet.Group{
-						fElement.Name(): transformedElement,
-					}),
-				}
+			// Wrap it to rename the internal fields to match what the file schema has.
+			listNode = &customNamingNode{
+				Node:         listNode,
+				repeatedName: fRepeated.Name(),
+				elementName:  fElement.Name(),
 			}
 
 			return &typedNode{Node: listNode, gotype: sNode.GoType()}
@@ -178,3 +172,51 @@ type typedNode struct {
 }
 
 func (t *typedNode) GoType() reflect.Type { return t.gotype }
+
+type customNamingNode struct {
+	parquet.Node
+	repeatedName string
+	elementName  string
+}
+
+func (n *customNamingNode) Fields() []parquet.Field {
+	fields := n.Node.Fields()
+	if len(fields) == 0 {
+		return fields
+	}
+	ret := make([]parquet.Field, len(fields))
+	copy(ret, fields)
+	ret[0] = &customNamingField{
+		Field:             fields[0],
+		overrideName:      n.repeatedName,
+		overrideChildName: n.elementName,
+	}
+	return ret
+}
+
+type customNamingField struct {
+	parquet.Field
+	overrideName      string
+	overrideChildName string
+}
+
+func (f *customNamingField) Name() string {
+	if f.overrideName != "" {
+		return f.overrideName
+	}
+	return f.Field.Name()
+}
+
+func (f *customNamingField) Fields() []parquet.Field {
+	fields := f.Field.Fields()
+	if f.overrideChildName != "" && len(fields) > 0 {
+		ret := make([]parquet.Field, len(fields))
+		copy(ret, fields)
+		ret[0] = &customNamingField{
+			Field:        fields[0],
+			overrideName: f.overrideChildName,
+		}
+		return ret
+	}
+	return fields
+}

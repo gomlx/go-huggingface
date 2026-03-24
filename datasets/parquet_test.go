@@ -1,6 +1,7 @@
 package datasets
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
@@ -32,6 +33,56 @@ func TestIterParquetFromFile(t *testing.T) {
 		assert.NotEmpty(t, rec.Query)
 		count++
 		if count >= 10 { // Just test the first 10 records to keep it fast
+			break
+		}
+	}
+	assert.Greater(t, count, 0)
+}
+
+func TestParquetFixListSchema(t *testing.T) {
+
+	const (
+		ID              = "microsoft/ms_marco"
+		Config          = "v2.1"
+		TrainSplit      = "train"
+		TestSplit       = "test"
+		ValidationSplit = "validation"
+	)
+
+	type PassagesGroup struct {
+		IsSelected  []int32  `parquet:"is_selected,list"`
+		PassageText []string `parquet:"passage_text,list"`
+		URL         []string `parquet:"url,list"`
+	}
+
+	type MsMarcoRecord struct {
+		Answers           []string      `parquet:"answers,list"`
+		Passages          PassagesGroup `parquet:"passages"`
+		Query             string        `parquet:"query"`
+		QueryID           int32         `parquet:"query_id"`
+		QueryType         string        `parquet:"query_type"`
+		WellFormedAnswers []string      `parquet:"wellFormedAnswers,list"`
+	}
+
+	ds := New(ID)
+	count := 0
+	limit := 10
+	for record, err := range IterParquetFromDataset[MsMarcoRecord](ds, Config, ValidationSplit) {
+		require.NoError(t, err)
+		fmt.Printf("Record #%02d: %+v\n", count, record)
+		assert.NotEmpty(t, record.Query)
+		assert.NotEmpty(t, record.Answers)
+		assert.NotEmpty(t, record.Answers[0])
+		assert.NotEmpty(t, record.Passages)
+		assert.NotEmpty(t, record.Passages.IsSelected)
+		assert.NotEmpty(t, record.Passages.PassageText)
+		assert.NotEmpty(t, record.Passages.PassageText[0])
+		assert.NotEmpty(t, record.Passages.URL)
+		assert.NotEmpty(t, record.Passages.URL[0])
+		assert.NotEmpty(t, record.QueryID)
+		assert.NotEmpty(t, record.QueryType)
+		count++
+		if count >= limit {
 			break
 		}
 	}
