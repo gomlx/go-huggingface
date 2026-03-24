@@ -4,11 +4,12 @@
 
 ## 📖 Overview
 
-Simple APIs for downloading (`hub`), tokenizing (`tokenizers`) and (**future work**) model conversion (`models`) of 
-[HuggingFace🤗](huggingface.co) models using [GoMLX](https://github.com/gomlx/gomlx).
+Simple APIs for downloading (`hub`), tokenizing (`tokenizers`), (**experimental**) model conversion (`models/transformers`) of 
+[HuggingFace🤗](huggingface.co) transformer models using [GoMLX](https://github.com/gomlx/gomlx), and last but not least, simplified datasets (parquet based) downloading and scanning.
 
-🚧 **EXPERIMENTAL and IN DEVELOPMENT**: While the `hub` package has been stable. The `tokenizers` only supports
-SentencePiece models (saved as proto), but has been working. 
+Each component is independent, and only depends on what it needs -- `hub` has no dependency on `GoMLX`, `tokenizers` has no dependence on `parquet-go` (to parse datasets), etc.
+
+🚧 **EXPERIMENTAL and IN DEVELOPMENT**: Bits and pieces are working everywhere: at least [one model (tencent/KaLM-Embedding-Gemma3-12B-2511)](https://huggingface.co/tencent/KaLM-Embedding-Gemma3-12B-2511) successfully converts nicely. Also at least [on dataset (microsoft/ms_marco)](https://huggingface.co/datasets/microsoft/ms_marco) can easily be downaloaded/scanned. But ... it is still under development -- and on that note: contributions and suggestions are most welcome.
 
 ## Packages `hub`: Downloding info and files from a repository
 
