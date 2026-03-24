@@ -5,6 +5,8 @@
 - Package `datasets`:
   - Added `datasets` package for downloading and iterating over parquet files of datasets from the HuggingFace Hub.
   - Added `cmd/generate_dataset_structs` for generating Go structs for dataset records.
+  - Added `ParquetFixListSchema` for fixing list schema parsed from Go struct (a bug? in parquet-go where it hard-codes
+    the group/element node names in lists).
 
 ## v0.3.4
 

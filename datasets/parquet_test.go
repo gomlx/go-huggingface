@@ -41,19 +41,19 @@ func TestIterParquetFromFile(t *testing.T) {
 
 func TestParquetFixListSchema(t *testing.T) {
 	// Based on HuggingFace dataset "microsoft/ms_marco", config "v2.1", split "validation"
-	type PassagesGroup struct {
-		IsSelected  []int32  `parquet:"is_selected,list"`
-		PassageText []string `parquet:"passage_text,list"`
-		URL         []string `parquet:"url,list"`
+	type PassagesItem struct {
+		IsSelected  []int32  `json:"is_selected" parquet:"is_selected,list"`
+		PassageText []string `json:"passage_text" parquet:"passage_text,list"`
+		URL         []string `json:"url" parquet:"url,list"`
 	}
 
 	type MsMarcoRecord struct {
-		Answers           []string      `parquet:"answers,list"`
-		Passages          PassagesGroup `parquet:"passages"`
-		Query             string        `parquet:"query"`
-		QueryID           int32         `parquet:"query_id"`
-		QueryType         string        `parquet:"query_type"`
-		WellFormedAnswers []string      `parquet:"wellFormedAnswers,list"`
+		Answers           []string     `json:"answers" parquet:"answers,list"`
+		Passages          PassagesItem `json:"passages" parquet:"passages"`
+		Query             string       `json:"query" parquet:"query"`
+		QueryID           int32        `json:"query_id" parquet:"query_id"`
+		QueryType         string       `json:"query_type" parquet:"query_type"`
+		WellFormedAnswers []string     `json:"wellFormedAnswers" parquet:"wellFormedAnswers,list"`
 	}
 
 	count := 0
