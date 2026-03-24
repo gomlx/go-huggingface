@@ -33,9 +33,9 @@ func TestEncodeWithSpans_MatchesEncode(t *testing.T) {
 	for _, input := range inputs {
 		t.Run(input, func(t *testing.T) {
 			ids := tok.Encode(input)
-			result := tok.EncodeWithSpans(input)
+			result := tok.EncodeWithAnnotations(input)
 			if !intSliceEqual(ids, result.IDs) {
-				t.Errorf("Encode(%q) = %v, EncodeWithSpans(%q).IDs = %v", input, ids, input, result.IDs)
+				t.Errorf("Encode(%q) = %v, EncodeWithAnnotations(%q).IDs = %v", input, ids, input, result.IDs)
 			}
 		})
 	}
@@ -62,7 +62,7 @@ func TestEncodeWithSpans_ValidSpans(t *testing.T) {
 
 	for _, input := range inputs {
 		t.Run(input, func(t *testing.T) {
-			result := tok.EncodeWithSpans(input)
+			result := tok.EncodeWithAnnotations(input)
 
 			if len(result.Spans) != len(result.IDs) {
 				t.Errorf("len(Spans)=%d != len(IDs)=%d", len(result.Spans), len(result.IDs))
@@ -103,7 +103,7 @@ func TestEncodeWithSpans_EmptyString(t *testing.T) {
 	}
 	tok := baseTok.(*Tokenizer)
 
-	result := tok.EncodeWithSpans("")
+	result := tok.EncodeWithAnnotations("")
 	if len(result.IDs) != 0 {
 		t.Errorf("Expected empty IDs for empty input, got %v", result.IDs)
 	}
@@ -134,7 +134,7 @@ func TestEncodeWithSpans_Unicode(t *testing.T) {
 
 	for _, input := range inputs {
 		t.Run(input, func(t *testing.T) {
-			result := tok.EncodeWithSpans(input)
+			result := tok.EncodeWithAnnotations(input)
 
 			// Verify IDs match Encode
 			ids := tok.Encode(input)
@@ -153,8 +153,8 @@ func TestEncodeWithSpans_Unicode(t *testing.T) {
 	}
 }
 
-// TestTokenizerWithSpansInterface verifies the interface is correctly implemented.
-func TestTokenizerWithSpansInterface(t *testing.T) {
+// TestTokenizerInterface verifies the interface is correctly implemented.
+func TestTokenizerInterface(t *testing.T) {
 	repo := hub.New("google/flan-t5-small")
 	if !repo.HasFile("tokenizer.model") {
 		t.Skip("tokenizer.model not found in repo")
@@ -165,8 +165,8 @@ func TestTokenizerWithSpansInterface(t *testing.T) {
 		t.Fatalf("New failed: %v", err)
 	}
 
-	// Verify the tokenizer implements TokenizerWithSpans
-	var _ api.TokenizerWithSpans = tok.(*Tokenizer)
+	// Verify the tokenizer implements Tokenizer
+	var _ api.Tokenizer = tok.(*Tokenizer)
 }
 
 func intSliceEqual(a, b []int) bool {

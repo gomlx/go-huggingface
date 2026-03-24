@@ -237,21 +237,21 @@ func TestUnigram_VocabParsing(t *testing.T) {
 
 	// Verify that tokens have the correct IDs (array index, not score)
 	tests := []struct {
-		token string
+		token  string
 		wantID int
 	}{
-		{"<pad>", 0},    // index 0, score 0.0
-		{"</s>", 1},     // index 1, score 0.0
-		{"<unk>", 2},    // index 2, score 0.0
-		{"▁hello", 3},   // index 3, score -5.5
-		{"▁world", 4},   // index 4, score -5.8
-		{"▁test", 5},    // index 5, score -6.2
-		{"▁", 6},        // index 6, score -2.1
-		{"hello", 7},    // index 7, score -7.5
-		{"world", 8},    // index 8, score -7.8
-		{"test", 9},     // index 9, score -8.2
-		{"ing", 10},     // index 10, score -4.5
-		{"▁the", 11},    // index 11, score -3.2
+		{"<pad>", 0},  // index 0, score 0.0
+		{"</s>", 1},   // index 1, score 0.0
+		{"<unk>", 2},  // index 2, score 0.0
+		{"▁hello", 3}, // index 3, score -5.5
+		{"▁world", 4}, // index 4, score -5.8
+		{"▁test", 5},  // index 5, score -6.2
+		{"▁", 6},      // index 6, score -2.1
+		{"hello", 7},  // index 7, score -7.5
+		{"world", 8},  // index 8, score -7.8
+		{"test", 9},   // index 9, score -8.2
+		{"ing", 10},   // index 10, score -4.5
+		{"▁the", 11},  // index 11, score -3.2
 	}
 
 	for _, tt := range tests {
@@ -898,49 +898,50 @@ func TestNFKCNormalization(t *testing.T) {
 	}
 }
 
-// Tests for EncodeWithSpans
+// Tests for EncodeWithAnnotations
 
-func TestWordPiece_EncodeWithSpans(t *testing.T) {
+func TestWordPiece_EncodeWithAnnotations(t *testing.T) {
 	tok, err := NewFromContent(nil, testWordPieceTokenizerJSON)
 	if err != nil {
 		t.Fatalf("NewFromContent failed: %v", err)
 	}
+	tok.options.IncludeSpans = true
 
 	tests := []struct {
-		name        string
-		input       string
-		wantIDs     []int
+		name      string
+		input     string
+		wantIDs   []int
 		wantSpans []api.TokenSpan
 	}{
 		{
-			name:        "single word",
-			input:       "hello",
-			wantIDs:     []int{1},
+			name:      "single word",
+			input:     "hello",
+			wantIDs:   []int{1},
 			wantSpans: []api.TokenSpan{{Start: 0, End: 5}},
 		},
 		{
-			name:        "two words",
-			input:       "hello world",
-			wantIDs:     []int{1, 2},
+			name:      "two words",
+			input:     "hello world",
+			wantIDs:   []int{1, 2},
 			wantSpans: []api.TokenSpan{{Start: 0, End: 5}, {Start: 6, End: 11}},
 		},
 		{
-			name:        "word with subword",
-			input:       "testing",
-			wantIDs:     []int{3, 4}, // test + ##ing
+			name:      "word with subword",
+			input:     "testing",
+			wantIDs:   []int{3, 4}, // test + ##ing
 			wantSpans: []api.TokenSpan{{Start: 0, End: 4}, {Start: 4, End: 7}},
 		},
 		{
-			name:        "sentence",
-			input:       "this is a test",
-			wantIDs:     []int{107, 106, 105, 3},
+			name:      "sentence",
+			input:     "this is a test",
+			wantIDs:   []int{107, 106, 105, 3},
 			wantSpans: []api.TokenSpan{{Start: 0, End: 4}, {Start: 5, End: 7}, {Start: 8, End: 9}, {Start: 10, End: 14}},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := tok.EncodeWithSpans(tt.input)
+			result := tok.EncodeWithAnnotations(tt.input)
 			if !intSliceEqual(result.IDs, tt.wantIDs) {
 				t.Errorf("EncodeWithSpans(%q).IDs = %v, want %v", tt.input, result.IDs, tt.wantIDs)
 			}
@@ -958,41 +959,42 @@ func TestWordPiece_EncodeWithSpans(t *testing.T) {
 	}
 }
 
-func TestBPE_EncodeWithSpans(t *testing.T) {
+func TestBPE_EncodeWithAnnotations(t *testing.T) {
 	tok, err := NewFromContent(nil, testSimpleBPETokenizerJSON)
 	if err != nil {
 		t.Fatalf("NewFromContent failed: %v", err)
 	}
+	tok.options.IncludeSpans = true
 
 	tests := []struct {
-		name        string
-		input       string
-		wantIDs     []int
+		name      string
+		input     string
+		wantIDs   []int
 		wantSpans []api.TokenSpan
 	}{
 		{
-			name:        "single word hello",
-			input:       "hello",
-			wantIDs:     []int{12},
+			name:      "single word hello",
+			input:     "hello",
+			wantIDs:   []int{12},
 			wantSpans: []api.TokenSpan{{Start: 0, End: 5}},
 		},
 		{
-			name:        "single word world",
-			input:       "world",
-			wantIDs:     []int{15},
+			name:      "single word world",
+			input:     "world",
+			wantIDs:   []int{15},
 			wantSpans: []api.TokenSpan{{Start: 0, End: 5}},
 		},
 		{
-			name:        "two words",
-			input:       "hello world",
-			wantIDs:     []int{12, 15},
+			name:      "two words",
+			input:     "hello world",
+			wantIDs:   []int{12, 15},
 			wantSpans: []api.TokenSpan{{Start: 0, End: 5}, {Start: 6, End: 11}},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := tok.EncodeWithSpans(tt.input)
+			result := tok.EncodeWithAnnotations(tt.input)
 			if !intSliceEqual(result.IDs, tt.wantIDs) {
 				t.Errorf("EncodeWithSpans(%q).IDs = %v, want %v", tt.input, result.IDs, tt.wantIDs)
 			}
@@ -1010,7 +1012,7 @@ func TestBPE_EncodeWithSpans(t *testing.T) {
 	}
 }
 
-func TestEncodeWithSpans_Unicode(t *testing.T) {
+func TestEncodeWithAnnotations_Unicode(t *testing.T) {
 	// Test with a simple tokenizer that handles unicode
 	unicodeTokenizerJSON := []byte(`{
 		"normalizer": null,
@@ -1033,30 +1035,31 @@ func TestEncodeWithSpans_Unicode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFromContent failed: %v", err)
 	}
+	tok.options.IncludeSpans = true
 
 	tests := []struct {
-		name        string
-		input       string
-		wantIDs     []int
+		name      string
+		input     string
+		wantIDs   []int
 		checkSpan bool
 	}{
 		{
-			name:        "mixed ascii and unicode",
-			input:       "hello 世界",
-			wantIDs:     []int{1, 2},
+			name:      "mixed ascii and unicode",
+			input:     "hello 世界",
+			wantIDs:   []int{1, 2},
 			checkSpan: true,
 		},
 		{
-			name:        "unicode only",
-			input:       "日本",
-			wantIDs:     []int{3},
+			name:      "unicode only",
+			input:     "日本",
+			wantIDs:   []int{3},
 			checkSpan: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := tok.EncodeWithSpans(tt.input)
+			result := tok.EncodeWithAnnotations(tt.input)
 			if !intSliceEqual(result.IDs, tt.wantIDs) {
 				t.Errorf("EncodeWithSpans(%q).IDs = %v, want %v", tt.input, result.IDs, tt.wantIDs)
 			}
@@ -1078,15 +1081,16 @@ func TestEncodeWithSpans_Unicode(t *testing.T) {
 	}
 }
 
-func TestEncodeWithSpans_Punctuation(t *testing.T) {
+func TestEncodeWithAnnotations_Punctuation(t *testing.T) {
 	tok, err := NewFromContent(nil, testWordPieceTokenizerJSON)
 	if err != nil {
 		t.Fatalf("NewFromContent failed: %v", err)
 	}
+	tok.options.IncludeSpans = true
 
 	// Test that punctuation gets its own offset
 	input := "hello, world!"
-	result := tok.EncodeWithSpans(input)
+	result := tok.EncodeWithAnnotations(input)
 
 	// Verify we get some offsets
 	if len(result.Spans) == 0 {
@@ -1108,13 +1112,14 @@ func TestEncodeWithSpans_Punctuation(t *testing.T) {
 	}
 }
 
-func TestEncodeWithSpans_EmptyString(t *testing.T) {
+func TestEncodeWithAnnotations_EmptyString(t *testing.T) {
 	tok, err := NewFromContent(nil, testWordPieceTokenizerJSON)
 	if err != nil {
 		t.Fatalf("NewFromContent failed: %v", err)
 	}
+	tok.options.IncludeSpans = true
 
-	result := tok.EncodeWithSpans("")
+	result := tok.EncodeWithAnnotations("")
 	if len(result.IDs) != 0 {
 		t.Errorf("Expected empty IDs for empty input, got %v", result.IDs)
 	}
@@ -1123,7 +1128,7 @@ func TestEncodeWithSpans_EmptyString(t *testing.T) {
 	}
 }
 
-func TestEncodeWithSpans_MatchesEncode(t *testing.T) {
+func TestEncodeWithAnnotations_MatchesEncode(t *testing.T) {
 	tok, err := NewFromContent(nil, testWordPieceTokenizerJSON)
 	if err != nil {
 		t.Fatalf("NewFromContent failed: %v", err)
@@ -1140,9 +1145,9 @@ func TestEncodeWithSpans_MatchesEncode(t *testing.T) {
 	for _, input := range inputs {
 		t.Run(input, func(t *testing.T) {
 			ids := tok.Encode(input)
-			result := tok.EncodeWithSpans(input)
+			result := tok.EncodeWithAnnotations(input)
 			if !intSliceEqual(ids, result.IDs) {
-				t.Errorf("Encode(%q) = %v, EncodeWithSpans(%q).IDs = %v", input, ids, input, result.IDs)
+				t.Errorf("Encode(%q) = %v, EncodeWithAnnotations(%q).IDs = %v", input, ids, input, result.IDs)
 			}
 		})
 	}
@@ -1427,8 +1432,9 @@ func TestPostProcessor_Spans(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFromContent failed: %v", err)
 	}
+	tok.options.IncludeSpans = true
 
-	result := tok.EncodeWithSpans("hello world")
+	result := tok.EncodeWithAnnotations("hello world")
 
 	// Expect: [CLS] hello world [SEP]
 	wantIDs := []int{101, 1, 2, 102}
@@ -1569,18 +1575,23 @@ func TestEncodeWithOptions(t *testing.T) {
 		t.Fatalf("NewFromContent failed: %v", err)
 	}
 
-	// EncodeWithOptions(text, true) includes [CLS]/[SEP]
-	full := tok.EncodeWithOptions("hello world", true)
+	// Encode includes [CLS]/[SEP]
+	full := tok.Encode("hello world")
 	wantFull := []int{101, 1, 2, 102}
 	if !intSliceEqual(full, wantFull) {
-		t.Errorf("EncodeWithOptions(true) = %v, want %v", full, wantFull)
+		t.Errorf("Encode = %v, want %v", full, wantFull)
 	}
 
-	// EncodeWithOptions(text, false) skips post-processing
-	raw := tok.EncodeWithOptions("hello world", false)
+	// Encode AddSpecialTokens: false skips post-processing
+	err = tok.With(api.EncodeOptions{AddSpecialTokens: false})
+	if err != nil {
+		t.Fatalf("With failed: %v", err)
+	}
+
+	raw := tok.Encode("hello world")
 	wantRaw := []int{1, 2}
 	if !intSliceEqual(raw, wantRaw) {
-		t.Errorf("EncodeWithOptions(false) = %v, want %v", raw, wantRaw)
+		t.Errorf("Encode = %v, want %v", raw, wantRaw)
 	}
 }
 
@@ -1606,7 +1617,7 @@ func BenchmarkEncode(b *testing.B) {
 	}
 }
 
-func BenchmarkEncodeWithSpans(b *testing.B) {
+func BenchmarkEncodeWithAnnotations(b *testing.B) {
 	tok, err := NewFromContent(nil, testWordPieceTokenizerJSON)
 	if err != nil {
 		b.Fatalf("NewFromContent failed: %v", err)
@@ -1621,9 +1632,77 @@ func BenchmarkEncodeWithSpans(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, input := range inputs {
-			_ = tok.EncodeWithSpans(input)
+			_ = tok.EncodeWithAnnotations(input)
 		}
 	}
+}
+
+func TestEncodeWithAnnotations_AllOutputs(t *testing.T) {
+	bertTokenizerJSON := []byte(`{
+		"version": "1.0",
+		"added_tokens": [
+			{"id": 101, "content": "[CLS]", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+			{"id": 102, "content": "[SEP]", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true}
+		],
+		"normalizer": {"type": "BertNormalizer", "lowercase": true},
+		"pre_tokenizer": {"type": "BertPreTokenizer"},
+		"post_processor": {
+			"type": "BertProcessing",
+			"sep": ["[SEP]", 102],
+			"cls": ["[CLS]", 101]
+		},
+		"model": {
+			"type": "WordPiece",
+			"vocab": {"hello": 1, "world": 2, "[CLS]": 101, "[SEP]": 102}
+		}
+	}`)
+
+	tok, err := NewFromContent(nil, bertTokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	options := api.EncodeOptions{
+		AddSpecialTokens:         true,
+		IncludeSpans:             true,
+		IncludeSpecialTokensMask: true,
+	}
+	err = tok.With(options)
+	if err != nil {
+		t.Fatalf("With failed: %v", err)
+	}
+
+	result := tok.EncodeWithAnnotations("hello world")
+
+	// IDs: [CLS] hello world [SEP]
+	wantIDs := []int{101, 1, 2, 102}
+	if !intSliceEqual(result.IDs, wantIDs) {
+		t.Errorf("IDs = %v, want %v", result.IDs, wantIDs)
+	}
+
+	// SpecialTokensMask: 1 for [CLS] and [SEP], 0 for others
+	wantSpecialMask := []int{1, 0, 0, 1}
+	if len(result.SpecialTokensMask) != len(wantIDs) {
+		t.Errorf("len(SpecialTokensMask) = %d, want %d", len(result.SpecialTokensMask), len(wantIDs))
+	} else {
+		for i, mask := range result.SpecialTokensMask {
+			if mask != wantSpecialMask[i] {
+				t.Errorf("SpecialTokensMask[%d] = %d, want %d", i, mask, wantSpecialMask[i])
+			}
+		}
+	}
+}
+
+func stringSliceEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func BenchmarkEncode_LongText(b *testing.B) {
@@ -1644,7 +1723,7 @@ func BenchmarkEncode_LongText(b *testing.B) {
 	}
 }
 
-func BenchmarkEncodeWithSpans_LongText(b *testing.B) {
+func BenchmarkEncodeWithAnnotations_LongText(b *testing.B) {
 	tok, err := NewFromContent(nil, testWordPieceTokenizerJSON)
 	if err != nil {
 		b.Fatalf("NewFromContent failed: %v", err)
@@ -1658,6 +1737,6 @@ func BenchmarkEncodeWithSpans_LongText(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = tok.EncodeWithSpans(input)
+		_ = tok.EncodeWithAnnotations(input)
 	}
 }
