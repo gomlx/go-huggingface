@@ -209,16 +209,6 @@ func (b *Bucketizer) WithMaxDelay(d time.Duration, useBatchPadding bool) *Bucket
 	return b
 }
 
-// Run starts the streaming of the sentences into buckets.
-//
-// It loops reading from the input, processing it, and writing to the output.
-// The loop terminates when the input channel is closed.
-//
-// The order of the output is very likely not the same as the input, but one can
-// reconciliate the order by using the Reference.
-//
-// By default this parallelizes the tokenization of sentences, but it can be configured
-// with MaxParallelization.
 func (b *Bucketizer) newPendingBucket(shape Shape) *pendingBucket {
 	batch := make([]int, shape.BatchSize*shape.SentenceLength)
 	if b.padID != 0 {
@@ -295,6 +285,16 @@ func (b *Bucketizer) updateTimer() {
 	b.timerChannel = b.timer.C
 }
 
+// Run starts the streaming of the sentences into buckets.
+//
+// It loops reading from the input, processing it, and writing to the output.
+// The loop terminates when the input channel is closed.
+//
+// The order of the output is very likely not the same as the input, but one can
+// reconciliate the order by using the Reference.
+//
+// By default this parallelizes the tokenization of sentences, but it can be configured
+// with MaxParallelization.
 func (b *Bucketizer) Run(input <-chan SentenceRef, output chan<- Bucket) {
 	defer close(output)
 
