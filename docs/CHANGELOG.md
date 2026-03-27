@@ -7,6 +7,9 @@
   - Added `cmd/generate_dataset_structs` for generating Go structs for dataset records.
   - Added `ParquetFixListSchema` for fixing list schema parsed from Go struct (a bug? in parquet-go where it hard-codes
     the group/element node names in lists).
+- Package `tokenizers/bucket`
+  - Added `bucket` package for streaming tokenization of sentences into buckets (or batches) of discrete sizes, 
+    to minimize padding.
 
 ## v0.3.4
 
