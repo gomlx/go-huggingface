@@ -29,42 +29,30 @@ func New(config *api.Config, repo *hub.Repo) (api.Tokenizer, error) {
 	return &Tokenizer{
 		Processor: proc,
 		Info:      proc.ModelInfo(),
+		options: api.EncodeOptions{
+			AddSpecialTokens: true,
+		},
 	}, nil
 }
 
 // Tokenizer implements tokenizers.Tokenizer interface based on SentencePiece tokenizer by Google.
 type Tokenizer struct {
-	*esentencepiece.Processor
-	Info *esentencepiece.ModelInfo
+	Processor *esentencepiece.Processor
+	Info      *esentencepiece.ModelInfo
+	options   api.EncodeOptions
 }
 
 // Compile time assert that sentencepiece.Tokenizer implements tokenizers.Tokenizer interface.
 var _ api.Tokenizer = &Tokenizer{}
 
-// Compile time assert that sentencepiece.Tokenizer implements tokenizers.TokenizerWithSpans interface.
-var _ api.TokenizerWithSpans = &Tokenizer{}
-
 // Encode returns the text encoded into a sequence of ids.
 // It implements sampler.Vocabulary.
 func (p *Tokenizer) Encode(text string) []int {
-	return p.EncodeWithOptions(text, true)
+	return p.EncodeWithAnnotations(text).IDs
 }
 
-// EncodeWithOptions returns the text encoded into a sequence of ids.
-// The addSpecialTokens parameter is accepted for interface compatibility but
-// has no effect — SentencePiece models do not have a post-processor.
-func (p *Tokenizer) EncodeWithOptions(text string, _ bool) []int {
-	tokens := p.Processor.Encode(text)
-	ids := make([]int, len(tokens))
-	for i, t := range tokens {
-		ids[i] = t.ID
-	}
-	return ids
-}
-
-// EncodeWithSpans returns the text encoded into a sequence of ids along with their byte spans.
-// It implements api.TokenizerWithSpans.
-func (p *Tokenizer) EncodeWithSpans(text string) api.EncodingResult {
+// EncodeWithAnnotations returns the encoded text along with requested annotations.
+func (p *Tokenizer) EncodeWithAnnotations(text string) api.AnnotatedEncoding {
 	tokens := p.Processor.Encode(text)
 	ids := make([]int, len(tokens))
 	spans := make([]api.TokenSpan, len(tokens))
@@ -123,10 +111,29 @@ func (p *Tokenizer) EncodeWithSpans(text string) api.EncodingResult {
 		}
 	}
 
-	return api.EncodingResult{
-		IDs:   ids,
-		Spans: spans,
+	res := api.AnnotatedEncoding{
+		IDs: ids,
 	}
+	if p.options.IncludeSpans {
+		res.Spans = spans
+	}
+	return res
+}
+
+// With applies options to a tokenizer.
+func (p *Tokenizer) With(options api.EncodeOptions) error {
+	if options.IncludeSpecialTokensMask || options.AddSpecialTokens || options.MaxLen > 0 {
+		return api.ErrNotImplemented
+	}
+	
+	p.options = options
+	return nil
+}
+
+// Normalize returns the normalization used by the tokenizer (e.g.: BERT lower cases the string)
+// SentencePiece handles normalization internally, but we don't expose it separately.
+func (p *Tokenizer) Normalize(text string) string {
+	return text
 }
 
 // findSubstring finds the first occurrence of substr in s starting from position start.
@@ -164,3 +171,7 @@ func (p *Tokenizer) SpecialTokenID(token api.SpecialToken) (int, error) {
 	}
 }
 
+// VocabSize returns the total number of tokens in the vocabulary.
+func (p *Tokenizer) VocabSize() int {
+	return 0 // TODO: implement
+}

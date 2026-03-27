@@ -31,3 +31,6 @@ go.work.sum
 
 # Notebooks temporary files.
 .ipynb_checkpoints
+
+# Test data
+.cache
