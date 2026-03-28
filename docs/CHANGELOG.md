@@ -2,6 +2,8 @@
 
 ## Next
 
+- Package `tokenizers`: **API change!**
+  - Updated `Tokenizer` interface to include `EncodeWithAnnotations`, `VocabSize()` and `Normalize()` methods, and cleaned up the API.
 - Package `datasets`:
   - Added `datasets` package for downloading and iterating over parquet files of datasets from the HuggingFace Hub.
   - Added `cmd/generate_dataset_structs` for generating Go structs for dataset records.
@@ -10,6 +12,7 @@
 - Package `tokenizers/bucket`
   - Added `bucket` package for streaming tokenization of sentences into buckets (or batches) of discrete sizes, 
     to minimize padding.
+- Updates to modified GoMLX transformer API.
 
 ## v0.3.4
 
