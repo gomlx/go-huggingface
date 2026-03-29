@@ -2,14 +2,15 @@ package transformer
 
 import (
 	"fmt"
-	"math"
-	"strings"
+	"slices"
 
+	"github.com/gomlx/gomlx/pkg/core/dtypes"
 	"github.com/gomlx/gomlx/pkg/core/graph"
 	"github.com/gomlx/gomlx/pkg/ml/context"
 	"github.com/gomlx/gomlx/pkg/ml/layers"
 	"github.com/gomlx/gomlx/pkg/ml/layers/activations"
-	ml_transformer "github.com/gomlx/gomlx/pkg/ml/model/transformer"
+	"github.com/gomlx/gomlx/pkg/ml/layers/attention/pos"
+	mltransformer "github.com/gomlx/gomlx/pkg/ml/model/transformer"
 	"github.com/gomlx/gomlx/pkg/support/exceptions"
 )
 
@@ -24,65 +25,38 @@ func (m *Model) WithCausalMask(useCausalMask bool) *Model {
 	return m
 }
 
-// BuildGraph takes the input tokens and creates the GoMLX graph for the model.
+// ForwardGraph takes the input tokens and creates the GoMLX graph for the model.
 // It returns the final sentence embeddings if appropriate, otherwise just final hidden states.
-func (m *Model) BuildGraph(ctx *context.Context, tokens *graph.Node) *graph.Node {
+//
+//   - tokens: shaped [batchSize, seqLen] with the tokens, including padding.
+//   - mask: shaped [batchSize, seqLen] with the mask, where 1 means valid token and 0 means padding. It can be nil,
+//     in which case no mask is used and it's assumed all elements of the sentence are used.
+//
+// If the model was trained as an embedding model (e.g. sentence-transformers), it will return the sentence embeddings,
+// usually as [batchSize, embedSize].
+// Otherwise, it will return the final hidden states of all layers, usually as [batchSize, seqLen, hiddenSize].
+func (m *Model) ForwardGraph(ctx *context.Context, tokens, mask *graph.Node) *graph.Node {
 	if len(m.Modules) > 0 || m.PoolingConfig != nil {
-		return m.SentenceEmbeddingGraph(ctx, tokens)
+		return m.SentenceEmbeddingGraph(ctx, tokens, mask)
 	}
 
 	// Default to just getting the final hidden state of all layers
-	outputs := m.BuildAllLayersGraph(ctx, tokens)
-	return outputs[len(outputs)-1]
+	lastLayer, _ := m.AllLayers(ctx, tokens, mask)
+	return lastLayer
 }
 
-// BuildAllLayersGraph takes the input tokens and creates the GoMLX graph for the embedding layer.
-// It returns an array of []*graph.Node containing [embeddings, layer0, (layer1, etc...)].
-func (m *Model) BuildAllLayersGraph(ctx *context.Context, tokens *graph.Node) (outputs []*graph.Node) {
-	g := tokens.Graph()
-
-	// The embedding weight name mapped from the HuggingFace safetensors
-	varName := "embeddings"
-
-	// Check if the variable exists in the context
-	weightVar := ctx.In("token_embed").InspectVariableInScope(varName)
-	if weightVar == nil {
-		exceptions.Panicf("failed to find embedding weights in context: token_embed/%s. did you call LoadContext?", varName)
-	}
-
-	weightNode := weightVar.ValueGraph(g)
-
-	// Gather embeddings for the given tokens.
-	// tokens shape: [batch, seq_len] -> expanded to [batch, seq_len, 1] for Gather
-	// weightNode shape: [vocab_size, hidden_size]
-	// Gather output shape: [batch, seq_len, hidden_size]
-	embeddings := graph.Gather(weightNode, graph.ExpandAxes(tokens, -1))
-
-	// Gemma3 scales the embeddings by sqrt(hidden_size).
-	// We might need to make this configurable based on architecture (e.g. m.Config.Architectures).
-	// For now we keep this scaling if the architecture implies it.
-	scaleEmbeddings := false
-	for _, arch := range m.Config.Architectures {
-		if strings.Contains(arch, "Gemma3") || strings.Contains(arch, "Gemma2") || strings.Contains(arch, "GemmaForCausal") {
-			scaleEmbeddings = true
-			break
-		}
-	}
-
-	if scaleEmbeddings {
-		scale := math.Sqrt(float64(m.Config.HiddenSize))
-		embeddings = graph.MulScalar(embeddings, scale)
-	}
-
-	// Output index 0 is token embeddings
-	outputs = append(outputs, embeddings)
-
-	// Initialize the base ml_transformer.Model configuration using the loaded fields.
+// CreateGoMLXModel initializes the base ml_transformer.Model configuration using the loaded fields.
+func (m *Model) CreateGoMLXModel() *mltransformer.Model {
 	headDim := m.Config.HeadDim
 	if headDim == 0 && m.Config.NumAttentionHeads > 0 {
 		headDim = m.Config.HiddenSize / m.Config.NumAttentionHeads
 	}
-	tm := ml_transformer.New(
+	ropeTheta := m.Config.RopeTheta
+	if ropeTheta == 0 {
+		ropeTheta = 10000.0
+	}
+
+	tm := mltransformer.New(
 		m.Config.VocabSize,
 		m.Config.HiddenSize,
 		m.Config.NumHiddenLayers,
@@ -91,34 +65,79 @@ func (m *Model) BuildAllLayersGraph(ctx *context.Context, tokens *graph.Node) (o
 	).
 		WithFFNDim(m.Config.IntermediateSize).
 		WithMaxPosEmbed(m.Config.MaxPositionEmbeddings).
-		WithArchitecture(ml_transformer.ArchitectureGemma3). // FIXME: Should use m.Config.Architectures to map Architecture
+		WithArchitecture(mltransformer.ArchitectureGemma3). // FIXME: Should use m.Config.Architectures to map Architecture
 		WithTransposedWeights(true).
 		WithNormalization(layers.NormalizationRMSNorm).
 		WithNormEpsilon(m.Config.RMSNormEps).
 		WithActivation(activations.FromName(m.Config.HiddenActivation)).
 		WithNumKVHeads(m.Config.NumKeyValueHeads).
 		WithBias(false).
-		WithCausalMask(m.useCausalMask)
+		WithCausalMask(m.useCausalMask).
+		WithPositionalEncoder(pos.NewRoPE(ropeTheta)).
+		WithFinalNormalization(layers.NormalizationRMSNorm)
 
-	x := embeddings
-	for layerIdx := range m.Config.NumHiddenLayers {
-		layerCtx := ctx.In(fmt.Sprintf("layer_%d", layerIdx))
-		x = tm.ForwardLayer(layerCtx, x, layerIdx, false, 0)
-
-		// For the very last layer, huggingface returns the normalized hidden state in hidden_states[-1]
-		if layerIdx == m.Config.NumHiddenLayers-1 {
-			x = layers.RMSNorm(ctx.In("final_norm"), x).WithEpsilon(m.Config.RMSNormEps).WithScaleOffset(1.0).Done()
-		}
-
-		outputs = append(outputs, x)
+	switch m.Config.TorchDtype {
+	case "bfloat16":
+		tm.WithDType(dtypes.BFloat16)
+	case "float16":
+		tm.WithDType(dtypes.Float16)
+	default:
+		tm.WithDType(dtypes.Float32)
 	}
-	return outputs
+
+	return tm
+}
+
+// AllLayers takes the input tokens and creates the GoMLX forward graph for the transformer model,
+// returning the last layer and all the intermediate layers.
+//
+// Inputs:
+//
+//   - tokens: shaped [batchSize, seqLen] with the tokens, including padding.
+//   - mask: shaped [batchSize, seqLen] with the mask, where 1 means valid token and 0 means padding. It can be nil,
+//     in which case not mask is set.
+//
+// It returns:
+//
+//   - lastLayer: the final hidden state of the last layer, shaped [batchSize, seqLen,hiddenSize].
+//   - allLayers: the input to the first layer and the output of each layer.
+//     It follows the HuggingFace convention, where the allLayers[0] is the input to the first attention layer,
+//     and the following nodes in allLayers are the outputs of all NumHiddenLayers attention layers.
+func (m *Model) AllLayers(ctx *context.Context, tokens, mask *graph.Node) (lastLayer *graph.Node, allLayers []*graph.Node) {
+	// Sanity checking.
+	if tokens.Rank() == 1 {
+		// Add batch dimension if not present.
+		tokens = graph.ExpandAxes(tokens, 0)
+	} else if tokens.Rank() != 2 {
+		exceptions.Panicf("tokens must be shaped [batchSize, seqLen] or [seqLen], got %v", tokens.Shape())
+	}
+	if mask != nil {
+		if mask.Rank() == 1 {
+			// Add batch dimension if not present.
+			mask = graph.ExpandAxes(mask, 0)
+		} else if mask.Rank() != 2 {
+			exceptions.Panicf("mask must be shaped [batchSize, seqLen] or [seqLen], got %v", mask.Shape())
+		}
+		if !slices.Equal(tokens.Shape().Dimensions, mask.Shape().Dimensions) {
+			exceptions.Panicf("if mask is set, its shape must match the tokens: got tokens.shape=%s, mask.shape=%s", tokens.Shape(), mask.Shape())
+		}
+	}
+
+	// Create GoMLXModel and build the graph for all the layers.
+	tm := m.CreateGoMLXModel()
+	return tm.AllLayers(ctx, tokens, mask, false, 0)
 }
 
 // SentenceEmbeddingGraph builds the equivalent of the sentence_transformers pipeline.
-// It uses BuildAllLayersGraph for the base model, and then applies pooling and normalization
+// It uses AllLayers for the base model, and then applies pooling and normalization
 // layers sequentially according to the modules.json configuration.
-func (m *Model) SentenceEmbeddingGraph(ctx *context.Context, tokens *graph.Node) *graph.Node {
+//
+//   - tokens: shaped [batchSize, seqLen] with the tokens, including padding.
+//   - mask: shaped [batchSize, seqLen] with the mask, where 1 means valid token and 0 means padding. It can be nil,
+//     in which case no mask is used and it's assumed all elements of the sentence are used.
+//
+// It returns the final pooled embedding (usually [batchSize, embedSize]) for the sentence.
+func (m *Model) SentenceEmbeddingGraph(ctx *context.Context, tokens, mask *graph.Node) *graph.Node {
 	var x *graph.Node
 
 	for _, mod := range m.Modules {
@@ -126,14 +145,14 @@ func (m *Model) SentenceEmbeddingGraph(ctx *context.Context, tokens *graph.Node)
 		case "sentence_transformers.models.Transformer":
 			// The base transformer output is the list of layer outputs.
 			// The last item is the final hidden state.
-			outputs := m.BuildAllLayersGraph(ctx, tokens)
-			x = outputs[len(outputs)-1]
+			lastLayer, _ := m.AllLayers(ctx, tokens, mask)
+			x = lastLayer
 
 		case "sentence_transformers.models.Pooling":
 			if x == nil {
 				exceptions.Panicf("pooling module found before transformer module")
 			}
-			x = m.ApplySentencePooling(ctx, x, tokens)
+			x = m.ApplySentencePooling(ctx, x, tokens, mask)
 
 		case "sentence_transformers.models.Normalize":
 			if x == nil {
@@ -156,11 +175,11 @@ func (m *Model) SentenceEmbeddingGraph(ctx *context.Context, tokens *graph.Node)
 
 	if x == nil {
 		// Fallback if modules.json is not present or didn't contain sentence_transformers layers
-		outputs := m.BuildAllLayersGraph(ctx, tokens)
-		x = outputs[len(outputs)-1]
+		lastLayer, _ := m.AllLayers(ctx, tokens, mask)
+		x = lastLayer
 		// and apply default pooling if a pooling config exists
 		if m.PoolingConfig != nil {
-			x = m.ApplySentencePooling(ctx, x, tokens)
+			x = m.ApplySentencePooling(ctx, x, tokens, mask)
 		}
 	}
 
@@ -168,7 +187,7 @@ func (m *Model) SentenceEmbeddingGraph(ctx *context.Context, tokens *graph.Node)
 }
 
 // ApplySentencePooling applies the configured pooling function to the hidden states.
-func (m *Model) ApplySentencePooling(ctx *context.Context, hiddenStates, tokens *graph.Node) *graph.Node {
+func (m *Model) ApplySentencePooling(ctx *context.Context, hiddenStates, tokens, mask *graph.Node) *graph.Node {
 	if m.PoolingConfig == nil {
 		exceptions.Panicf("no pooling config was loaded for this model")
 	}

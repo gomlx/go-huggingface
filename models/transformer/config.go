@@ -14,9 +14,11 @@ type Config struct {
 	IntermediateSize      int            `json:"intermediate_size"`
 	NumKeyValueHeads      int            `json:"num_key_value_heads"`
 	RMSNormEps            float64        `json:"rms_norm_eps"`
+	RopeTheta             float64        `json:"rope_theta"`
 	HiddenActivation      string         `json:"hidden_activation"`
 	MaxPositionEmbeddings int            `json:"max_position_embeddings"`
 	ModelType             string         `json:"model_type"`
+	TorchDtype            string         `json:"torch_dtype"`
 	VocabSize             int            `json:"vocab_size"`
 	Extra                 map[string]any `json:"-"`
 }

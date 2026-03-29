@@ -115,8 +115,12 @@ func (m *mockTokenizer) Encode(text string) []int {
 	return ids
 }
 
-func (m *mockTokenizer) EncodeWithOptions(text string, addSpecialTokens bool) []int {
-	return m.Encode(text)
+func (m *mockTokenizer) EncodeWithAnnotations(text string) api.AnnotatedEncoding {
+	return api.AnnotatedEncoding{IDs: m.Encode(text)}
+}
+
+func (m *mockTokenizer) With(options api.EncodeOptions) error {
+	return nil
 }
 
 func (m *mockTokenizer) Decode(ids []int) string { return "" }
@@ -127,6 +131,10 @@ func (m *mockTokenizer) SpecialTokenID(token api.SpecialToken) (int, error) {
 	}
 	return 0, nil
 }
+
+func (m *mockTokenizer) Normalize(s string) string { return s }
+
+func (m *mockTokenizer) VocabSize() int { return 1000 }
 
 func TestBucketizerRun(t *testing.T) {
 	mockTok := &mockTokenizer{padID: 99}
