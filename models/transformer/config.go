@@ -18,6 +18,7 @@ type Config struct {
 	HiddenActivation      string         `json:"hidden_activation"`
 	MaxPositionEmbeddings int            `json:"max_position_embeddings"`
 	ModelType             string         `json:"model_type"`
+	TorchDtype            string         `json:"torch_dtype"`
 	VocabSize             int            `json:"vocab_size"`
 	Extra                 map[string]any `json:"-"`
 }

@@ -12,7 +12,10 @@
 - Package `tokenizers/bucket`
   - Added `bucket` package for streaming tokenization of sentences into buckets (or batches) of discrete sizes, 
     to minimize padding.
-- Updates to modified GoMLX transformer API.
+- Package `transformer`
+  - Renamed main method to `AllLayers`: it returns both the final hidden state and all layer outputs; 
+    it added RoPE positional embeddings support; added support for scaling factor.
+  - Updates to modified GoMLX transformer API.
 
 ## v0.3.4
 

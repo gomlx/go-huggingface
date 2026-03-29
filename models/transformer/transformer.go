@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/gomlx/gomlx/pkg/core/dtypes"
 	"github.com/gomlx/gomlx/pkg/core/graph"
 	"github.com/gomlx/gomlx/pkg/ml/context"
 	"github.com/gomlx/gomlx/pkg/ml/layers"
@@ -24,51 +25,28 @@ func (m *Model) WithCausalMask(useCausalMask bool) *Model {
 	return m
 }
 
-// BuildGraph takes the input tokens and creates the GoMLX graph for the model.
+// ForwardGraph takes the input tokens and creates the GoMLX graph for the model.
 // It returns the final sentence embeddings if appropriate, otherwise just final hidden states.
 //
 //   - tokens: shaped [batchSize, seqLen] with the tokens, including padding.
 //   - mask: shaped [batchSize, seqLen] with the mask, where 1 means valid token and 0 means padding. It can be nil,
 //     in which case no mask is used and it's assumed all elements of the sentence are used.
-func (m *Model) BuildGraph(ctx *context.Context, tokens, mask *graph.Node) *graph.Node {
+//
+// If the model was trained as an embedding model (e.g. sentence-transformers), it will return the sentence embeddings,
+// usually as [batchSize, embedSize].
+// Otherwise, it will return the final hidden states of all layers, usually as [batchSize, seqLen, hiddenSize].
+func (m *Model) ForwardGraph(ctx *context.Context, tokens, mask *graph.Node) *graph.Node {
 	if len(m.Modules) > 0 || m.PoolingConfig != nil {
 		return m.SentenceEmbeddingGraph(ctx, tokens, mask)
 	}
 
 	// Default to just getting the final hidden state of all layers
-	lastLayer, _ := m.EmbeddingLayers(ctx, tokens, mask)
+	lastLayer, _ := m.AllLayers(ctx, tokens, mask)
 	return lastLayer
 }
 
-// EmbeddingLayers takes the input tokens and creates the GoMLX graph for the embedding layer.
-// It returns an array of []*graph.Node containing [embeddings, layer0, (layer1, etc...)].
-//
-// Inputs:
-//
-//   - tokens: shaped [batchSize, seqLen] with the tokens, including padding.
-//   - mask: shaped [batchSize, seqLen] with the mask, where 1 means valid token and 0 means padding. It can be nil,
-//     in which case not mask is set.
-func (m *Model) EmbeddingLayers(ctx *context.Context, tokens, mask *graph.Node) (lastLayer *graph.Node, allLayers []*graph.Node) {
-	// Sanity checking.
-	if tokens.Rank() == 1 {
-		// Add batch dimension if not present.
-		tokens = graph.ExpandAxes(tokens, 0)
-	} else if tokens.Rank() != 2 {
-		exceptions.Panicf("tokens must be shaped [batchSize, seqLen] or [seqLen], got %v", tokens.Shape())
-	}
-	if mask != nil {
-		if mask.Rank() == 1 {
-			// Add batch dimension if not present.
-			mask = graph.ExpandAxes(mask, 0)
-		} else if mask.Rank() != 2 {
-			exceptions.Panicf("mask must be shaped [batchSize, seqLen] or [seqLen], got %v", mask.Shape())
-		}
-		if !slices.Equal(tokens.Shape().Dimensions, mask.Shape().Dimensions) {
-			exceptions.Panicf("if mask is set, its shape must match the tokens: got tokens.shape=%s, mask.shape=%s", tokens.Shape(), mask.Shape())
-		}
-	}
-
-	// Initialize the base ml_transformer.Model configuration using the loaded fields.
+// CreateGoMLXModel initializes the base ml_transformer.Model configuration using the loaded fields.
+func (m *Model) CreateGoMLXModel() *mltransformer.Model {
 	headDim := m.Config.HeadDim
 	if headDim == 0 && m.Config.NumAttentionHeads > 0 {
 		headDim = m.Config.HiddenSize / m.Config.NumAttentionHeads
@@ -95,27 +73,63 @@ func (m *Model) EmbeddingLayers(ctx *context.Context, tokens, mask *graph.Node) 
 		WithNumKVHeads(m.Config.NumKeyValueHeads).
 		WithBias(false).
 		WithCausalMask(m.useCausalMask).
-		WithPositionalEncoder(pos.NewRoPE(ropeTheta))
+		WithPositionalEncoder(pos.NewRoPE(ropeTheta)).
+		WithFinalNormalization(layers.NormalizationRMSNorm)
 
-	lastLayer, allLayers = tm.EmbeddingLayers(ctx, tokens, mask, false, 0)
-
-	// outputs should match the huggingface format: [embeddings, layer_0_out, layer_1_out, ..., final_norm_out]
-	// allLayers from GoMLX is [raw_token_embed, styled_token_embed, layer_0_out, ...]
-	var outputs []*graph.Node
-	outputs = append(outputs, allLayers[1])
-	for i := 0; i < m.Config.NumHiddenLayers-1; i++ {
-		outputs = append(outputs, allLayers[2+i])
+	switch m.Config.TorchDtype {
+	case "bfloat16":
+		tm.WithDType(dtypes.BFloat16)
+	case "float16":
+		tm.WithDType(dtypes.Float16)
+	default:
+		tm.WithDType(dtypes.Float32)
 	}
 
-	// For the very last layer, huggingface returns the normalized hidden state in hidden_states[-1]
-	lastLayer = layers.RMSNorm(ctx.In("final_norm"), lastLayer).WithEpsilon(m.Config.RMSNormEps).WithScaleOffset(1.0).Done()
-	outputs = append(outputs, lastLayer)
+	return tm
+}
 
-	return lastLayer, outputs
+// AllLayers takes the input tokens and creates the GoMLX forward graph for the transformer model,
+// returning the last layer and all the intermediate layers.
+//
+// Inputs:
+//
+//   - tokens: shaped [batchSize, seqLen] with the tokens, including padding.
+//   - mask: shaped [batchSize, seqLen] with the mask, where 1 means valid token and 0 means padding. It can be nil,
+//     in which case not mask is set.
+//
+// It returns:
+//
+//   - lastLayer: the final hidden state of the last layer, shaped [batchSize, seqLen,hiddenSize].
+//   - allLayers: the input to the first layer and the output of each layer.
+//     It follows the HuggingFace convention, where the allLayers[0] is the input to the first attention layer,
+//     and the following nodes in allLayers are the outputs of all NumHiddenLayers attention layers.
+func (m *Model) AllLayers(ctx *context.Context, tokens, mask *graph.Node) (lastLayer *graph.Node, allLayers []*graph.Node) {
+	// Sanity checking.
+	if tokens.Rank() == 1 {
+		// Add batch dimension if not present.
+		tokens = graph.ExpandAxes(tokens, 0)
+	} else if tokens.Rank() != 2 {
+		exceptions.Panicf("tokens must be shaped [batchSize, seqLen] or [seqLen], got %v", tokens.Shape())
+	}
+	if mask != nil {
+		if mask.Rank() == 1 {
+			// Add batch dimension if not present.
+			mask = graph.ExpandAxes(mask, 0)
+		} else if mask.Rank() != 2 {
+			exceptions.Panicf("mask must be shaped [batchSize, seqLen] or [seqLen], got %v", mask.Shape())
+		}
+		if !slices.Equal(tokens.Shape().Dimensions, mask.Shape().Dimensions) {
+			exceptions.Panicf("if mask is set, its shape must match the tokens: got tokens.shape=%s, mask.shape=%s", tokens.Shape(), mask.Shape())
+		}
+	}
+
+	// Create GoMLXModel and build the graph for all the layers.
+	tm := m.CreateGoMLXModel()
+	return tm.AllLayers(ctx, tokens, mask, false, 0)
 }
 
 // SentenceEmbeddingGraph builds the equivalent of the sentence_transformers pipeline.
-// It uses BuildAllLayersGraph for the base model, and then applies pooling and normalization
+// It uses AllLayers for the base model, and then applies pooling and normalization
 // layers sequentially according to the modules.json configuration.
 //
 //   - tokens: shaped [batchSize, seqLen] with the tokens, including padding.
@@ -131,7 +145,7 @@ func (m *Model) SentenceEmbeddingGraph(ctx *context.Context, tokens, mask *graph
 		case "sentence_transformers.models.Transformer":
 			// The base transformer output is the list of layer outputs.
 			// The last item is the final hidden state.
-			lastLayer, _ := m.EmbeddingLayers(ctx, tokens, mask)
+			lastLayer, _ := m.AllLayers(ctx, tokens, mask)
 			x = lastLayer
 
 		case "sentence_transformers.models.Pooling":
@@ -161,7 +175,7 @@ func (m *Model) SentenceEmbeddingGraph(ctx *context.Context, tokens, mask *graph
 
 	if x == nil {
 		// Fallback if modules.json is not present or didn't contain sentence_transformers layers
-		lastLayer, _ := m.EmbeddingLayers(ctx, tokens, mask)
+		lastLayer, _ := m.AllLayers(ctx, tokens, mask)
 		x = lastLayer
 		// and apply default pooling if a pooling config exists
 		if m.PoolingConfig != nil {
