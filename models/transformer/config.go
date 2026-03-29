@@ -6,21 +6,42 @@ import (
 
 // Config represents standard HuggingFace config.json.
 type Config struct {
-	Architectures         []string       `json:"architectures"`
-	HiddenSize            int            `json:"hidden_size"`
-	NumHiddenLayers       int            `json:"num_hidden_layers"`
-	NumAttentionHeads     int            `json:"num_attention_heads"`
-	HeadDim               int            `json:"head_dim"`
-	IntermediateSize      int            `json:"intermediate_size"`
-	NumKeyValueHeads      int            `json:"num_key_value_heads"`
-	RMSNormEps            float64        `json:"rms_norm_eps"`
-	RopeTheta             float64        `json:"rope_theta"`
-	HiddenActivation      string         `json:"hidden_activation"`
-	MaxPositionEmbeddings int            `json:"max_position_embeddings"`
-	ModelType             string         `json:"model_type"`
-	TorchDtype            string         `json:"torch_dtype"`
-	VocabSize             int            `json:"vocab_size"`
-	Extra                 map[string]any `json:"-"`
+	Architectures     []string `json:"architectures"`
+	HiddenSize        int      `json:"hidden_size"`
+	NumHiddenLayers   int      `json:"num_hidden_layers"`
+	NumAttentionHeads int      `json:"num_attention_heads"`
+	HeadDim           int      `json:"head_dim"`
+	IntermediateSize  int      `json:"intermediate_size"`
+	NumKeyValueHeads  int      `json:"num_key_value_heads"`
+	RMSNormEps        float64  `json:"rms_norm_eps"`
+
+	// RoPE Positional Embedder
+	RoPETheta   float64     `json:"rope_theta"`
+	RoPEScaling RoPEScaling `json:"rope_scaling"`
+
+	// RoPELocalBaseFreq is the Theta used by sliding attention layers (or so the AI says).
+	RoPELocalBaseFreq float64 `json:"rope_local_base_freq"`
+
+	HiddenActivation      string `json:"hidden_activation"`
+	MaxPositionEmbeddings int    `json:"max_position_embeddings"`
+	ModelType             string `json:"model_type"`
+	TorchDtype            string `json:"torch_dtype"`
+	VocabSize             int    `json:"vocab_size"`
+	PadTokenID            int    `json:"pad_token_id"`
+
+	// SlidingWindow is the size of the sliding window for sliding attention layers.
+	SlidingWindow int `json:"sliding_window"`
+
+	// LayerTypes: known values are "full_attention", "sliding_attention"
+	LayerTypes []string       `json:"layer_types"`
+	Extra      map[string]any `json:"-"`
+}
+
+type RoPEScaling struct {
+	Factor float64 `json:"factor"`
+
+	// Type: "linear"
+	Type string `json:"rope_type"`
 }
 
 func (c *Config) UnmarshalJSON(data []byte) error {
