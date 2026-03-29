@@ -61,19 +61,6 @@ func (m *ModuleConfig) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, &m.Extra)
 }
 
-// TaskPromptsConfig represents task_prompts.json
-type TaskPromptsConfig struct {
-	Extra map[string]any `json:"-"`
-}
-
-func (c *TaskPromptsConfig) UnmarshalJSON(data []byte) error {
-	type wrapper TaskPromptsConfig
-	if err := json.Unmarshal(data, (*wrapper)(c)); err != nil {
-		return err
-	}
-	return json.Unmarshal(data, &c.Extra)
-}
-
 // PoolingConfig represents 1_Pooling/config.json
 type PoolingConfig struct {
 	PoolingModeMeanTokens bool           `json:"pooling_mode_mean_tokens"`

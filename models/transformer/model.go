@@ -10,6 +10,7 @@ import (
 	"github.com/gomlx/go-huggingface/models/safetensors"
 	"github.com/gomlx/go-huggingface/tokenizers"
 	"github.com/gomlx/gomlx/pkg/ml/context"
+	"github.com/gomlx/gomlx/pkg/support/xslices"
 	"github.com/pkg/errors"
 )
 
@@ -20,7 +21,7 @@ type Model struct {
 	Config                    Config
 	SentenceTransformerConfig *SentenceTransformerConfig
 	Modules                   []ModuleConfig
-	TaskPrompts               *TaskPromptsConfig
+	TaskPrompts               map[string]string
 	PoolingConfig             *PoolingConfig
 
 	// useCausalMask: The KaLM paper says that the model is trained without a causal mask, but HuggingFace transformer
@@ -77,8 +78,8 @@ func LoadModel(repo *hub.Repo) (*Model, error) {
 		m.Modules = mods
 	}
 
-	tpc := &TaskPromptsConfig{}
-	if ok, _ := loadFile("task_prompts.json", tpc); ok {
+	var tpc map[string]string
+	if ok, _ := loadFile("task_prompts.json", &tpc); ok {
 		m.TaskPrompts = tpc
 	}
 
@@ -158,7 +159,7 @@ func (m *Model) Description() string {
 		sb.WriteString(fmt.Sprintf(" - modules.json: loaded (%d modules)\n", len(m.Modules)))
 	}
 	if m.TaskPrompts != nil {
-		sb.WriteString(" - task_prompts.json: loaded\n")
+		sb.WriteString(fmt.Sprintf(" - task_prompts.json: %d prompts defined\n", len(m.RegisteredPromptTasks())))
 	}
 	if m.PoolingConfig != nil {
 		sb.WriteString(" - 1_Pooling/config.json: loaded\n")
@@ -266,4 +267,36 @@ func (m *Model) GetTokenizer() (tokenizers.Tokenizer, error) {
 	var err error
 	m.tokenizer, err = tokenizers.New(m.Repo)
 	return m.tokenizer, err
+}
+
+// QueryPrompt builds the full query prompt, based on a task code.
+// If the code is not found, or there are no registered prompts, it returns the sentence unmodified.
+func (m *Model) QueryPrompt(query, taskCode string) string {
+	if taskCode == "" || m.TaskPrompts == nil {
+		return query
+	}
+	if taskPrompt, ok := m.TaskPrompts[taskCode]; ok {
+		return fmt.Sprintf("Instruct: %s\nQuery: %s", taskPrompt, query)
+	}
+	return query
+}
+
+// RegisteredPromptTasks returns a list of all task codes for which prompts are registered.
+func (m *Model) RegisteredPromptTasks() []string {
+	if m.TaskPrompts == nil {
+		return nil
+	}
+	return xslices.SortedKeys(m.TaskPrompts)
+}
+
+// GetTaskPrompt returns the prompt string for the given task code.
+// Returns an empty string if the task code is not found or no prompts are registered.
+func (m *Model) GetTaskPrompt(taskCode string) string {
+	if taskCode == "" || m.TaskPrompts == nil {
+		return ""
+	}
+	if promptStr, ok := m.TaskPrompts[taskCode]; ok {
+		return promptStr
+	}
+	return ""
 }
