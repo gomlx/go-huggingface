@@ -31,9 +31,14 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, &c.Extra)
 }
 
+const DefaultQueryPrompt = "Instruct: Given a query, retrieve documents that answer the query \nQuery: "
+
 // SentenceTransformerConfig represents config_sentence_transformers.json (optional)
 type SentenceTransformerConfig struct {
-	Extra map[string]any `json:"-"`
+	Extra             map[string]any    `json:"-"`
+	Prompts           map[string]string `json:"prompts"`
+	DefaultPromptName string            `json:"default_prompt_name"`
+	SimilarityFnName  string            `json:"similarity_fn_name"`
 }
 
 func (c *SentenceTransformerConfig) UnmarshalJSON(data []byte) error {

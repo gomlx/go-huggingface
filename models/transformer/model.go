@@ -21,7 +21,6 @@ type Model struct {
 	Config                    Config
 	SentenceTransformerConfig *SentenceTransformerConfig
 	Modules                   []ModuleConfig
-	TaskPrompts               map[string]string
 	PoolingConfig             *PoolingConfig
 
 	// useCausalMask: The KaLM paper says that the model is trained without a causal mask, but HuggingFace transformer
@@ -76,11 +75,6 @@ func LoadModel(repo *hub.Repo) (*Model, error) {
 	var mods []ModuleConfig
 	if ok, _ := loadFile("modules.json", &mods); ok {
 		m.Modules = mods
-	}
-
-	var tpc map[string]string
-	if ok, _ := loadFile("task_prompts.json", &tpc); ok {
-		m.TaskPrompts = tpc
 	}
 
 	pc := &PoolingConfig{}
@@ -157,9 +151,6 @@ func (m *Model) Description() string {
 	}
 	if len(m.Modules) > 0 {
 		sb.WriteString(fmt.Sprintf(" - modules.json: loaded (%d modules)\n", len(m.Modules)))
-	}
-	if m.TaskPrompts != nil {
-		sb.WriteString(fmt.Sprintf(" - task_prompts.json: %d prompts defined\n", len(m.RegisteredPromptTasks())))
 	}
 	if m.PoolingConfig != nil {
 		sb.WriteString(" - 1_Pooling/config.json: loaded\n")
@@ -269,33 +260,68 @@ func (m *Model) GetTokenizer() (tokenizers.Tokenizer, error) {
 	return m.tokenizer, err
 }
 
-// QueryPrompt builds the full query prompt, based on a task code.
-// If the code is not found, or there are no registered prompts, it returns the sentence unmodified.
-func (m *Model) QueryPrompt(query, taskCode string) string {
-	if taskCode == "" || m.TaskPrompts == nil {
+// BuildPrompt builds the full sentence prompt, based on a promptName, an index to the
+// list of prompts in the SentenceTransformerConfig.
+// If the code is not found, it attempts to use the default one. If a default one is
+// not defined, it returns the original sentence.
+func (m *Model) BuildPrompt(sentence, promptName string) string {
+	if m.SentenceTransformerConfig == nil || m.SentenceTransformerConfig.Prompts == nil {
+		return sentence
+	}
+	if promptName == "" {
+		promptName = m.SentenceTransformerConfig.DefaultPromptName
+	}
+	if promptName == "" {
+		return sentence
+	}
+	if taskPrompt, ok := m.SentenceTransformerConfig.Prompts[promptName]; ok {
+		return taskPrompt + sentence
+	}
+	return sentence
+}
+
+// BuildQueryPrompt builds the full query prompt, based on a promptName.
+// It's exactly like BuildPrompt but if a default prompt doesn't exist it uses
+// "Instruct: Given a query, retrieve documents that answer the query \nQuery: " as
+// a prompt prefix.
+func (m *Model) BuildQueryPrompt(query, promptName string) string {
+	if m.SentenceTransformerConfig == nil || m.SentenceTransformerConfig.Prompts == nil {
 		return query
 	}
-	if taskPrompt, ok := m.TaskPrompts[taskCode]; ok {
-		return fmt.Sprintf("Instruct: %s\nQuery: %s", taskPrompt, query)
+	var prompt string
+	if promptName == "" {
+		promptName = m.SentenceTransformerConfig.DefaultPromptName
 	}
-	return query
+	if promptName != "" {
+		prompt = m.SentenceTransformerConfig.Prompts[promptName]
+	}
+	if prompt == "" {
+		return query
+	}
+	return prompt + query
 }
 
 // RegisteredPromptTasks returns a list of all task codes for which prompts are registered.
 func (m *Model) RegisteredPromptTasks() []string {
-	if m.TaskPrompts == nil {
+	if m.SentenceTransformerConfig == nil || m.SentenceTransformerConfig.Prompts == nil {
 		return nil
 	}
-	return xslices.SortedKeys(m.TaskPrompts)
+	return xslices.SortedKeys(m.SentenceTransformerConfig.Prompts)
 }
 
 // GetTaskPrompt returns the prompt string for the given task code.
 // Returns an empty string if the task code is not found or no prompts are registered.
 func (m *Model) GetTaskPrompt(taskCode string) string {
-	if taskCode == "" || m.TaskPrompts == nil {
+	if m.SentenceTransformerConfig == nil || m.SentenceTransformerConfig.Prompts == nil {
 		return ""
 	}
-	if promptStr, ok := m.TaskPrompts[taskCode]; ok {
+	if taskCode == "" {
+		taskCode = m.SentenceTransformerConfig.DefaultPromptName
+	}
+	if taskCode == "" {
+		return ""
+	}
+	if promptStr, ok := m.SentenceTransformerConfig.Prompts[taskCode]; ok {
 		return promptStr
 	}
 	return ""
