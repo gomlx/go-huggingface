@@ -5,6 +5,7 @@ import (
 	"os"
 	"unsafe"
 
+	"github.com/gomlx/gomlx/backends"
 	"github.com/gomlx/gomlx/pkg/core/shapes"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/pkg/errors"
@@ -33,13 +34,17 @@ func (r *Reader) Close() error {
 // ReadTensor reads a tensor by name:
 // native types (F32, F16, BF16, I8, etc.) are loaded directly;
 // GGUF quantized types are dequantized to Float32.
-func (r *Reader) ReadTensor(tensorName string) (*tensors.Tensor, error) {
+func (r *Reader) ReadTensor(backend backends.Backend, tensorName string) (*tensors.Tensor, error) {
 	info, ok := r.gguf.GetTensorInfo(tensorName)
 	if !ok {
 		return nil, errors.Errorf("gguf: tensor %q not found", tensorName)
 	}
 	dtype, dims := info.GoMLXShape()
-	t := tensors.FromShape(shapes.Make(dtype, dims...))
+	shape := shapes.Make(dtype, dims...)
+	t, err := tensors.FromShapeForBackend(backend, shape)
+	if err != nil {
+		return nil, errors.Wrapf(err, "gguf: failed to create tensor %q with shape %s", tensorName, shape)
+	}
 	tensorOffset := r.gguf.DataOffset() + int64(info.Offset)
 
 	if info.Type.IsQuantized() {
@@ -64,6 +69,15 @@ func (r *Reader) ReadTensor(tensorName string) (*tensors.Tensor, error) {
 	if readErr != nil {
 		return nil, errors.WithMessagef(readErr, "gguf: read tensor %q", tensorName)
 	}
+
+	// If backend is configured, make sure to materialize it on-device and free the local copy.
+	if backend != nil {
+		err := t.ToDevice(backend, 0)
+		if err != nil {
+			return nil, errors.WithMessagef(err, "failed to move tensor %q (%s) to backend's device #0", tensorName, t.Shape())
+		}
+	}
+
 	return t, nil
 }
 

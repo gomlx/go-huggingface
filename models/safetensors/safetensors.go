@@ -250,7 +250,7 @@ func (m *Model) GetTensorFromFile(backend backends.Backend, fileName, tensorName
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create MMapReader for %s", fileName)
 	}
-	tensor, err := reader.ReadTensor(tensorName, backend)
+	tensor, err := reader.ReadTensor(backend, tensorName)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to read tensor %s from %s", tensorName, fileName)
 	}
@@ -260,17 +260,9 @@ func (m *Model) GetTensorFromFile(backend backends.Backend, fileName, tensorName
 // IterTensors returns an iterator over all tensors as GoMLX tensors.
 // It opens each shard file once and reads all tensors from it sequentially, to optimize I/O.
 //
-// See also IterBackendTensors if you want to load tensors into a specific backend.
-func (m *Model) IterTensors() func(yield func(TensorAndName, error) bool) {
-	return m.IterBackendTensors(nil)
-}
-
-// IterBackendTensors returns an iterator over all tensors as GoMLX tensors.
-// It opens each shard file once and reads all tensors from it sequentially, to optimize I/O.
-//
 // Tensors are loaded into the backend directly (e.g.: GPU, or a shared memory tensor on CPU, etc).
 // If the backend is nil, it instead loads them in host memory.
-func (m *Model) IterBackendTensors(backend backends.Backend) func(yield func(TensorAndName, error) bool) {
+func (m *Model) IterTensors(backend backends.Backend) func(yield func(TensorAndName, error) bool) {
 	return func(yield func(TensorAndName, error) bool) {
 		if m.Repo == nil {
 			yield(TensorAndName{}, errors.New("repo is nil!?"))
@@ -302,7 +294,7 @@ func (m *Model) IterBackendTensors(backend backends.Backend) func(yield func(Ten
 
 			// Read all tensors from this shard
 			for _, tensorName := range sortedTensors {
-				tensor, err := reader.ReadTensor(tensorName, backend)
+				tensor, err := reader.ReadTensor(backend, tensorName)
 				if err != nil {
 					reader.Close()
 					yield(TensorAndName{}, err)
@@ -355,16 +347,11 @@ func sortTensorsByOffset(tensorNames []string, header *Header) []string {
 	return result
 }
 
-// IterTensorsFromRepo iterates over all tensors in the repository.
-func IterTensorsFromRepo(repo *hub.Repo) func(yield func(TensorAndName, error) bool) {
-	return IterBackendTensorsFromRepo(nil, repo)
-}
-
 // IterBackendTensorsFromRepo iterates over all tensors in the repository.
 //
 // Tensors are loaded into the backend directly (e.g.: GPU, or a shared memory tensor on CPU, etc).
 // If the backend is nil, it instead loads them in host memory.
-func IterBackendTensorsFromRepo(backend backends.Backend, repo *hub.Repo) func(yield func(TensorAndName, error) bool) {
+func IterTensorsFromRepo(backend backends.Backend, repo *hub.Repo) func(yield func(TensorAndName, error) bool) {
 	return func(yield func(TensorAndName, error) bool) {
 		m, err := New(repo)
 		if err != nil {
@@ -372,7 +359,7 @@ func IterBackendTensorsFromRepo(backend backends.Backend, repo *hub.Repo) func(y
 			return
 		}
 
-		for tensorAndName, err := range m.IterBackendTensors(backend) {
+		for tensorAndName, err := range m.IterTensors(backend) {
 			if err != nil {
 				yield(TensorAndName{}, err)
 				return

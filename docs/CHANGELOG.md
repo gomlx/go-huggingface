@@ -20,6 +20,10 @@
     - `QueryPrompt` builds the full query prompt, based on a task code.
     - `RegisteredPromptTasks` returns a list of all task codes for which prompts are registered.
     - `GetTaskPrompt` returns the prompt string for the given task code.
+  - `LoadContext` now accepts an optional (nil-lable) backend and loads the variables directly into the backend.
+- Package `safetensors` and `gguf`:
+  - `IterTensors` and `IterTensorsFromRepo` now take an optional (nil-lable) backend for reading tensors directly into
+    a backend.
 
 ## v0.3.4
 

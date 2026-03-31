@@ -97,7 +97,7 @@ func (m *Model) LoadContext(backend backends.Backend, ctx *context.Context) erro
 	var totalParams int64
 	var totalBytes int64
 
-	for tensorAndName, err := range safetensors.IterBackendTensorsFromRepo(backend, m.Repo) {
+	for tensorAndName, err := range safetensors.IterTensorsFromRepo(backend, m.Repo) {
 		if err != nil {
 			return errors.WithMessagef(err, "failed loading variables of models %q", m.Repo.ID)
 		}

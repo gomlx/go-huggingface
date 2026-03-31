@@ -49,7 +49,7 @@ func (sr *MMapReader) Close() error {
 }
 
 // ReadTensor reads a tensor by name from the memory-mapped file.
-func (mr *MMapReader) ReadTensor(tensorName string, backend backends.Backend) (*tensors.Tensor, error) {
+func (mr *MMapReader) ReadTensor(backend backends.Backend, tensorName string) (*tensors.Tensor, error) {
 	meta, ok := mr.Header.Tensors[tensorName]
 	if !ok {
 		return nil, errors.Errorf("tensor %s not found", tensorName)
@@ -87,11 +87,11 @@ func (mr *MMapReader) ReadTensor(tensorName string, backend backends.Backend) (*
 	}
 
 	// If backend is configured, make sure to materialize it on-device and free the local copy.
-	if backend != nil && !backend.HasSharedBuffers() {
-		if err := t.MaterializeOnDevice(backend, false, 0); err != nil {
-			return nil, errors.Wrapf(err, "failed to materialize tensor %q on device", tensorName)
+	if backend != nil {
+		err := t.ToDevice(backend, 0)
+		if err != nil {
+			return nil, errors.WithMessagef(err, "failed to move tensor %q (%s) to backend's device #0", tensorName, t.Shape())
 		}
-		t.FinalizeLocal()
 	}
 
 	return t, nil
