@@ -3,6 +3,7 @@ package safetensors
 import (
 	"io"
 
+	"github.com/gomlx/gomlx/backends"
 	"github.com/gomlx/gomlx/pkg/core/shapes"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/pkg/errors"
@@ -48,7 +49,7 @@ func (sr *MMapReader) Close() error {
 }
 
 // ReadTensor reads a tensor by name from the memory-mapped file.
-func (mr *MMapReader) ReadTensor(tensorName string) (*tensors.Tensor, error) {
+func (mr *MMapReader) ReadTensor(backend backends.Backend, tensorName string) (*tensors.Tensor, error) {
 	meta, ok := mr.Header.Tensors[tensorName]
 	if !ok {
 		return nil, errors.Errorf("tensor %s not found", tensorName)
@@ -61,7 +62,11 @@ func (mr *MMapReader) ReadTensor(tensorName string) (*tensors.Tensor, error) {
 	}
 
 	// Convert shape to ints
-	t := tensors.FromShape(shapes.Make(dtype, meta.Shape...))
+	shape := shapes.Make(dtype, meta.Shape...)
+	t, err := tensors.FromShapeForBackend(backend, shape)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to create tensor %q with shape %s", tensorName, shape)
+	}
 
 	// Read from mmap directly into tensor memory
 	tensorOffset := mr.dataOffset + meta.DataOffsets[0]
@@ -79,6 +84,14 @@ func (mr *MMapReader) ReadTensor(tensorName string) (*tensors.Tensor, error) {
 	})
 	if readErr != nil {
 		return nil, readErr
+	}
+
+	// If backend is configured, make sure to materialize it on-device and free the local copy.
+	if backend != nil {
+		err := t.ToDevice(backend, 0)
+		if err != nil {
+			return nil, errors.WithMessagef(err, "failed to move tensor %q (%s) to backend's device #0", tensorName, t.Shape())
+		}
 	}
 
 	return t, nil

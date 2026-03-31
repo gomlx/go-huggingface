@@ -16,6 +16,14 @@
   - Renamed main method to `AllLayers`: it returns both the final hidden state and all layer outputs; 
     it added RoPE positional embeddings support; added support for scaling factor.
   - Updates to modified GoMLX transformer API.
+  - Added support for configured task prompts (via `task_prompts.json`):
+    - `QueryPrompt` builds the full query prompt, based on a task code.
+    - `RegisteredPromptTasks` returns a list of all task codes for which prompts are registered.
+    - `GetTaskPrompt` returns the prompt string for the given task code.
+  - `LoadContext` now accepts an optional (nil-lable) backend and loads the variables directly into the backend.
+- Package `safetensors` and `gguf`:
+  - `IterTensors` and `IterTensorsFromRepo` now take an optional (nil-lable) backend for reading tensors directly into
+    a backend.
 
 ## v0.3.4
 

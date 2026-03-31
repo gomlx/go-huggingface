@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/gomlx/go-huggingface/hub"
+	"github.com/gomlx/gomlx/backends"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/pkg/errors"
 )
@@ -132,7 +133,7 @@ func (m *Model) Architecture() string {
 }
 
 // GetTensor loads a single tensor by name, dequantizing if needed.
-func (m *Model) GetTensor(tensorName string) (*TensorAndName, error) {
+func (m *Model) GetTensor(backend backends.Backend, tensorName string) (*TensorAndName, error) {
 	if m.File == nil {
 		return nil, errors.Errorf("gguf: model not loaded, call Load() first")
 	}
@@ -142,7 +143,7 @@ func (m *Model) GetTensor(tensorName string) (*TensorAndName, error) {
 		return nil, err
 	}
 
-	t, err := reader.ReadTensor(tensorName)
+	t, err := reader.ReadTensor(backend, tensorName)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +152,10 @@ func (m *Model) GetTensor(tensorName string) (*TensorAndName, error) {
 
 // IterTensors returns an iterator over all tensors as GoMLX tensors.
 // Tensors are read sequentially sorted by offset for optimal I/O.
-func (m *Model) IterTensors() func(yield func(TensorAndName, error) bool) {
+//
+// Tensors are loaded into the backend directly (e.g.: GPU, or a shared memory tensor on CPU, etc).
+// If the backend is nil, it instead loads them in host memory.
+func (m *Model) IterTensors(backend backends.Backend) func(yield func(TensorAndName, error) bool) {
 	return func(yield func(TensorAndName, error) bool) {
 		if m.File == nil {
 			yield(TensorAndName{}, errors.Errorf("gguf: model not loaded, call Load() first"))
@@ -166,7 +170,7 @@ func (m *Model) IterTensors() func(yield func(TensorAndName, error) bool) {
 
 		// TensorInfos are pre-sorted by offset in Open() for sequential I/O.
 		for _, info := range m.File.TensorInfos {
-			t, err := reader.ReadTensor(info.Name)
+			t, err := reader.ReadTensor(backend, info.Name)
 			if err != nil {
 				yield(TensorAndName{}, err)
 				return
@@ -179,7 +183,10 @@ func (m *Model) IterTensors() func(yield func(TensorAndName, error) bool) {
 }
 
 // IterTensorsFromRepo creates a Model from a repo and iterates over all tensors.
-func IterTensorsFromRepo(repo *hub.Repo) func(yield func(TensorAndName, error) bool) {
+//
+// Tensors are loaded into the backend directly (e.g.: GPU, or a shared memory tensor on CPU, etc).
+// If the backend is nil, it instead loads them in host memory.
+func IterTensorsFromRepo(backend backends.Backend, repo *hub.Repo) func(yield func(TensorAndName, error) bool) {
 	return func(yield func(TensorAndName, error) bool) {
 		m, err := New(repo)
 		if err != nil {
@@ -187,7 +194,7 @@ func IterTensorsFromRepo(repo *hub.Repo) func(yield func(TensorAndName, error) b
 			return
 		}
 		defer m.Close()
-		for tn, err := range m.IterTensors() {
+		for tn, err := range m.IterTensors(backend) {
 			if err != nil {
 				yield(TensorAndName{}, err)
 				return

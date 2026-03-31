@@ -9,7 +9,9 @@ import (
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/models/safetensors"
 	"github.com/gomlx/go-huggingface/tokenizers"
+	"github.com/gomlx/gomlx/backends"
 	"github.com/gomlx/gomlx/pkg/ml/context"
+	"github.com/gomlx/gomlx/pkg/support/xslices"
 	"github.com/pkg/errors"
 )
 
@@ -20,7 +22,6 @@ type Model struct {
 	Config                    Config
 	SentenceTransformerConfig *SentenceTransformerConfig
 	Modules                   []ModuleConfig
-	TaskPrompts               *TaskPromptsConfig
 	PoolingConfig             *PoolingConfig
 
 	// useCausalMask: The KaLM paper says that the model is trained without a causal mask, but HuggingFace transformer
@@ -77,11 +78,6 @@ func LoadModel(repo *hub.Repo) (*Model, error) {
 		m.Modules = mods
 	}
 
-	tpc := &TaskPromptsConfig{}
-	if ok, _ := loadFile("task_prompts.json", tpc); ok {
-		m.TaskPrompts = tpc
-	}
-
 	pc := &PoolingConfig{}
 	if ok, _ := loadFile("1_Pooling/config.json", pc); ok {
 		m.PoolingConfig = pc
@@ -90,12 +86,18 @@ func LoadModel(repo *hub.Repo) (*Model, error) {
 	return m, nil
 }
 
-// LoadContext uses models/safetensors to load the variables of the model to a context.
-func (m *Model) LoadContext(ctx *context.Context) error {
+// LoadContext uses models/safetensors to load the variables of the model into a context.
+//
+// If a backend is provided (not nil), the variables are immediately loaded into the backend
+// device #0, saving host memory space or accelerating the loading in some cases.
+//
+// For distributed execution, better to leave backend and nil, and let the executor decide
+// on which devices to place the variables.
+func (m *Model) LoadContext(backend backends.Backend, ctx *context.Context) error {
 	var totalParams int64
 	var totalBytes int64
 
-	for tensorAndName, err := range safetensors.IterTensorsFromRepo(m.Repo) {
+	for tensorAndName, err := range safetensors.IterTensorsFromRepo(backend, m.Repo) {
 		if err != nil {
 			return errors.WithMessagef(err, "failed loading variables of models %q", m.Repo.ID)
 		}
@@ -156,9 +158,6 @@ func (m *Model) Description() string {
 	}
 	if len(m.Modules) > 0 {
 		sb.WriteString(fmt.Sprintf(" - modules.json: loaded (%d modules)\n", len(m.Modules)))
-	}
-	if m.TaskPrompts != nil {
-		sb.WriteString(" - task_prompts.json: loaded\n")
 	}
 	if m.PoolingConfig != nil {
 		sb.WriteString(" - 1_Pooling/config.json: loaded\n")
@@ -266,4 +265,71 @@ func (m *Model) GetTokenizer() (tokenizers.Tokenizer, error) {
 	var err error
 	m.tokenizer, err = tokenizers.New(m.Repo)
 	return m.tokenizer, err
+}
+
+// BuildPrompt builds the full sentence prompt, based on a promptName, an index to the
+// list of prompts in the SentenceTransformerConfig.
+// If the code is not found, it attempts to use the default one. If a default one is
+// not defined, it returns the original sentence.
+func (m *Model) BuildPrompt(sentence, promptName string) string {
+	if m.SentenceTransformerConfig == nil || m.SentenceTransformerConfig.Prompts == nil {
+		return sentence
+	}
+	if promptName == "" {
+		promptName = m.SentenceTransformerConfig.DefaultPromptName
+	}
+	if promptName == "" {
+		return sentence
+	}
+	if taskPrompt, ok := m.SentenceTransformerConfig.Prompts[promptName]; ok {
+		return taskPrompt + sentence
+	}
+	return sentence
+}
+
+// BuildQueryPrompt builds the full query prompt, based on a promptName.
+// It's exactly like BuildPrompt but if a default prompt doesn't exist it uses
+// "Instruct: Given a query, retrieve documents that answer the query \nQuery: " as
+// a prompt prefix.
+func (m *Model) BuildQueryPrompt(query, promptName string) string {
+	if m.SentenceTransformerConfig == nil || m.SentenceTransformerConfig.Prompts == nil {
+		return query
+	}
+	var prompt string
+	if promptName == "" {
+		promptName = m.SentenceTransformerConfig.DefaultPromptName
+	}
+	if promptName != "" {
+		prompt = m.SentenceTransformerConfig.Prompts[promptName]
+	}
+	if prompt == "" {
+		return query
+	}
+	return prompt + query
+}
+
+// RegisteredPromptTasks returns a list of all task codes for which prompts are registered.
+func (m *Model) RegisteredPromptTasks() []string {
+	if m.SentenceTransformerConfig == nil || m.SentenceTransformerConfig.Prompts == nil {
+		return nil
+	}
+	return xslices.SortedKeys(m.SentenceTransformerConfig.Prompts)
+}
+
+// GetTaskPrompt returns the prompt string for the given task code.
+// Returns an empty string if the task code is not found or no prompts are registered.
+func (m *Model) GetTaskPrompt(taskCode string) string {
+	if m.SentenceTransformerConfig == nil || m.SentenceTransformerConfig.Prompts == nil {
+		return ""
+	}
+	if taskCode == "" {
+		taskCode = m.SentenceTransformerConfig.DefaultPromptName
+	}
+	if taskCode == "" {
+		return ""
+	}
+	if promptStr, ok := m.SentenceTransformerConfig.Prompts[taskCode]; ok {
+		return promptStr
+	}
+	return ""
 }

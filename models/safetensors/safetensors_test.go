@@ -91,7 +91,7 @@ func TestGetTensorFromFile(t *testing.T) {
 	m, err := New(repo)
 	require.NoError(t, err)
 
-	tensor, err := m.GetTensorFromFile("model.safetensors", "embeddings.position_embeddings.weight")
+	tensor, err := m.GetTensorFromFile(nil, "model.safetensors", "embeddings.position_embeddings.weight")
 	require.NoError(t, err)
 	assert.NotNil(t, tensor)
 	assert.NotNil(t, tensor.Tensor)
@@ -105,7 +105,7 @@ func TestGetTensor(t *testing.T) {
 	m, err := New(repo)
 	require.NoError(t, err)
 
-	tensor, err := m.GetTensor("embeddings.position_embeddings.weight")
+	tensor, err := m.GetTensor(nil, "embeddings.position_embeddings.weight")
 	require.NoError(t, err)
 	assert.NotNil(t, tensor)
 	assert.NotNil(t, tensor.Tensor)
@@ -226,7 +226,7 @@ func TestIterTensors(t *testing.T) {
 	m, err := New(repo)
 	require.NoError(t, err)
 	count := 0
-	for tensorAndName, err := range m.IterTensors() {
+	for tensorAndName, err := range m.IterTensors(nil) {
 		require.NoError(t, err)
 		wantShapeStr, found := allMiniVariablesToShape[tensorAndName.Name]
 		require.True(t, found, "tensor %q not expected", tensorAndName.Name)
@@ -239,7 +239,7 @@ func TestIterTensors(t *testing.T) {
 func TestIterTensorsFromRepo(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	count := 0
-	for tensorAndName, err := range IterTensorsFromRepo(repo) {
+	for tensorAndName, err := range IterTensorsFromRepo(nil, repo) {
 		require.NoError(t, err)
 		wantShapeStr, found := allMiniVariablesToShape[tensorAndName.Name]
 		require.True(t, found, "tensor %q not expected", tensorAndName.Name)

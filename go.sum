@@ -48,8 +48,12 @@ github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 h1:DACJavvAHhabrF0
 github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0/go.mod h1:E/TSTwGwJL78qG/PmXZO1EjYhfJinVAhrmmHX6Z8B9k=
 github.com/gomlx/go-xla v0.2.2 h1:2YMzXAcmK8BvqFjRnUHHtE2QwKDEts2tRglcFcKhZj8=
 github.com/gomlx/go-xla v0.2.2/go.mod h1:T2CsL/E90te3k4qpuzlXv2uQU2FmLMLfUsRlAGqKSuI=
-github.com/gomlx/gomlx v0.27.3-0.20260329065442-fff6979cb6b3 h1:UIXspWgMaHyj5wepcSPM5/zT6KK6GFhRytg4QM9fyKU=
-github.com/gomlx/gomlx v0.27.3-0.20260329065442-fff6979cb6b3/go.mod h1:kk+NQXJ8pFrREbC+oJ/s+sMF+q4zjd3t8+/4Ro/6DHM=
+github.com/gomlx/gomlx v0.27.3-0.20260329161550-ca5798cd1082 h1:uWdP+k8FDXY4/Fczaah0gra5yknyYTZ0VF25NkWLHss=
+github.com/gomlx/gomlx v0.27.3-0.20260329161550-ca5798cd1082/go.mod h1:kk+NQXJ8pFrREbC+oJ/s+sMF+q4zjd3t8+/4Ro/6DHM=
+github.com/gomlx/gomlx v0.27.3-0.20260331053405-e830470c4e05 h1:/UVzSpYVRQ80vdqHwtIaIn2G5BW1ZnA2laP/1ITfKPE=
+github.com/gomlx/gomlx v0.27.3-0.20260331053405-e830470c4e05/go.mod h1:kk+NQXJ8pFrREbC+oJ/s+sMF+q4zjd3t8+/4Ro/6DHM=
+github.com/gomlx/gomlx v0.27.3-0.20260331071102-a7878b05f8be h1:AHJ0HdWzSyh5nEBNmCT+JHetRPFbqtilWt77OOX4t2U=
+github.com/gomlx/gomlx v0.27.3-0.20260331071102-a7878b05f8be/go.mod h1:kk+NQXJ8pFrREbC+oJ/s+sMF+q4zjd3t8+/4Ro/6DHM=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=

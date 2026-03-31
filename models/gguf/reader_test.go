@@ -33,7 +33,7 @@ func TestReadTensorF32(t *testing.T) {
 	require.NoError(t, err)
 	defer reader.Close()
 
-	tensor, err := reader.ReadTensor("weights")
+	tensor, err := reader.ReadTensor(nil, "weights")
 	require.NoError(t, err)
 
 	assert.Equal(t, []int{4}, tensor.Shape().Dimensions)
@@ -73,7 +73,7 @@ func TestReadTensorF32_2D(t *testing.T) {
 	require.NoError(t, err)
 	defer reader.Close()
 
-	tensor, err := reader.ReadTensor("matrix")
+	tensor, err := reader.ReadTensor(nil, "matrix")
 	require.NoError(t, err)
 
 	// Dimensions reversed: GGUF [3, 2] → GoMLX [2, 3].
@@ -94,7 +94,7 @@ func TestReadTensorNotFound(t *testing.T) {
 	require.NoError(t, err)
 	defer reader.Close()
 
-	_, err = reader.ReadTensor("nonexistent")
+	_, err = reader.ReadTensor(nil, "nonexistent")
 	assert.ErrorContains(t, err, "not found")
 }
 
@@ -154,7 +154,7 @@ func TestReadTensorQ8_0(t *testing.T) {
 	defer reader.Close()
 
 	// Quantized tensors are dequantized to Float32.
-	tensor, err := reader.ReadTensor("q8")
+	tensor, err := reader.ReadTensor(nil, "q8")
 	require.NoError(t, err)
 
 	assert.Equal(t, []int{32}, tensor.Shape().Dimensions)
@@ -195,11 +195,11 @@ func TestReadMultipleTensors(t *testing.T) {
 	require.NoError(t, err)
 	defer reader.Close()
 
-	t1, err := reader.ReadTensor("first")
+	t1, err := reader.ReadTensor(nil, "first")
 	require.NoError(t, err)
 	assert.Equal(t, []int{4}, t1.Shape().Dimensions)
 
-	t2, err := reader.ReadTensor("second")
+	t2, err := reader.ReadTensor(nil, "second")
 	require.NoError(t, err)
 	assert.Equal(t, []int{2}, t2.Shape().Dimensions)
 
