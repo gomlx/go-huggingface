@@ -9,6 +9,7 @@ import (
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/models/safetensors"
 	"github.com/gomlx/go-huggingface/tokenizers"
+	"github.com/gomlx/gomlx/backends"
 	"github.com/gomlx/gomlx/pkg/ml/context"
 	"github.com/gomlx/gomlx/pkg/support/xslices"
 	"github.com/pkg/errors"
@@ -85,12 +86,18 @@ func LoadModel(repo *hub.Repo) (*Model, error) {
 	return m, nil
 }
 
-// LoadContext uses models/safetensors to load the variables of the model to a context.
-func (m *Model) LoadContext(ctx *context.Context) error {
+// LoadContext uses models/safetensors to load the variables of the model into a context.
+//
+// If a backend is provided (not nil), the variables are immediately loaded into the backend
+// device #0, saving host memory space or accelerating the loading in some cases.
+//
+// For distributed execution, better to leave backend and nil, and let the executor decide
+// on which devices to place the variables.
+func (m *Model) LoadContext(backend backends.Backend, ctx *context.Context) error {
 	var totalParams int64
 	var totalBytes int64
 
-	for tensorAndName, err := range safetensors.IterTensorsFromRepo(m.Repo) {
+	for tensorAndName, err := range safetensors.IterBackendTensorsFromRepo(backend, m.Repo) {
 		if err != nil {
 			return errors.WithMessagef(err, "failed loading variables of models %q", m.Repo.ID)
 		}

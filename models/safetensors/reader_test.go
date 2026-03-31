@@ -39,7 +39,7 @@ func TestMMapReaderReadTensor(t *testing.T) {
 
 	// Read a known tensor
 	tensorName := "embeddings.position_embeddings.weight"
-	tensor, err := mmapReader.ReadTensor(tensorName)
+	tensor, err := mmapReader.ReadTensor(tensorName, nil)
 	require.NoError(t, err)
 	assert.NotNil(t, tensor)
 	assert.Greater(t, tensor.Shape().Size(), 0)
@@ -97,7 +97,7 @@ func TestMMapReaderTensor(t *testing.T) {
 
 	// Read a known tensor
 	tensorName := "embeddings.position_embeddings.weight"
-	tensor, err := reader.ReadTensor(tensorName)
+	tensor, err := reader.ReadTensor(tensorName, nil)
 	require.NoError(t, err)
 	assert.NotNil(t, tensor)
 	assert.Greater(t, tensor.Shape().Size(), 0)

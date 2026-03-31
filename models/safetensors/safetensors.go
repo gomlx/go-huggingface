@@ -34,6 +34,8 @@ import (
 	"strings"
 
 	"github.com/gomlx/go-huggingface/hub"
+	"github.com/gomlx/gomlx/backends"
+	"github.com/gomlx/gomlx/pkg/support/xslices"
 	"github.com/pkg/errors"
 )
 
@@ -219,18 +221,24 @@ func (m *Model) IterSafetensors() func(yield func(FileInfo, error) bool) {
 }
 
 // GetTensor by its name.
-func (m *Model) GetTensor(tensorName string) (*TensorAndName, error) {
+//
+// The tensor will be directly created on the given backend, if it is not nil.
+// Otherwise, it creates a local (on-host) tensor.
+func (m *Model) GetTensor(backend backends.Backend, tensorName string) (*TensorAndName, error) {
 	filename, err := m.GetTensorFilename(tensorName)
 	if err != nil {
 		return nil, err
 	}
-	return m.GetTensorFromFile(filename, tensorName)
+	return m.GetTensorFromFile(backend, filename, tensorName)
 }
 
 // GetTensorFromFile loads a tensor from within a .safetensors file and converts it to a GoMLX tensor.
 //
 // This requires a loaded model -- see Model.Load().
-func (m *Model) GetTensorFromFile(fileName, tensorName string) (*TensorAndName, error) {
+//
+// The tensor will be directly created on the given backend, if it is not nil.
+// Otherwise, it creates a local (on-host) tensor.
+func (m *Model) GetTensorFromFile(backend backends.Backend, fileName, tensorName string) (*TensorAndName, error) {
 	if m.Repo == nil {
 		return nil, errors.New("repo is nil!?")
 	}
@@ -242,7 +250,7 @@ func (m *Model) GetTensorFromFile(fileName, tensorName string) (*TensorAndName, 
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create MMapReader for %s", fileName)
 	}
-	tensor, err := reader.ReadTensor(tensorName)
+	tensor, err := reader.ReadTensor(tensorName, backend)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to read tensor %s from %s", tensorName, fileName)
 	}
@@ -250,9 +258,19 @@ func (m *Model) GetTensorFromFile(fileName, tensorName string) (*TensorAndName, 
 }
 
 // IterTensors returns an iterator over all tensors as GoMLX tensors.
-// It uses mmap efficiently: opens each shard file once and reads all tensors from it sequentially.
-// This is optimal for startup when loading many tensors.
+// It opens each shard file once and reads all tensors from it sequentially, to optimize I/O.
+//
+// See also IterBackendTensors if you want to load tensors into a specific backend.
 func (m *Model) IterTensors() func(yield func(TensorAndName, error) bool) {
+	return m.IterBackendTensors(nil)
+}
+
+// IterBackendTensors returns an iterator over all tensors as GoMLX tensors.
+// It opens each shard file once and reads all tensors from it sequentially, to optimize I/O.
+//
+// Tensors are loaded into the backend directly (e.g.: GPU, or a shared memory tensor on CPU, etc).
+// If the backend is nil, it instead loads them in host memory.
+func (m *Model) IterBackendTensors(backend backends.Backend) func(yield func(TensorAndName, error) bool) {
 	return func(yield func(TensorAndName, error) bool) {
 		if m.Repo == nil {
 			yield(TensorAndName{}, errors.New("repo is nil!?"))
@@ -270,7 +288,7 @@ func (m *Model) IterTensors() func(yield func(TensorAndName, error) bool) {
 		}
 
 		// Process each shard file with one mmap
-		for fileName, tensorNames := range shardToTensors {
+		for _, fileName := range xslices.SortedKeys(shardToTensors) {
 			// Create reader for shard.
 			reader, err := m.NewMMapReader(fileName)
 			if err != nil {
@@ -279,11 +297,12 @@ func (m *Model) IterTensors() func(yield func(TensorAndName, error) bool) {
 			}
 
 			// Sort tensors by file offset for sequential reading
+			tensorNames := shardToTensors[fileName]
 			sortedTensors := sortTensorsByOffset(tensorNames, reader.Header)
 
 			// Read all tensors from this shard
 			for _, tensorName := range sortedTensors {
-				tensor, err := reader.ReadTensor(tensorName)
+				tensor, err := reader.ReadTensor(tensorName, backend)
 				if err != nil {
 					reader.Close()
 					yield(TensorAndName{}, err)
@@ -338,6 +357,14 @@ func sortTensorsByOffset(tensorNames []string, header *Header) []string {
 
 // IterTensorsFromRepo iterates over all tensors in the repository.
 func IterTensorsFromRepo(repo *hub.Repo) func(yield func(TensorAndName, error) bool) {
+	return IterBackendTensorsFromRepo(nil, repo)
+}
+
+// IterBackendTensorsFromRepo iterates over all tensors in the repository.
+//
+// Tensors are loaded into the backend directly (e.g.: GPU, or a shared memory tensor on CPU, etc).
+// If the backend is nil, it instead loads them in host memory.
+func IterBackendTensorsFromRepo(backend backends.Backend, repo *hub.Repo) func(yield func(TensorAndName, error) bool) {
 	return func(yield func(TensorAndName, error) bool) {
 		m, err := New(repo)
 		if err != nil {
@@ -345,7 +372,7 @@ func IterTensorsFromRepo(repo *hub.Repo) func(yield func(TensorAndName, error) b
 			return
 		}
 
-		for tensorAndName, err := range m.IterTensors() {
+		for tensorAndName, err := range m.IterBackendTensors(backend) {
 			if err != nil {
 				yield(TensorAndName{}, err)
 				return

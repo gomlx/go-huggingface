@@ -91,7 +91,7 @@ func TestGetTensorFromFile(t *testing.T) {
 	m, err := New(repo)
 	require.NoError(t, err)
 
-	tensor, err := m.GetTensorFromFile("model.safetensors", "embeddings.position_embeddings.weight")
+	tensor, err := m.GetTensorFromFile(nil, "model.safetensors", "embeddings.position_embeddings.weight")
 	require.NoError(t, err)
 	assert.NotNil(t, tensor)
 	assert.NotNil(t, tensor.Tensor)
@@ -105,7 +105,7 @@ func TestGetTensor(t *testing.T) {
 	m, err := New(repo)
 	require.NoError(t, err)
 
-	tensor, err := m.GetTensor("embeddings.position_embeddings.weight")
+	tensor, err := m.GetTensor(nil, "embeddings.position_embeddings.weight")
 	require.NoError(t, err)
 	assert.NotNil(t, tensor)
 	assert.NotNil(t, tensor.Tensor)
