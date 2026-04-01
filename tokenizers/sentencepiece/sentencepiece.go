@@ -50,71 +50,17 @@ var _ api.Tokenizer = &Tokenizer{}
 // Encode returns the text encoded into a sequence of ids.
 // It implements sampler.Vocabulary.
 func (t *Tokenizer) Encode(text string) []int {
-	return t.EncodeWithAnnotations(text).IDs
+	ids, _, _ := t.encodeCore(text, false)
+	return ids
 }
 
 // EncodeWithAnnotations returns the encoded text along with requested annotations.
 func (t *Tokenizer) EncodeWithAnnotations(text string) api.AnnotatedEncoding {
-	tokens := t.Processor.Encode(text)
-	ids := make([]int, len(tokens))
-	spans := make([]api.TokenSpan, len(tokens))
-
-	// Track position in original text by matching token pieces
-	pos := 0
-	for i, tok := range tokens {
-		ids[i] = tok.ID
-		piece := tok.Text
-
-		// SentencePiece uses U+2581 (lower one eighth block) as the space replacement
-		// We need to handle this when matching back to original text
-		matchPiece := piece
-		hasLeadingSpace := false
-		if len(matchPiece) > 0 && matchPiece[0] == '\xe2' && len(matchPiece) >= 3 &&
-			matchPiece[1] == '\x96' && matchPiece[2] == '\x81' {
-			// Remove the U+2581 metaspace character for matching
-			matchPiece = matchPiece[3:]
-			hasLeadingSpace = true
-		}
-
-		// Skip any whitespace in the original text before this token
-		if hasLeadingSpace {
-			for pos < len(text) && (text[pos] == ' ' || text[pos] == '\t' || text[pos] == '\n' || text[pos] == '\r') {
-				pos++
-			}
-		}
-
-		// Find where this piece starts in the original text
-		start := pos
-
-		// Advance position by the length of the actual content
-		if matchPiece == "" {
-			// Empty piece after removing metaspace (token represents just the space)
-			// Check if there was actually a space character
-			if hasLeadingSpace && start > 0 {
-				start = start - 1
-				spans[i] = api.TokenSpan{Start: start, End: pos}
-			} else {
-				spans[i] = api.TokenSpan{Start: pos, End: pos}
-			}
-		} else {
-			// Find the piece in the text starting from current position
-			foundAt := findSubstring(text, matchPiece, pos)
-			if foundAt >= 0 {
-				start = foundAt
-				pos = foundAt + len(matchPiece)
-			} else {
-				// Fallback: advance by piece length
-				pos += len(matchPiece)
-				if pos > len(text) {
-					pos = len(text)
-				}
-			}
-			spans[i] = api.TokenSpan{Start: start, End: pos}
-		}
-	}
+	ids, spans, specialTokensMask := t.encodeCore(text, t.options.IncludeSpans)
 
 	res := api.AnnotatedEncoding{
-		IDs: ids,
+		IDs:               ids,
+		SpecialTokensMask: specialTokensMask,
 	}
 	if t.options.IncludeSpans {
 		res.Spans = spans
@@ -122,9 +68,81 @@ func (t *Tokenizer) EncodeWithAnnotations(text string) api.AnnotatedEncoding {
 	return res
 }
 
+func (t *Tokenizer) encodeCore(text string, includeSpans bool) ([]int, []api.TokenSpan, []int) {
+	tokens := t.Processor.Encode(text)
+	ids := make([]int, len(tokens))
+	for i, tok := range tokens {
+		ids[i] = tok.ID
+	}
+
+	var spans []api.TokenSpan
+	if includeSpans {
+		spans = make([]api.TokenSpan, len(tokens))
+
+		// Track position in original text by matching token pieces
+		pos := 0
+		for i, tok := range tokens {
+			piece := tok.Text
+
+			// SentencePiece uses U+2581 (lower one eighth block) as the space replacement
+			// We need to handle this when matching back to original text
+			matchPiece := piece
+			hasLeadingSpace := false
+			if len(matchPiece) > 0 && matchPiece[0] == '\xe2' && len(matchPiece) >= 3 &&
+				matchPiece[1] == '\x96' && matchPiece[2] == '\x81' {
+				// Remove the U+2581 metaspace character for matching
+				matchPiece = matchPiece[3:]
+				hasLeadingSpace = true
+			}
+
+			// Skip any whitespace in the original text before this token
+			if hasLeadingSpace {
+				for pos < len(text) && (text[pos] == ' ' || text[pos] == '\t' || text[pos] == '\n' || text[pos] == '\r') {
+					pos++
+				}
+			}
+
+			// Find where this piece starts in the original text
+			start := pos
+
+			// Advance position by the length of the actual content
+			if matchPiece == "" {
+				// Empty piece after removing metaspace (token represents just the space)
+				// Check if there was actually a space character
+				if hasLeadingSpace && start > 0 {
+					start = start - 1
+					spans[i] = api.TokenSpan{Start: start, End: pos}
+				} else {
+					spans[i] = api.TokenSpan{Start: pos, End: pos}
+				}
+			} else {
+				// Find the piece in the text starting from current position
+				foundAt := findSubstring(text, matchPiece, pos)
+				if foundAt >= 0 {
+					start = foundAt
+					pos = foundAt + len(matchPiece)
+				} else {
+					// Fallback: advance by piece length
+					pos += len(matchPiece)
+					if pos > len(text) {
+						pos = len(text)
+					}
+				}
+				spans[i] = api.TokenSpan{Start: start, End: pos}
+			}
+		}
+	}
+
+	if t.options.AddSpecialTokens {
+		return t.applyPostProcessor(ids, spans)
+	}
+
+	return ids, spans, nil
+}
+
 // With applies options to a tokenizer.
 func (t *Tokenizer) With(options api.EncodeOptions) error {
-	if options.IncludeSpecialTokensMask || options.AddSpecialTokens || options.MaxLen > 0 {
+	if options.IncludeSpecialTokensMask || options.MaxLen > 0 {
 		return api.ErrNotImplemented
 	}
 

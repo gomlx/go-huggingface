@@ -69,6 +69,8 @@ type TokenSpan struct {
 type EncodeOptions struct {
 
 	// AddSpecialTokens option takes a boolean value, and enables post-processing (e.g., [CLS]/[SEP] for BERT).
+	// This is enabled by default for tokenizers that support it, since this is
+	// the expected HuggingFace tokenizer behavior.
 	AddSpecialTokens bool
 
 	// MaxLen option takes an int value. Set it to a value <= 0 to disable MaxLen.
