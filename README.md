@@ -1,6 +1,9 @@
 # **go-huggingface**, download, tokenize and convert models from HuggingFace. 
 
 [![GoDev](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white)](https://pkg.go.dev/github.com/gomlx/go-huggingface?tab=doc)
+[![Tests](https://github.com/gomlx/go-huggingface/actions/workflows/linux_amd64_tests.yaml/badge.svg)](https://github.com/gomlx/go-huggingface/actions/workflows/linux_amd64_tests.yaml)
+[![Slack](https://img.shields.io/badge/Slack-GoMLX-purple.svg?logo=slack)](https://app.slack.com/client/T029RQSE6/C08TX33BX6U)
+[![Sponsor gomlx](https://img.shields.io/badge/Sponsor-gomlx-white?logo=github&style=flat-square)](https://github.com/sponsors/gomlx)
 
 ## 📖 Overview
 
@@ -9,7 +12,14 @@ Simple APIs for downloading (`hub`), tokenizing (`tokenizers`), (**experimental*
 
 Each component is independent, and only depends on what it needs -- `hub` has no dependency on `GoMLX`, `tokenizers` has no dependence on `parquet-go` (to parse datasets), etc.
 
-🚧 **EXPERIMENTAL and IN DEVELOPMENT**: Bits and pieces are working everywhere: at least [one model (tencent/KaLM-Embedding-Gemma3-12B-2511)](https://huggingface.co/tencent/KaLM-Embedding-Gemma3-12B-2511) successfully converts nicely. Also at least [on dataset (microsoft/ms_marco)](https://huggingface.co/datasets/microsoft/ms_marco) can easily be downaloaded/scanned. But ... it is still under development -- and on that note: contributions and suggestions are most welcome.
+🚧 **EXPERIMENTAL and IN DEVELOPMENT**: Bits and pieces are working everywhere: at least [one model (tencent/KaLM-Embedding-Gemma3-12B-2511)](https://huggingface.co/tencent/KaLM-Embedding-Gemma3-12B-2511) successfully converts nicely. Also at least [on dataset (microsoft/ms_marco)](https://huggingface.co/datasets/microsoft/ms_marco) can easily be downaloaded/scanned. There are reports of many other models working with the tokenizers package.But ... it is still under development -- and on that note: contributions and suggestions are most welcome.
+
+See examples:
+ 
+* [MS MARCO dataset](https://github.com/gomlx/go-huggingface/tree/main/examples/msmarco): 
+  a small library that makes it easy access to this specific dataset, and serves as an example to access others.
+* [Tencent's KaLM-Embedding-Gemma3-12B-2511 Sentence Encoder](https://github.com/gomlx/go-huggingface/tree/main/examples/kalmgemma3): 
+  a small library that makes it trivial to use this model and serves as an example how to use others.
 
 ## Packages `hub`: Downloding info and files from a repository
 
