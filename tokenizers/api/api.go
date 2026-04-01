@@ -40,6 +40,10 @@ type Tokenizer interface {
 
 	// VocabSize returns the total number of tokens in the vocabulary.
 	VocabSize() int
+
+	// Config returns the HuggingFace tokenizer configuration.
+	// It is optional, and in case the tokenizer has been instantiated in some other fashion it may return nil.
+	Config() *Config
 }
 
 // AnnotatedEncoding contains various optional annotations.

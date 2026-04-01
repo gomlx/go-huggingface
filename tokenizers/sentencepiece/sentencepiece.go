@@ -32,6 +32,7 @@ func New(config *api.Config, repo *hub.Repo) (api.Tokenizer, error) {
 		options: api.EncodeOptions{
 			AddSpecialTokens: true,
 		},
+		config: config,
 	}, nil
 }
 
@@ -40,6 +41,7 @@ type Tokenizer struct {
 	Processor *esentencepiece.Processor
 	Info      *esentencepiece.ModelInfo
 	options   api.EncodeOptions
+	config    *api.Config
 }
 
 // Compile time assert that sentencepiece.Tokenizer implements tokenizers.Tokenizer interface.
@@ -47,13 +49,13 @@ var _ api.Tokenizer = &Tokenizer{}
 
 // Encode returns the text encoded into a sequence of ids.
 // It implements sampler.Vocabulary.
-func (p *Tokenizer) Encode(text string) []int {
-	return p.EncodeWithAnnotations(text).IDs
+func (t *Tokenizer) Encode(text string) []int {
+	return t.EncodeWithAnnotations(text).IDs
 }
 
 // EncodeWithAnnotations returns the encoded text along with requested annotations.
-func (p *Tokenizer) EncodeWithAnnotations(text string) api.AnnotatedEncoding {
-	tokens := p.Processor.Encode(text)
+func (t *Tokenizer) EncodeWithAnnotations(text string) api.AnnotatedEncoding {
+	tokens := t.Processor.Encode(text)
 	ids := make([]int, len(tokens))
 	spans := make([]api.TokenSpan, len(tokens))
 
@@ -114,25 +116,25 @@ func (p *Tokenizer) EncodeWithAnnotations(text string) api.AnnotatedEncoding {
 	res := api.AnnotatedEncoding{
 		IDs: ids,
 	}
-	if p.options.IncludeSpans {
+	if t.options.IncludeSpans {
 		res.Spans = spans
 	}
 	return res
 }
 
 // With applies options to a tokenizer.
-func (p *Tokenizer) With(options api.EncodeOptions) error {
+func (t *Tokenizer) With(options api.EncodeOptions) error {
 	if options.IncludeSpecialTokensMask || options.AddSpecialTokens || options.MaxLen > 0 {
 		return api.ErrNotImplemented
 	}
-	
-	p.options = options
+
+	t.options = options
 	return nil
 }
 
 // Normalize returns the normalization used by the tokenizer (e.g.: BERT lower cases the string)
 // SentencePiece handles normalization internally, but we don't expose it separately.
-func (p *Tokenizer) Normalize(text string) string {
+func (t *Tokenizer) Normalize(text string) string {
 	return text
 }
 
@@ -151,27 +153,31 @@ func findSubstring(s, substr string, start int) int {
 
 // Decode returns the text from a sequence of ids.
 // It implements sampler.Vocabulary.
-func (p *Tokenizer) Decode(ids []int) string {
-	return p.Processor.Decode(ids)
+func (t *Tokenizer) Decode(ids []int) string {
+	return t.Processor.Decode(ids)
 }
 
 // SpecialTokenID returns the token for the given symbol, or an error if not known.
-func (p *Tokenizer) SpecialTokenID(token api.SpecialToken) (int, error) {
+func (t *Tokenizer) SpecialTokenID(token api.SpecialToken) (int, error) {
 	switch token {
 	case api.TokUnknown:
-		return p.Info.UnknownID, nil
+		return t.Info.UnknownID, nil
 	case api.TokPad:
-		return p.Info.PadID, nil
+		return t.Info.PadID, nil
 	case api.TokBeginningOfSentence:
-		return p.Info.BeginningOfSentenceID, nil
+		return t.Info.BeginningOfSentenceID, nil
 	case api.TokEndOfSentence:
-		return p.Info.EndOfSentenceID, nil
+		return t.Info.EndOfSentenceID, nil
 	default:
 		return 0, errors.Errorf("unknown special token: %s (%d)", token, int(token))
 	}
 }
 
 // VocabSize returns the total number of tokens in the vocabulary.
-func (p *Tokenizer) VocabSize() int {
+func (t *Tokenizer) VocabSize() int {
 	return 0 // TODO: implement
+}
+
+func (t *Tokenizer) Config() *api.Config {
+	return t.config
 }

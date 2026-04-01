@@ -273,9 +273,6 @@ func (t *Tokenizer) With(options api.EncodeOptions) error {
 	return nil
 }
 
-// Encode converts text to a sequence of token IDs, including post-processing
-// (e.g., [CLS]/[SEP] wrapping for BERT-style models).
-// This matches Python's tokenizer(text) default behavior.
 func (t *Tokenizer) Encode(text string) []int {
 	result := t.encodeCore(text)
 	if t.options.AddSpecialTokens {
@@ -707,6 +704,11 @@ func (t *Tokenizer) GetVocab() map[string]int {
 		vocab[at.Content] = at.ID
 	}
 	return vocab
+}
+
+// Config returns the HuggingFace tokenizer configuration.
+func (t *Tokenizer) Config() *api.Config {
+	return t.config
 }
 
 // Helper functions
