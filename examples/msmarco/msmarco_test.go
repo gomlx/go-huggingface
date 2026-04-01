@@ -9,6 +9,10 @@ import (
 )
 
 func TestBrowse(t *testing.T) {
+	if testing.Short() {
+		t.Skip("⚠️  Skipping tests because -short flag is set, and these tests are very expensive.\n")
+		return
+	}
 	ds := datasets.New(msmarco.ID)
 	count := 0
 	const limit = 10
