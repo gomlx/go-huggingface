@@ -3,15 +3,22 @@
 ## Next
 
 - Package `tokenizers`: **API change!**
-  - Updated `Tokenizer` interface to include `EncodeWithAnnotations`, `VocabSize()` and `Normalize()` methods, and cleaned up the API.
+  - Updated `api.Tokenizer` interface: added `EncodeWithAnnotations`, `VocabSize()`, `Normalize()` and `Config` methods,
+    and cleaned up the API.
+- Package `tokenizers/hftokenizer`:
+  - Added support to `AddBosToken` and `AddEosToken`.
+- Package `tokenizers/sentencepiece`:
+  - Added post-processing.
+  - Spans only generated for `EncodeWithAnnotations`.
+  - Added support to `AddBosToken` and `AddEosToken`.
+- Package `tokenizers/bucket`
+  - Added `bucket` package for streaming tokenization of sentences into buckets (or batches) of discrete sizes, 
+    to minimize padding.
 - Package `datasets`:
   - Added `datasets` package for downloading and iterating over parquet files of datasets from the HuggingFace Hub.
   - Added `cmd/generate_dataset_structs` for generating Go structs for dataset records.
   - Added `ParquetFixListSchema` for fixing list schema parsed from Go struct (a bug? in parquet-go where it hard-codes
     the group/element node names in lists).
-- Package `tokenizers/bucket`
-  - Added `bucket` package for streaming tokenization of sentences into buckets (or batches) of discrete sizes, 
-    to minimize padding.
 - Package `transformer`
   - Renamed main method to `AllLayers`: it returns both the final hidden state and all layer outputs; 
     it added RoPE positional embeddings support; added support for scaling factor.
