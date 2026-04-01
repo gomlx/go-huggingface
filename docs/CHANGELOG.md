@@ -2,6 +2,8 @@
 
 ## Next
 
+- Added `.github` with continuous integration (CI) workflow: only for Linux/amd64 because it should work the
+  same on other platforms.
 - Package `tokenizers`: **API change!**
   - Updated `api.Tokenizer` interface: added `EncodeWithAnnotations`, `VocabSize()`, `Normalize()` and `Config` methods,
     and cleaned up the API.
