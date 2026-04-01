@@ -40,6 +40,10 @@ type Tokenizer interface {
 
 	// VocabSize returns the total number of tokens in the vocabulary.
 	VocabSize() int
+
+	// Config returns the HuggingFace tokenizer configuration.
+	// It is optional, and in case the tokenizer has been instantiated in some other fashion it may return nil.
+	Config() *Config
 }
 
 // AnnotatedEncoding contains various optional annotations.
@@ -65,6 +69,8 @@ type TokenSpan struct {
 type EncodeOptions struct {
 
 	// AddSpecialTokens option takes a boolean value, and enables post-processing (e.g., [CLS]/[SEP] for BERT).
+	// This is enabled by default for tokenizers that support it, since this is
+	// the expected HuggingFace tokenizer behavior.
 	AddSpecialTokens bool
 
 	// MaxLen option takes an int value. Set it to a value <= 0 to disable MaxLen.

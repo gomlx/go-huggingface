@@ -133,8 +133,8 @@ func (m *mockTokenizer) SpecialTokenID(token api.SpecialToken) (int, error) {
 }
 
 func (m *mockTokenizer) Normalize(s string) string { return s }
-
-func (m *mockTokenizer) VocabSize() int { return 1000 }
+func (m *mockTokenizer) VocabSize() int            { return 1000 }
+func (m *mockTokenizer) Config() *api.Config       { return nil }
 
 func TestBucketizerRun(t *testing.T) {
 	mockTok := &mockTokenizer{padID: 99}

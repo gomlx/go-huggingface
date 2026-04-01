@@ -1,26 +1,53 @@
 package hftokenizer
 
-import "github.com/gomlx/go-huggingface/tokenizers/api"
+import (
+	"github.com/gomlx/go-huggingface/tokenizers/api"
+)
 
 // applyPostProcessor applies the post_processor to add special tokens
 // (e.g., [CLS] prefix and [SEP] suffix for BERT-style models).
 // This matches the Rust tokenizer's addSpecialTokens=true behavior.
 //
 // Supported types: TemplateProcessing, BertProcessing, RobertaProcessing.
+// As a fallback, this also injects configured bos/eos tokens from tokenizer_config.json
 func (t *Tokenizer) applyPostProcessor(ids []int, spans []api.TokenSpan) ([]int, []api.TokenSpan, []int) {
+	outIDs := ids
+	outSpans := spans
+	var outSpecial []int
+
 	pp := t.tokenizer.PostProcessor
-	if pp == nil {
-		return ids, spans, nil
+	if pp != nil {
+		switch pp.Type {
+		case "TemplateProcessing":
+			outIDs, outSpans, outSpecial = t.applyTemplateProcessing(pp, ids, spans)
+		case "BertProcessing", "RobertaProcessing":
+			outIDs, outSpans, outSpecial = t.applyBertProcessing(pp, ids, spans)
+		}
 	}
 
-	switch pp.Type {
-	case "TemplateProcessing":
-		return t.applyTemplateProcessing(pp, ids, spans)
-	case "BertProcessing", "RobertaProcessing":
-		return t.applyBertProcessing(pp, ids, spans)
-	default:
-		return ids, spans, nil
+	// Prepare outSpecial mask if it hasn't been instantiated
+	if outSpecial == nil && len(outIDs) > 0 {
+		outSpecial = make([]int, len(outIDs))
 	}
+
+	if t.config != nil {
+		if t.config.AddBosToken && t.bosID >= 0 {
+			if len(outIDs) == 0 || outIDs[0] != t.bosID {
+				outIDs = append([]int{t.bosID}, outIDs...)
+				outSpans = append([]api.TokenSpan{{Start: -1, End: -1}}, outSpans...)
+				outSpecial = append([]int{1}, outSpecial...)
+			}
+		}
+		if t.config.AddEosToken && t.eosID >= 0 {
+			if len(outIDs) == 0 || outIDs[len(outIDs)-1] != t.eosID {
+				outIDs = append(outIDs, t.eosID)
+				outSpans = append(outSpans, api.TokenSpan{Start: -1, End: -1})
+				outSpecial = append(outSpecial, 1)
+			}
+		}
+	}
+
+	return outIDs, outSpans, outSpecial
 }
 
 // applyTemplateProcessing handles TemplateProcessing post-processors.
