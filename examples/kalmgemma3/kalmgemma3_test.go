@@ -55,7 +55,7 @@ func TestMain(m *testing.M) {
 	klog.InitFlags(nil)
 	flag.Parse() // Ensure flags are parsed before we use them
 	if testing.Short() {
-		fmt.Printf("⚠️  Skipping tests because -short flag is set, and these tests are very expensive.\n")
+		fmt.Printf("🚨 Skipping tests because -short flag is set, and these tests are very expensive.\n")
 		os.Exit(0)
 	}
 
