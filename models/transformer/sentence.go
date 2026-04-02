@@ -6,6 +6,7 @@ import (
 	"github.com/gomlx/gomlx/backends"
 	"github.com/gomlx/gomlx/pkg/core/dtypes"
 	"github.com/gomlx/gomlx/pkg/core/graph"
+	"github.com/gomlx/gomlx/pkg/core/shapes"
 	"github.com/gomlx/gomlx/pkg/ml/context"
 	"github.com/gomlx/gomlx/pkg/support/exceptions"
 )
@@ -21,6 +22,17 @@ import (
 // It returns the final pooled embedding (usually [batchSize, embedSize]) for the sentence.
 func (m *Model) SentenceEmbeddingGraph(ctx *context.Context, tokens, mask *graph.Node) *graph.Node {
 	var x *graph.Node
+	// Add a batch axis if not present.
+	if tokens.Rank() == 1 {
+		tokens = graph.ExpandAxes(tokens, 0) // [seqLen] -> [1, seqLen]
+		if mask != nil {
+			mask = graph.ExpandAxes(mask, 0) // [seqLen] -> [1, seqLen]
+		}
+	}
+	if tokens.Rank() != 2 || (mask != nil && mask.Rank() != 2) {
+		exceptions.Panicf("tokens must be [batchSize, seqLen] and mask must be [batchSize, seqLen] or nil, got %v and %v",
+			tokens.Shape(), mask.Shape())
+	}
 
 	for _, mod := range m.Modules {
 		switch mod.Type {
@@ -34,7 +46,7 @@ func (m *Model) SentenceEmbeddingGraph(ctx *context.Context, tokens, mask *graph
 			if x == nil {
 				exceptions.Panicf("pooling module found before transformer module")
 			}
-			x = m.ApplySentencePooling(ctx, x, tokens, mask)
+			x = m.ApplySentencePooling(x, mask)
 
 		case "sentence_transformers.models.Normalize":
 			if x == nil {
@@ -61,7 +73,7 @@ func (m *Model) SentenceEmbeddingGraph(ctx *context.Context, tokens, mask *graph
 		x = lastLayer
 		// and apply default pooling if a pooling config exists
 		if m.PoolingConfig != nil {
-			x = m.ApplySentencePooling(ctx, x, tokens, mask)
+			x = m.ApplySentencePooling(x, mask)
 		}
 	}
 
@@ -72,34 +84,59 @@ func (m *Model) SentenceEmbeddingGraph(ctx *context.Context, tokens, mask *graph
 // No padding, not bucketing, the exec takes as input a single sentence [seqLen] and returns the embedding [embedDim].
 func (m *Model) SingleSentenceEmbeddingExec(backend backends.Backend, ctx *context.Context) (*context.Exec, error) {
 	return context.NewExec(backend, ctx, func(ctx *context.Context, tokens *graph.Node) *graph.Node {
-		return graph.ConvertDType(m.SentenceEmbeddingGraph(ctx, tokens, nil), dtypes.Float32)
+		output := graph.ConvertDType(m.SentenceEmbeddingGraph(ctx, tokens, nil), dtypes.Float32)
+		if output.Rank() == 2 && output.Shape().Dimensions[0] == 1 {
+			// Remove the batch dimension, since we are expecting a single sentence.
+			return graph.Squeeze(output, 0)
+		}
+		return output
 	})
 }
 
 // ApplySentencePooling applies the configured pooling function to the hidden states.
-func (m *Model) ApplySentencePooling(ctx *context.Context, hiddenStates, tokens, mask *graph.Node) *graph.Node {
+//
+// - hiddenStates: [batchSize, seqLen, hiddenSize]
+// - mask: nil or [batchSize, seqLen] of dtype Bool.
+//
+// Returns [batchSize, hiddenSize]
+func (m *Model) ApplySentencePooling(hiddenStates, mask *graph.Node) *graph.Node {
 	if m.PoolingConfig == nil {
 		exceptions.Panicf("no pooling config was loaded for this model")
 	}
 	cfg := m.PoolingConfig
+	g := hiddenStates.Graph()
+	batchSize := hiddenStates.Shape().Dimensions[0]
+	seqLen := hiddenStates.Shape().Dimensions[1]
 
-	if cfg.PoolingModeLastToken {
-		// In Hugging Face, sentence transformers typically use the attention mask to find the last valid token.
-		// Since we don't handle padding explicitly through an attention mask yet, we take the physical
-		// last token in the sequence. For left-padded or unpadded sequences, this is correct.
-		seqLen := hiddenStates.Shape().Dimensions[1]
-		if seqLen == -1 {
-			// If sequence length is unknown at translation time, we could use graph.Shape(hiddenStates)
-			// and graph.Slice dynamically. For simplicity assuming known seq length for now.
-			exceptions.Panicf("PoolingModeLastToken requires sequence length to be known at trace time")
+	switch {
+	case cfg.PoolingModeLastToken:
+		// In Hugging Face, sentence transformers typically use the "attention mask" (the 1D mask, here called simply
+		// mask) to find the last valid token.
+
+		var lastTokenIdx *graph.Node
+		if mask == nil {
+			// If no mask is provided, assume all tokens are valid and take the last one.
+			lastTokenIdx = graph.Scalar(g, dtypes.Int32, seqLen-1)
+			lastTokenIdx = graph.ExpandAxes(lastTokenIdx, 0)              // scalar -> [1]
+			lastTokenIdx = graph.BroadcastPrefix(lastTokenIdx, batchSize) // -> [batchSize, 1]
+		} else {
+			// Find the last token index by finding the last non-zero element in the mask.
+			// mask is [batchSize, seqLen]
+			sequenceIndices := graph.Iota(g, shapes.Make(dtypes.Int32, batchSize, seqLen), 1)
+			validIndices := graph.Where(mask, sequenceIndices, graph.Scalar(g, dtypes.Int32, -1))
+			lastTokenIdx = graph.ReduceAndKeep(validIndices, graph.ReduceMax, 1) // [batchSize, 1]
 		}
-		sliced := graph.Slice(hiddenStates, graph.AxisRange(), graph.AxisRange(seqLen-1, seqLen))
-		return graph.Squeeze(sliced, 1) // [batch, 1, hidden] -> [batch, hidden]
-	}
+		// Create a one-hot mask for the last token.
+		// lastTokenIdx is [batchSize, 1].
+		oneHot := graph.OneHot(lastTokenIdx, seqLen, hiddenStates.DType()) // -> [batchSize, 1, seqLen]
+		oneHot = graph.Squeeze(oneHot, 1)                                  // -> [batchSize, seqLen]
+		oneHot = graph.ExpandAxes(oneHot, -1)                              // -> [batchSize, seqLen, 1]
+		lastTokenEmbeddings := graph.Mul(hiddenStates, oneHot)             // -> [batchSize, seqLen, hiddenDim]
+		return graph.ReduceSum(lastTokenEmbeddings, 1)                     // -> [batchSize, hiddenDim]
 
-	if cfg.PoolingModeMeanTokens {
+	case cfg.PoolingModeMeanTokens:
 		// Plain mean pooling over the sequence tokens (assuming no padding for now).
-		return graph.ReduceMean(hiddenStates, 1)
+		return graph.MaskedReduceMean(hiddenStates, mask, 1) // [batch, hidden]
 	}
 
 	exceptions.Panicf("no supported pooling mode enabled in PoolingConfig: %+v", cfg)
