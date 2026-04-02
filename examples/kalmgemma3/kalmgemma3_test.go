@@ -13,10 +13,12 @@ import (
 	"time"
 
 	"github.com/gomlx/go-huggingface/models/transformer"
+	"github.com/gomlx/go-huggingface/tokenizers/api"
 	"github.com/gomlx/gomlx/backends"
 	_ "github.com/gomlx/gomlx/backends/default"
 	"github.com/gomlx/gomlx/pkg/core/dtypes"
 	"github.com/gomlx/gomlx/pkg/core/graph"
+	"github.com/gomlx/gomlx/pkg/core/shapes"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/gomlx/gomlx/pkg/ml/context"
 	"github.com/gomlx/gomlx/pkg/support/xslices"
@@ -37,6 +39,7 @@ var (
 	taskPrompts TaskPrompts
 	testQueries []string
 	testDocs    []string
+	testPadID   int32
 )
 
 func must(err error) {
@@ -88,7 +91,15 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 
-	fmt.Printf("✅ Model: %s\n\n", testModel.Description())
+	fmt.Printf("✅ Model: %s", testModel.Description())
+
+	tokenizer := must1(testModel.GetTokenizer())
+	padID, err := tokenizer.SpecialTokenID(api.TokPad)
+	if err != nil {
+		fmt.Printf("Padding token not defined: %+v\n", err)
+		os.Exit(1)
+	}
+	testPadID = int32(padID)
 
 	taskPrompts = must1(LoadTaskPrompts(repo))
 	fmt.Printf("✅ Task prompts loaded: %d tasks\n", len(taskPrompts))
@@ -212,6 +223,7 @@ func TestTransformerLayers(t *testing.T) {
 		{"Doc 2", testDocs[1], "layer_emb_d2.txt"},
 	}
 
+	tokenizer := must1(testModel.GetTokenizer())
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			expectedLayers, err := readPythonEmbeddings(tc.fileName, finalLayersToCheck)
@@ -224,64 +236,107 @@ func TestTransformerLayers(t *testing.T) {
 				}
 			}
 
-			tokensInt := must1(testModel.GetTokenizer()).Encode(tc.prompt)
-			tokens := make([]int32, len(tokensInt))
-			for j, tIdx := range tokensInt {
-				tokens[j] = int32(tIdx)
-			}
-			inputTensor := tensors.FromValue([][]int32{tokens})
-
-			fmt.Printf("- Executing model for %s ...", tc.name)
-			start := time.Now()
-			results, err := exec.Exec(inputTensor)
-			if err != nil {
-				t.Fatalf("Failed to execute graph: %v", err)
-			}
-			fmt.Printf("done (%v)\n", time.Since(start))
-
-			if len(results) < testModel.Config.NumHiddenLayers+1 {
-				t.Fatalf("Expected at least %d outputs from graph, got %d", testModel.Config.NumHiddenLayers+1, len(results))
-			}
-
-			for _, l := range finalLayersToCheck {
-				outTensor := results[l]
-				expectedData := expectedLayers[l]
-				name := fmt.Sprintf("Layer %d Output", l)
-				if l == 0 {
-					name = "Token Embeddings"
-				}
-				outTensor.ConstFlatData(func(flatAny any) {
-					flat := flatAny.([]float32)
-					outShape := outTensor.Shape()
-					if outShape.Rank() < 3 {
-						t.Fatalf("[%s] Expected rank >= 3, got %s", name, outShape)
+			tokens := tokenizer.Encode(tc.prompt)
+			testSubTitle := []string{"no-mask", "with-mask"}
+			for maskIdx, withMask := range []bool{false, true} {
+				t.Run(testSubTitle[maskIdx], func(t *testing.T) {
+					// Create inputTensor with extra padding if mask is selected.
+					sentenceLen := len(tokens)
+					var inputTensor *tensors.Tensor
+					if withMask {
+						sentenceLen += 10 // Extra padding.
 					}
-					batchSize := outShape.Dimensions[1]
-					if batchSize != len(tokens) {
-						t.Fatalf("[%s] Expected %d tokens in output, got %d -- output shape is %s", name, len(tokens), batchSize, outShape)
+					inputTensor = tensors.FromShape(shapes.Make(dtypes.Int32, 1, sentenceLen))
+					tensors.MustMutableFlatData(inputTensor, func(flat []int32) {
+						for i, token := range tokens {
+							flat[i] = int32(token)
+						}
+						if withMask && testPadID != 0 {
+							for i := len(tokens); i < sentenceLen; i++ {
+								flat[i] = testPadID
+							}
+						}
+					})
+
+					// Execute the embedder.
+					fmt.Printf("- Executing model for %s ...", tc.name)
+					start := time.Now()
+					gotAllLayers, err := exec.Exec(inputTensor)
+					if err != nil {
+						t.Fatalf("Failed to execute graph: %v", err)
 					}
-					if outShape.Dimensions[2] != testModel.Config.HiddenSize {
-						t.Fatalf("[%s] Expected hidden size %d, got %d -- output shape is %s", name, testModel.Config.HiddenSize, outShape.Dimensions[2], outShape)
+					fmt.Printf("done (%v)\n", time.Since(start))
+					if len(gotAllLayers) < testModel.Config.NumHiddenLayers+1 {
+						t.Fatalf("Expected at least %d outputs from graph, got %d", testModel.Config.NumHiddenLayers+1, len(gotAllLayers))
 					}
-					validateTensor(t, flat, expectedData, name)
+
+					for _, l := range finalLayersToCheck {
+						gotLayer := gotAllLayers[l]
+						expectedFlat := expectedLayers[l]
+						name := fmt.Sprintf("Layer %d Output", l)
+						if l == 0 {
+							name = "Token Embeddings"
+						}
+
+						// Verify shape of layer.
+						gotShape := gotLayer.Shape()
+						if gotShape.Rank() < 3 {
+							t.Fatalf("[%s] Expected rank >= 3, got %s", name, gotShape)
+						}
+						if gotShape.Dimensions[0] != 1 {
+							t.Fatalf("[%s] Expected batch size 1, got %d -- output shape is %s", name, gotShape.Dimensions[0], gotShape)
+						}
+						gotSentenceLen := gotShape.Dimensions[1]
+						if gotSentenceLen != sentenceLen {
+							t.Fatalf("[%s] Expected %d tokens in output, got %d -- output shape is %s", name, sentenceLen, gotSentenceLen, gotShape)
+						}
+						if gotShape.Dimensions[2] != testModel.Config.HiddenSize {
+							t.Fatalf("[%s] Expected hidden size %d, got %d -- output shape is %s", name, testModel.Config.HiddenSize, gotShape.Dimensions[2], gotShape)
+						}
+
+						// Verify values of the first len(tokens) only, we don't need to check the padding.
+						gotLayer.ConstFlatData(func(flatAny any) {
+							gotFlat := flatAny.([]float32)
+							validateTensor(t, gotFlat, expectedFlat, name, 1, sentenceLen, len(tokens))
+						})
+					}
 				})
 			}
 		})
 	}
 }
 
-func validateTensor(t *testing.T, got []float32, expected []float32, name string) {
-	if len(got) != len(expected) {
-		t.Fatalf("[%s] Shape mismatch: expected %d flat floats (%d tokens), got %d (%d tokens)",
-			name, len(expected), len(expected)/EmbeddingDim, len(got), len(got)/EmbeddingDim)
+// validateTensor validates the values of a tensor.
+// It checks the values of the first expectedSentenceLen tokens only, ignoring the padding in
+// case gotSentencenLen > expectedSentenceLen.
+func validateTensor(t *testing.T, got []float32, expected []float32, name string,
+	batchSize, gotSentenceLen, expectedSentenceLen int) {
+
+	gotHiddenDim := len(got) / batchSize / gotSentenceLen
+	expectedHiddenDim := len(expected) / batchSize / expectedSentenceLen
+	if gotHiddenDim == 0 || gotHiddenDim != expectedHiddenDim || gotSentenceLen < expectedSentenceLen {
+		t.Fatalf("[%s] Shape mismatch: expected %d flat floats ([%d, %d, %d]?), got %d ([%d, %d, %d])",
+			name, len(expected), batchSize, expectedSentenceLen, expectedHiddenDim,
+			len(got), batchSize, gotSentenceLen, gotHiddenDim)
+	}
+
+	// Find mapping from expected indices to got indices.
+	expectedShape := shapes.Make(dtypes.Float32, batchSize, expectedSentenceLen, expectedHiddenDim)
+	gotShape := shapes.Make(dtypes.Float32, batchSize, gotSentenceLen, gotHiddenDim)
+	gotStrides := gotShape.Strides()
+	gotFlatIdxFn := func(indices []int) int {
+		flatIdx := 0
+		for i, idx := range indices {
+			flatIdx += idx * gotStrides[i]
+		}
+		return flatIdx
 	}
 
 	var sumAbsDiff, sumAbsExpected float64
 	const minRelDenominator = 0.2
-	for i, gotValue := range got {
-		expectValue := float64(expected[i])
-		gotValueF64 := float64(gotValue)
-
+	for flatIdx, expectedIndices := range expectedShape.Iter() {
+		expectValue := float64(expected[flatIdx])
+		gotValueF64 := float64(got[gotFlatIdxFn(expectedIndices)])
 		absDiff := math.Abs(gotValueF64 - expectValue)
 		sumAbsDiff += absDiff
 		sumAbsExpected += math.Abs(expectValue)
@@ -291,16 +346,16 @@ func validateTensor(t *testing.T, got []float32, expected []float32, name string
 
 	var maxRelDiff float64
 	var maxRelDiffIdx int
-	for i, gotValue := range got {
-		expectValue := float64(expected[i])
-		gotValueF64 := float64(gotValue)
+	for flatIdx, expectedIndices := range expectedShape.Iter() {
+		expectValue := float64(expected[flatIdx])
+		gotValueF64 := float64(got[gotFlatIdxFn(expectedIndices)])
 		absDiff := math.Abs(gotValueF64 - expectValue)
 		relDenominator := math.Max(math.Abs(expectValue), math.Abs(gotValueF64))
 		relDenominator = max(relDenominator, meanAbsExpected)
 		relDiff := absDiff / relDenominator
 		if relDiff > maxRelDiff {
 			maxRelDiff = relDiff
-			maxRelDiffIdx = i
+			maxRelDiffIdx = flatIdx
 		}
 	}
 
@@ -312,13 +367,13 @@ func validateTensor(t *testing.T, got []float32, expected []float32, name string
 			"Mean abs diff: %.3g (== %.1f%% of the mean absolute values %.3g)",
 			name, maxRelDiff, maxRelDiffIdx, expected[maxRelDiffIdx], got[maxRelDiffIdx],
 			meanAbsDiff, 100*meanAbsDiff/meanAbsExpected, meanAbsExpected)
-		for i, gotValue := range got {
-			expectValue := float64(expected[i])
-			gotValueF64 := float64(gotValue)
-			if i > 10 && i < len(got)-10 {
+		for flatIdx, expectedIndices := range expectedShape.Iter() {
+			expectValue := float64(expected[flatIdx])
+			gotValueF64 := float64(got[gotFlatIdxFn(expectedIndices)])
+			if flatIdx > 10 && flatIdx < len(expected)-10 {
 				continue
 			}
-			fmt.Printf("\t- Value #%d:\tgot %.3g,\t expected %.3g\n", i, gotValueF64, expectValue)
+			fmt.Printf("\t- Value #%d:\tgot %.3g,\t expected %.3g\n", flatIdx, gotValueF64, expectValue)
 		}
 	} else {
 		t.Logf("[%s] Match! Max rel diff: %.3g, Mean abs diff: %.3g (== %.1f%% of %.3g is the mean absolute)",
@@ -368,17 +423,6 @@ func TestSentenceEmbedding(t *testing.T) {
 		t.Fatalf("Failed to create exec: %v", err)
 	}
 
-	fmt.Printf("- Pre-compiling model ...")
-	start := time.Now()
-	dummyTokens := tensors.FromValue([][]int32{{2}})
-	_, err = exec.Exec(dummyTokens)
-	if err != nil {
-		t.Fatalf("Failed to compile graph: %v", err)
-	}
-	fmt.Printf("done (%v)\n", time.Since(start))
-
-	fmt.Printf("- Executing model ...")
-	start = time.Now()
 	hiddenSize := testModel.Config.HiddenSize
 	if len(expectedFlatData) != len(prompts)*hiddenSize {
 		t.Fatalf("Expected %d flat floats from python embeddings, got %d", len(prompts)*hiddenSize, len(expectedFlatData))
@@ -405,14 +449,101 @@ func TestSentenceEmbedding(t *testing.T) {
 		outTensor.ConstFlatData(func(flatAny any) {
 			flat := flatAny.([]float32)
 			expectedData := expectedFlatData[i*hiddenSize : (i+1)*hiddenSize]
-			validateTensor(t, flat, expectedData, fmt.Sprintf("Sentence Embedding %d", i))
+			validateTensor(t, flat, expectedData, fmt.Sprintf("Sentence Embedding %d", i),
+				1, len(tokens), len(tokens))
 		})
 	}
+}
+
+func TestSentenceBatchEmbedding(t *testing.T) {
+	prompts := make([]string, 0, len(testQueries)+len(testDocs))
+	prompts = append(prompts, testQueries...)
+	prompts = append(prompts, testDocs...)
+
+	pythonPath := "similarity_embeddings.txt"
+	expectedFlatData, err := readPythonEmbeddingsList(pythonPath)
+	if err != nil {
+		t.Skipf("Skipping test because %s is not available: %v", pythonPath, err)
+	}
+
+	exec, err := context.NewExec(testBackend, testCtx.Checked(false), func(ctx *context.Context, tokens *graph.Node) *graph.Node {
+		mask := graph.NotEqual(tokens, graph.Const(tokens.Graph(), testPadID))
+		x := testModel.SentenceEmbeddingGraph(ctx, tokens, mask)
+		return graph.ConvertDType(x, dtypes.Float32)
+	})
+	if err != nil {
+		t.Fatalf("Failed to create exec: %v", err)
+	}
+
+	// Tokenize all sentences.
+	tokenizer := must1(testModel.GetTokenizer())
+	var batchTokens [][]int32
+	var maxLen int
+	for _, prompt := range prompts {
+		tokensInt := tokenizer.Encode(prompt)
+		tokens := xslices.Map(tokensInt, func(t int) int32 { return int32(t) })
+		batchTokens = append(batchTokens, tokens)
+		if len(tokens) > maxLen {
+			maxLen = len(tokens)
+		}
+	}
+
+	// Find the paddedLen and create the flat batch with the tokens+padding.
+	paddedLen := int(math.Pow(2, math.Ceil(math.Log2(float64(maxLen)))))
+	var batchFlat []int32
+	totalBatchSize := len(prompts) * paddedLen
+	if testPadID == 0 {
+		batchFlat = make([]int32, totalBatchSize)
+	} else {
+		batchFlat = xslices.SliceWithValue(totalBatchSize, testPadID)
+	}
+	for i, tokens := range batchTokens {
+		offset := i * paddedLen
+		copy(batchFlat[offset:offset+len(tokens)], tokens)
+	}
+	batch := tensors.FromFlatDataAndDimensions(batchFlat, len(prompts), paddedLen)
+	batch.ToDevice(testBackend, 0)
+
+	fmt.Printf("- Pre-compiling model for batch ...")
+	start := time.Now()
+	err = exec.PreCompile(batch)
+	if err != nil {
+		t.Fatalf("Failed to compile graph: %+v", err)
+	}
 	fmt.Printf("done (%v)\n", time.Since(start))
+
+	fmt.Printf("- Executing model ...")
+	hiddenSize := testModel.Config.HiddenSize
+	if len(expectedFlatData) != len(prompts)*hiddenSize {
+		t.Fatalf("Expected %d flat floats from python embeddings, got %d", len(prompts)*hiddenSize, len(expectedFlatData))
+	}
+	start = time.Now()
+	results, err := exec.Exec(batch)
+	fmt.Printf("done (%v)\n", time.Since(start))
+	if err != nil {
+		t.Fatalf("Failed to execute graph for batched prompts: %v", err)
+	}
+
+	outTensor := results[0]
+	outShape := outTensor.Shape()
+	if outShape.Rank() != 2 || outShape.Dimensions[0] != len(prompts) || outShape.Dimensions[1] != hiddenSize {
+		t.Fatalf("Expected shape [batch, hidden_size] ([%d, %d]), got %s", len(prompts), hiddenSize, outShape)
+	}
+
+	outTensor.ConstFlatData(func(flatAny any) {
+		flat := flatAny.([]float32)
+		for i := range prompts {
+			gotData := flat[i*hiddenSize : (i+1)*hiddenSize]
+			expectedData := expectedFlatData[i*hiddenSize : (i+1)*hiddenSize]
+			validateTensor(t, gotData, expectedData, fmt.Sprintf("Sentence Batch Embedding %d", i),
+				1, 1, 1)
+		}
+	})
 }
 
 func TestSimilarity(t *testing.T) {
-	fmt.Printf("Queries: %q\n", testQueries)
+	fmt.Printf("Queries:   %q\n", testQueries)
+	fmt.Printf("Documents: %q\n", testDocs)
 
 	prompts := make([]string, 0, len(testQueries)+len(testDocs))
 	prompts = append(prompts, testQueries...)
@@ -426,12 +557,13 @@ func TestSimilarity(t *testing.T) {
 
 	allEmbeddingsAny := xslices.Map(allEmbeddings, func(t *tensors.Tensor) any { return t })
 	similarities := must1(graph.ExecOnce(testBackend, func(allEmbeddings []*graph.Node) *graph.Node {
-		queryEmbeddings := graph.Concatenate(allEmbeddings[:len(testQueries)], 0)
-		docEmbeddings := graph.Concatenate(allEmbeddings[len(testQueries):], 0)
+		queryEmbeddings := graph.Stack(allEmbeddings[:len(testQueries)], 0)
+		docEmbeddings := graph.Stack(allEmbeddings[len(testQueries):], 0)
 		return testModel.Similarity(queryEmbeddings, docEmbeddings)
 	}, allEmbeddingsAny...))
 	fmt.Printf("Similarities: %v\n", similarities)
 	want := []float32{0.9316, 0.3984, 0.4251, 0.7317}
+	fmt.Printf("- Expected: %v\n", want)
 	got := tensors.MustCopyFlatData[float32](similarities)
 	require.InDeltaSlicef(t, want, got, 1e-2, "Similaries don't match!")
 }

@@ -48,8 +48,8 @@ github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 h1:DACJavvAHhabrF0
 github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0/go.mod h1:E/TSTwGwJL78qG/PmXZO1EjYhfJinVAhrmmHX6Z8B9k=
 github.com/gomlx/go-xla v0.2.2 h1:2YMzXAcmK8BvqFjRnUHHtE2QwKDEts2tRglcFcKhZj8=
 github.com/gomlx/go-xla v0.2.2/go.mod h1:T2CsL/E90te3k4qpuzlXv2uQU2FmLMLfUsRlAGqKSuI=
-github.com/gomlx/gomlx v0.27.3-0.20260331073747-ceb6ad132507 h1:2VR4p5G13h+jOxCntVzQQs29L7MUgEusK4y8aoeO2gk=
-github.com/gomlx/gomlx v0.27.3-0.20260331073747-ceb6ad132507/go.mod h1:kk+NQXJ8pFrREbC+oJ/s+sMF+q4zjd3t8+/4Ro/6DHM=
+github.com/gomlx/gomlx v0.27.3-0.20260402104346-8c577defa432 h1:Zk8ETYBAsBYwEu5dqOlNcmvkK3xSFsvyHjBsuRtWah0=
+github.com/gomlx/gomlx v0.27.3-0.20260402104346-8c577defa432/go.mod h1:kk+NQXJ8pFrREbC+oJ/s+sMF+q4zjd3t8+/4Ro/6DHM=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=

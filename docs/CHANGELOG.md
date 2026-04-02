@@ -30,9 +30,13 @@
     - `RegisteredPromptTasks` returns a list of all task codes for which prompts are registered.
     - `GetTaskPrompt` returns the prompt string for the given task code.
   - `LoadContext` now accepts an optional (nil-lable) backend and loads the variables directly into the backend.
+  - Fixed mask support for batches with padding.
 - Package `safetensors` and `gguf`:
   - `IterTensors` and `IterTensorsFromRepo` now take an optional (nil-lable) backend for reading tensors directly into
     a backend.
+- Examples:
+  - Added [Tecent's KaLM-Gemma3 12B model](https://huggingface.co/tencent/KaLM-Embedding-Gemma3-12B-2511) sentence embedder example.
+  - Added [MSMARCO Dataset](https://huggingface.co/datasets/microsoft/ms_marco) example.
 
 ## v0.3.4
 
