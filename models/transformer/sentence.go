@@ -107,6 +107,7 @@ func (m *Model) ApplySentencePooling(hiddenStates, mask *graph.Node) *graph.Node
 	g := hiddenStates.Graph()
 	batchSize := hiddenStates.Shape().Dimensions[0]
 	seqLen := hiddenStates.Shape().Dimensions[1]
+	// hiddenDim := hiddenStates.Shape().Dimensions[2]
 
 	switch {
 	case cfg.PoolingModeLastToken:
@@ -126,19 +127,19 @@ func (m *Model) ApplySentencePooling(hiddenStates, mask *graph.Node) *graph.Node
 			validIndices := graph.Where(mask, sequenceIndices, graph.Scalar(g, dtypes.Int32, -1))
 			lastTokenIdx = graph.ReduceAndKeep(validIndices, graph.ReduceMax, 1) // [batchSize, 1]
 		}
-		// Create a one-hot mask for the last token.
-		// lastTokenIdx is [batchSize, 1].
-		oneHot := graph.OneHot(lastTokenIdx, seqLen, hiddenStates.DType()) // -> [batchSize, 1, seqLen]
-		oneHot = graph.Squeeze(oneHot, 1)                                  // -> [batchSize, seqLen]
-		oneHot = graph.ExpandAxes(oneHot, -1)                              // -> [batchSize, seqLen, 1]
-		lastTokenEmbeddings := graph.Mul(hiddenStates, oneHot)             // -> [batchSize, seqLen, hiddenDim]
-		return graph.ReduceSum(lastTokenEmbeddings, 1)                     // -> [batchSize, hiddenDim]
+		// Gather the last token embeddings of each example.
+		// Add the batch index to each lastTokenIdx:
+		batchIndices := graph.Iota(g, lastTokenIdx.Shape(), 0)
+		lastTokenIdx = graph.Concatenate([]*graph.Node{batchIndices, lastTokenIdx}, -1)                        // [batchSize, 2]
+		lastTokenEmbeddings := graph.GatherSlices(hiddenStates, []int{0, 1}, lastTokenIdx, []int{1, 1}, false) // [batchSize, 1, 1, hiddenDim]
+		lastTokenEmbeddings = graph.Squeeze(lastTokenEmbeddings, 1, 2)                                         // [batchSize, hiddenDim]
+		return lastTokenEmbeddings
 
 	case cfg.PoolingModeMeanTokens:
 		// Plain mean pooling over the sequence tokens (assuming no padding for now).
 		return graph.MaskedReduceMean(hiddenStates, mask, 1) // [batch, hidden]
 	}
 
-	exceptions.Panicf("no supported pooling mode enabled in PoolingConfig: %+v", cfg)
+	exceptions.Panicf("unsupported pooling mode in PoolingConfig, please add an issue in github.com/gomlx/go-huggingface to add support for it: %+v", cfg)
 	return nil
 }
