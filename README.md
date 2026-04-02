@@ -12,7 +12,7 @@ Simple APIs for downloading (`hub`), tokenizing (`tokenizers`), (**experimental*
 
 Each component is independent, and only depends on what it needs -- `hub` has no dependency on `GoMLX`, `tokenizers` has no dependence on `parquet-go` (to parse datasets), etc.
 
-🚧 **EXPERIMENTAL and IN DEVELOPMENT**: Bits and pieces are working everywhere: at least [one model (tencent/KaLM-Embedding-Gemma3-12B-2511)](https://huggingface.co/tencent/KaLM-Embedding-Gemma3-12B-2511) successfully converts nicely. Also at least [on dataset (microsoft/ms_marco)](https://huggingface.co/datasets/microsoft/ms_marco) can easily be downaloaded/scanned. There are reports of many other models working with the tokenizers package.But ... it is still under development -- and on that note: contributions and suggestions are most welcome.
+🚧 **EXPERIMENTAL and IN DEVELOPMENT**: By no means it covers all models/tokenizers/dataset types in HuggingFace, but support is continuously expanding (we add support for the models we are using, or when someone asks for). Models are easy to run, datasets are easy to scan, tokenizers come configured from HuggingFace, etc. But ... it is still under development -- and on that note: contributions and suggestions are most welcome.
 
 See examples:
  
