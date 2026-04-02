@@ -162,7 +162,6 @@ func (m *Model) Description() string {
 	if m.PoolingConfig != nil {
 		sb.WriteString(" - 1_Pooling/config.json: loaded\n")
 	}
-
 	return sb.String()
 }
 
