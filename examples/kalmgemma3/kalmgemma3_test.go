@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gomlx/go-huggingface/hub"
+	"github.com/gomlx/go-huggingface/models/safetensors"
 	"github.com/gomlx/go-huggingface/models/transformer"
 	"github.com/gomlx/go-huggingface/tokenizers/api"
 	"github.com/gomlx/gomlx/backends"
@@ -610,4 +611,18 @@ func TestReadAllShards(t *testing.T) {
 		f = nil
 	}
 	fmt.Printf("done (%v)\n", time.Since(start))
+}
+
+func TestUploadSafetensors(t *testing.T) {
+	model := safetensors.NewEmpty(testRepo)
+	for fileInfo, err := range model.IterSafetensors() {
+		require.NoError(t, err)
+		// Sort tensor names for deterministic output
+		tensorNames := xslices.SortedKeys(fileInfo.Header.Tensors)
+		for _, name := range tensorNames {
+			meta := fileInfo.Header.Tensors[name]
+			size := meta.DataOffsets[1] - meta.DataOffsets[0]
+			fmt.Printf("%s: shape=%v, size=%d\n", name, meta.Shape, size)
+		}
+	}
 }
