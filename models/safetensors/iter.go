@@ -6,10 +6,15 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+	"unsafe"
 
+	"github.com/edsrzf/mmap-go"
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/gomlx/backends"
+	"github.com/gomlx/gomlx/pkg/core/dtypes"
+	"github.com/gomlx/gomlx/pkg/core/shapes"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -18,6 +23,9 @@ import (
 type iterTensorData struct {
 	name           string
 	tensor         *tensors.Tensor
+	shape          shapes.Shape
+	readBuffer     []byte
+	mmapBuf        mmap.MMap
 	err            error
 	f              *os.File
 	closeFileOnEnd bool
@@ -35,19 +43,30 @@ func IterTensorsFromRepo(backend backends.Backend, repo *hub.Repo) func(yield fu
 		done := make(chan struct{})
 		var wg sync.WaitGroup
 
-		defer wg.Wait()
+		var mmaps []mmap.MMap
+		var mmapsMu sync.Mutex
+
+		defer func() {
+			wg.Wait()
+			mmapsMu.Lock()
+			defer mmapsMu.Unlock()
+			for _, m := range mmaps {
+				if m != nil {
+					m.Unmap()
+				}
+			}
+		}()
 		defer close(done)
 
 		chRead := make(chan iterTensorData, 10)
-		wg.Go(func() { iterFromRepoDownload(backend, repo, done, chRead) })
+		wg.Go(func() { iterFromRepoDownload(backend, repo, done, chRead, &mmaps, &mmapsMu) })
 
 		chDevice := make(chan iterTensorData, 10)
 		wg.Go(func() { iterFromRepoRead(done, chRead, chDevice) })
 
-		chOut := make(chan iterTensorData, 3)
+		chOut := make(chan iterTensorData, 100)
 		wg.Go(func() { iterFromRepoToDevice(backend, done, chDevice, chOut) })
 
-		defer wg.Wait()
 		for data := range chOut {
 			if data.err != nil {
 				yield(TensorAndName{}, data.err)
@@ -60,26 +79,35 @@ func IterTensorsFromRepo(backend backends.Backend, repo *hub.Repo) func(yield fu
 	}
 }
 
-func iterFromRepoDownload(backend backends.Backend, repo *hub.Repo, done <-chan struct{}, chRead chan<- iterTensorData) {
-	defer close(chRead)
-
+func iterFromRepoDownload(backend backends.Backend, repo *hub.Repo, done <-chan struct{}, chRead chan<- iterTensorData, mmaps *[]mmap.MMap, mmapsMu *sync.Mutex) {
+	start := time.Now()
 	var waitTime time.Duration
 	if klog.V(1).Enabled() {
 		defer func() {
-			klog.Infof("- Total wait time not downloading/allocating anything: %s", waitTime)
+			klog.Infof(" - Repo download / Mmap open time: %s (of which %s is waiting)", time.Since(start), waitTime)
 		}()
 	}
+	defer close(chRead)
 
 	var openFile *os.File
 	var sentFileOwnership bool
 
+	reportErrFn := func(err error) {
+		waitStart := time.Now()
+		select {
+		case <-done:
+		case chRead <- iterTensorData{err: err}:
+			waitTime += time.Since(waitStart)
+		}
+	}
+
 	defer func() {
-		// Close any file that hasn't been sent off by a closeFileOnEnd=true payload
 		if openFile != nil && !sentFileOwnership {
 			openFile.Close()
 		}
 	}()
 
+	var waitStart time.Time
 	for filename, err := range repo.IterFileNames() {
 		select {
 		case <-done:
@@ -88,12 +116,7 @@ func iterFromRepoDownload(backend backends.Backend, repo *hub.Repo, done <-chan 
 		}
 
 		if err != nil {
-			start := time.Now()
-			select {
-			case <-done:
-			case chRead <- iterTensorData{err: errors.Wrap(err, "failed to iterate repo files")}:
-				waitTime += time.Since(start)
-			}
+			reportErrFn(errors.Wrap(err, "failed to iterate repo files"))
 			return
 		}
 
@@ -103,23 +126,13 @@ func iterFromRepoDownload(backend backends.Backend, repo *hub.Repo, done <-chan 
 
 		localPath, err := repo.DownloadFile(filename)
 		if err != nil {
-			start := time.Now()
-			select {
-			case <-done:
-			case chRead <- iterTensorData{err: errors.Wrapf(err, "failed to download %s", filename)}:
-				waitTime += time.Since(start)
-			}
+			reportErrFn(errors.Wrapf(err, "failed to download %s", filename))
 			return
 		}
 
 		header, dataOffset, err := (*Model)(nil).parseHeader(localPath)
 		if err != nil {
-			start := time.Now()
-			select {
-			case <-done:
-			case chRead <- iterTensorData{err: errors.Wrapf(err, "failed to parse header for %s", localPath)}:
-				waitTime += time.Since(start)
-			}
+			reportErrFn(errors.Wrapf(err, "failed to parse header for %s", localPath))
 			return
 		}
 
@@ -129,7 +142,6 @@ func iterFromRepoDownload(backend backends.Backend, repo *hub.Repo, done <-chan 
 		}
 		tensorNames = sortTensorsByOffset(tensorNames, header)
 
-		// Ensure any left over file from a previous iteration without elements is closed
 		if openFile != nil && !sentFileOwnership {
 			openFile.Close()
 		}
@@ -137,29 +149,26 @@ func iterFromRepoDownload(backend backends.Backend, repo *hub.Repo, done <-chan 
 		openFile, err = os.Open(localPath)
 		sentFileOwnership = false
 		if err != nil {
-			start := time.Now()
-			select {
-			case <-done:
-			case chRead <- iterTensorData{err: errors.Wrapf(err, "failed to open %s", localPath)}:
-				waitTime += time.Since(start)
-			}
+			reportErrFn(errors.Wrapf(err, "failed to open %s", localPath))
 			return
+		}
+
+		var mmapBuf mmap.MMap
+		fi, err := openFile.Stat()
+		if err == nil && fi.Size() > 0 {
+			mmapBuf, err = mmap.Map(openFile, mmap.RDONLY, 0)
+			if err != nil {
+				mmapBuf = nil
+			} else {
+				mmapsMu.Lock()
+				*mmaps = append(*mmaps, mmapBuf)
+				mmapsMu.Unlock()
+			}
 		}
 
 		var currentOffset int64
 		if len(tensorNames) > 0 {
-			firstTensorOffset := dataOffset + header.Tensors[tensorNames[0]].DataOffsets[0]
-			_, err = openFile.Seek(firstTensorOffset, io.SeekStart)
-			if err != nil {
-				start := time.Now()
-				select {
-				case <-done:
-				case chRead <- iterTensorData{err: errors.Wrapf(err, "failed to seek in %s", localPath)}:
-					waitTime += time.Since(start)
-				}
-				return
-			}
-			currentOffset = firstTensorOffset
+			currentOffset = dataOffset + header.Tensors[tensorNames[0]].DataOffsets[0]
 		}
 
 		for i, name := range tensorNames {
@@ -169,110 +178,112 @@ func iterFromRepoDownload(backend backends.Backend, repo *hub.Repo, done <-chan 
 			default:
 			}
 
-			// Create shape.
 			meta := header.Tensors[name]
 			shape, err := meta.GoMLXShape()
 			if err != nil {
-				start := time.Now()
-				select {
-				case <-done:
-				case chRead <- iterTensorData{err: err}:
-					waitTime += time.Since(start)
-				}
-				return
-			}
-			t, err := tensors.FromShapeForBackend(backend, shape)
-			if err != nil {
-				start := time.Now()
-				select {
-				case <-done:
-				case chRead <- iterTensorData{err: errors.Wrapf(err, "failed to create tensor %q with shape %s", name, shape)}:
-					waitTime += time.Since(start)
-				}
+				reportErrFn(err)
 				return
 			}
 
+			var t *tensors.Tensor
+			var readBuffer []byte
 			expectedBytes := int64(shape.Memory())
+
+			if backend != nil && !backend.HasSharedBuffers() {
+				if mmapBuf != nil {
+					readBuffer = mmapBuf[dataOffset+meta.DataOffsets[0] : dataOffset+meta.DataOffsets[1]]
+				} else {
+					readBuffer = make([]byte, expectedBytes)
+				}
+			} else {
+				t, err = tensors.FromShapeForBackend(backend, shape)
+				if err != nil {
+					reportErrFn(errors.Wrapf(err, "failed to create tensor %q with shape %s", name, shape))
+					return
+				}
+			}
+
 			tensorOffset := dataOffset + meta.DataOffsets[0]
 			closeFile := (i == len(tensorNames)-1)
 
-			start := time.Now()
+			waitStart = time.Now()
 			select {
 			case <-done:
+				waitTime += time.Since(waitStart)
 				return
 			case chRead <- iterTensorData{
 				name:           name,
 				tensor:         t,
+				shape:          shape,
+				readBuffer:     readBuffer,
+				mmapBuf:        mmapBuf,
 				f:              openFile,
 				closeFileOnEnd: closeFile,
 				tensorOffset:   tensorOffset,
 				currentOffset:  currentOffset,
 				expectedBytes:  expectedBytes,
 			}:
-				waitTime += time.Since(start)
+				waitTime += time.Since(waitStart)
 				if closeFile {
 					sentFileOwnership = true
 				}
 			}
 			currentOffset = tensorOffset + expectedBytes
 		}
-
-		if len(tensorNames) == 0 {
-			openFile.Close()
-			sentFileOwnership = true
-		}
 	}
 }
 
 func iterFromRepoRead(done <-chan struct{}, chRead <-chan iterTensorData, chDevice chan<- iterTensorData) {
+	start := time.Now()
+	var waitTime time.Duration
+	if klog.V(1).Enabled() {
+		defer func() {
+			klog.Infof("- Read files time: %s (of which %s is waiting)", time.Since(start), waitTime)
+		}()
+	}
+
 	defer close(chDevice)
 
 	var currentFile *os.File
 	var currentData *iterTensorData
+	var waitStart time.Time
 
 	defer func() {
-		// Close currently held file if active on abort
-		if currentFile != nil {
-			currentFile.Close()
-		} else if currentData != nil && currentData.closeFileOnEnd && currentData.f != nil {
-			currentData.f.Close()
+		if currentData != nil && currentData.closeFileOnEnd {
+			if currentData.f != nil {
+				currentData.f.Close()
+			}
 		}
 
-		// Clean-up function that drains the channel
 		for data := range chRead {
-			if data.closeFileOnEnd && data.f != nil {
-				data.f.Close()
+			if data.closeFileOnEnd {
+				if data.f != nil {
+					data.f.Close()
+				}
 			}
 		}
 	}()
 
-	var waitTime time.Duration
-	if klog.V(1).Enabled() {
-		defer func() {
-			klog.Infof("- Total wait time not reading anything: %s", waitTime)
-		}()
-	}
-
-	var start time.Time
 	for {
-		start = time.Now()
+		waitStart = time.Now()
 		select {
 		case <-done:
+			waitTime += time.Since(waitStart)
 			return
 		case data, ok := <-chRead:
-			waitTime += time.Since(start)
+			waitTime += time.Since(waitStart)
 			if !ok {
 				return
 			}
 			currentData = &data
 
 			if data.err != nil {
-				start = time.Now()
+				waitStart = time.Now()
 				select {
 				case <-done:
 				case chDevice <- data:
-					waitTime += time.Since(start)
 				}
+				waitTime += time.Since(waitStart)
 				return
 			}
 
@@ -282,46 +293,57 @@ func iterFromRepoRead(done <-chan struct{}, chRead <-chan iterTensorData, chDevi
 
 			var readErr error
 			if data.f != nil {
-				data.tensor.MutableBytes(func(b []byte) {
+				readFn := func(b []byte) {
 					if int64(len(b)) != data.expectedBytes {
-						readErr = errors.Errorf("tensor shape %s expected %d bytes, but got %d bytes", data.tensor.Shape(), data.expectedBytes, len(b))
+						readErr = errors.Errorf("tensor shape %s expected %d bytes, but got %d bytes", data.shape, data.expectedBytes, len(b))
 						return
 					}
-					if data.tensorOffset != data.currentOffset {
-						start = time.Now()
-						_, err := data.f.Seek(data.tensorOffset, io.SeekStart)
-						if err != nil {
-							readErr = errors.Wrapf(err, "failed to seek to offset %d for tensor %s", data.tensorOffset, data.name)
-							return
-						}
-						waitTime += time.Since(start)
-					}
-					_, readErr = io.ReadFull(data.f, b)
-					if readErr != nil && readErr != io.EOF {
-						readErr = errors.Wrapf(readErr, "failed to read tensor %s", data.name)
-					} else {
+					if data.mmapBuf != nil {
+						copy(b, data.mmapBuf[data.tensorOffset:data.tensorOffset+data.expectedBytes])
 						readErr = nil
+					} else {
+						if data.tensorOffset != data.currentOffset {
+							_, err := data.f.Seek(data.tensorOffset, io.SeekStart)
+							if err != nil {
+								readErr = errors.Wrapf(err, "failed to seek to offset %d for tensor %s", data.tensorOffset, data.name)
+								return
+							}
+						}
+						_, readErr = io.ReadFull(data.f, b)
+						if readErr != nil && readErr != io.EOF {
+							readErr = errors.Wrapf(readErr, "failed to read tensor %s", data.name)
+						} else {
+							readErr = nil
+						}
 					}
-				})
+				}
+				if data.tensor != nil {
+					data.tensor.MutableBytes(readFn)
+				} else if data.mmapBuf == nil {
+					readFn(data.readBuffer)
+				}
 			}
 
 			if readErr != nil {
 				data.err = readErr
 			}
 
-			if data.closeFileOnEnd && data.f != nil {
-				data.f.Close()
+			if data.closeFileOnEnd {
+				if data.f != nil {
+					data.f.Close()
+				}
 				currentFile = nil
 			}
 
 			currentData = nil
 
-			start = time.Now()
+			waitStart = time.Now()
 			select {
 			case <-done:
+				waitTime += time.Since(waitStart)
 				return
 			case chDevice <- data:
-				waitTime += time.Since(start)
+				waitTime += time.Since(waitStart)
 				if data.err != nil {
 					return
 				}
@@ -330,54 +352,85 @@ func iterFromRepoRead(done <-chan struct{}, chRead <-chan iterTensorData, chDevi
 	}
 }
 
+var MaxParallelBufferTransfers = 4
+
 func iterFromRepoToDevice(backend backends.Backend, done <-chan struct{}, chDevice <-chan iterTensorData, chOut chan<- iterTensorData) {
 	defer close(chOut)
-
-	var waitTime time.Duration
+	start := time.Now()
+	var totalWaitTime atomic.Int64
 	if klog.V(1).Enabled() {
 		defer func() {
-			klog.Infof("- Total wait time not moving to device: %s", waitTime)
+			klog.Infof("- Send to device time: %s (of which %s is waiting, across %d workers)", time.Since(start), time.Duration(totalWaitTime.Load()), MaxParallelBufferTransfers)
 		}()
 	}
 
-	var start time.Time
-	for {
-		start = time.Now()
-		select {
-		case <-done:
-			return
-		case data, ok := <-chDevice:
-			waitTime += time.Since(start)
-			if !ok {
-				return
-			}
-			if data.err != nil {
-				start = time.Now()
+	var wg sync.WaitGroup
+	for i := 0; i < MaxParallelBufferTransfers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var waitTime time.Duration
+			defer func() {
+				totalWaitTime.Add(int64(waitTime))
+			}()
+
+			var waitStart time.Time
+
+			for {
+				waitStart = time.Now()
 				select {
 				case <-done:
-				case chOut <- data:
-					waitTime += time.Since(start)
-				}
-				return
-			}
-
-			if backend != nil {
-				err := data.tensor.ToDevice(backend, 0)
-				if err != nil {
-					data.err = errors.WithMessagef(err, "failed to move tensor %q (%s) to backend's device #0", data.name, data.tensor.Shape())
-				}
-			}
-
-			start = time.Now()
-			select {
-			case <-done:
-				return
-			case chOut <- data:
-				waitTime += time.Since(start)
-				if data.err != nil {
+					waitTime += time.Since(waitStart)
 					return
+				case data, ok := <-chDevice:
+					waitTime += time.Since(waitStart)
+					if !ok {
+						return
+					}
+					if data.err != nil {
+						waitStart = time.Now()
+						select {
+						case <-done:
+						case chOut <- data:
+						}
+						waitTime += time.Since(waitStart)
+						return
+					}
+
+					if backend != nil {
+						if data.tensor == nil {
+							bytesPtr := unsafe.Pointer(&data.readBuffer[0])
+							length := data.shape.Size() / data.shape.DType.ValuesPerStorageUnit()
+							flatAny := dtypes.UnsafeAnySliceFromBytes(bytesPtr, data.shape.DType, length)
+
+							backendBuf, err := backend.BufferFromFlatData(0, flatAny, data.shape)
+							if err != nil {
+								data.err = errors.WithMessagef(err, "failed to create backend buffer for tensor %q (%s)", data.name, data.shape)
+							} else {
+								data.tensor, err = tensors.FromBuffer(backend, backendBuf)
+								if err != nil {
+									data.err = errors.WithMessagef(err, "failed to create tensor from buffer for %q (%s)", data.name, data.shape)
+								}
+							}
+						} else {
+							err := data.tensor.ToDevice(backend, 0)
+							if err != nil {
+								data.err = errors.WithMessagef(err, "failed to move tensor %q (%s) to backend's device #0", data.name, data.shape)
+							}
+						}
+					}
+
+					waitStart = time.Now()
+					select {
+					case <-done:
+						waitTime += time.Since(waitStart)
+						return
+					case chOut <- data:
+					}
+					waitTime += time.Since(waitStart)
 				}
 			}
-		}
+		}()
 	}
+	wg.Wait()
 }

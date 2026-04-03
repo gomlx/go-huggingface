@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/internal/humanize"
@@ -25,6 +26,7 @@ import (
 	"github.com/gomlx/gomlx/pkg/core/shapes"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/gomlx/gomlx/pkg/ml/context"
+	"github.com/gomlx/gomlx/pkg/support/sets"
 	"github.com/gomlx/gomlx/pkg/support/xslices"
 	"github.com/stretchr/testify/require"
 	"k8s.io/klog/v2"
@@ -617,6 +619,9 @@ func TestReadAllShards(t *testing.T) {
 func TestUploadSafetensors(t *testing.T) {
 	model := safetensors.NewEmpty(testRepo)
 	maxSize := int64(0)
+	uniqueSizes := sets.Make[int64]()
+	var allShapes []shapes.Shape
+	start := time.Now()
 	for fileInfo, err := range model.IterSafetensors() {
 		require.NoError(t, err)
 		// Sort tensor names for deterministic output
@@ -631,9 +636,51 @@ func TestUploadSafetensors(t *testing.T) {
 					humanize.Bytes(int64(shape.Memory())),
 					humanize.Bytes(int64(size)))
 			}
-			fmt.Printf(" - %s: shape=%v, size=%s\n", name, shape, humanize.Bytes(int64(shape.Memory())))
+			klog.V(1).Infof(" - %s: shape=%v, size=%s\n", name, shape, humanize.Bytes(int64(shape.Memory())))
 			maxSize = max(maxSize, size)
+			uniqueSizes.Insert(size)
+			allShapes = append(allShapes, shape)
 		}
 	}
 	fmt.Printf("Max size: %s\n", humanize.Bytes(int64(maxSize)))
+	fmt.Printf("Unique sizes: %s\n", xslices.Map(xslices.Keys(uniqueSizes),
+		func(s int64) string {
+			return humanize.Bytes(int64(s))
+		}))
+	byteBuf := make([]byte, maxSize)
+	bytesPtr := unsafe.Pointer(&byteBuf[0])
+	allBuffers := make([]backends.Buffer, 0, len(allShapes))
+
+	for _, shape := range allShapes {
+		length := shape.Size() / shape.DType.ValuesPerStorageUnit()
+		flatAny := dtypes.UnsafeAnySliceFromBytes(bytesPtr, shape.DType, length)
+		b, err := testBackend.BufferFromFlatData(0, flatAny, shape)
+		require.NoError(t, err)
+		allBuffers = append(allBuffers, b)
+	}
+	fmt.Printf("Buffers created in %v\n", time.Since(start))
+
+	start = time.Now()
+	for _, buf := range allBuffers {
+		err := testBackend.BufferFinalize(buf)
+		require.NoError(t, err)
+	}
+	fmt.Printf("Buffers finalized in %v\n", time.Since(start))
+}
+
+func TestIterTensorsFromRepo(t *testing.T) {
+	start := time.Now()
+	var allTensors []safetensors.TensorAndName
+	for tan, err := range safetensors.IterTensorsFromRepo(testBackend, testRepo) {
+		require.NoError(t, err)
+		allTensors = append(allTensors, tan)
+	}
+	fmt.Printf("- %d tensors loaded in %v\n", len(allTensors), time.Since(start))
+
+	start = time.Now()
+	for _, tan := range allTensors {
+		err := tan.Tensor.FinalizeAll()
+		require.NoError(t, err)
+	}
+	fmt.Printf("- %d tensors finalized in %v\n", len(allTensors), time.Since(start))
 }
