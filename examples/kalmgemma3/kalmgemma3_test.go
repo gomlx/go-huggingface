@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"runtime"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/models/transformer"
 	"github.com/gomlx/go-huggingface/tokenizers/api"
 	"github.com/gomlx/gomlx/backends"
@@ -34,6 +36,7 @@ var (
 
 var (
 	testBackend backends.Backend
+	testRepo    *hub.Repo
 	testCtx     *context.Context
 	testModel   *transformer.Model
 	taskPrompts TaskPrompts
@@ -70,13 +73,13 @@ func TestMain(m *testing.M) {
 	}
 
 	testCtx = context.New().Checked(false)
-	repo, err := LoadRepo()
+	testRepo, err = LoadRepo()
 	if err != nil {
 		fmt.Printf("Failed to LoadRepo: %v\n", err)
 		os.Exit(1)
 	}
 
-	testModel, err = transformer.LoadModel(repo)
+	testModel, err = transformer.LoadModel(testRepo)
 	if err != nil {
 		fmt.Printf("Failed to LoadModel: %v\n", err)
 		os.Exit(1)
@@ -101,7 +104,7 @@ func TestMain(m *testing.M) {
 	}
 	testPadID = int32(padID)
 
-	taskPrompts = must1(LoadTaskPrompts(repo))
+	taskPrompts = must1(LoadTaskPrompts(testRepo))
 	fmt.Printf("✅ Task prompts loaded: %d tasks\n", len(taskPrompts))
 
 	testQueries = []string{
@@ -113,7 +116,7 @@ func TestMain(m *testing.M) {
 		"Gravity is a force that attracts two bodies towards each other. It gives weight to physical objects and is responsible for the movement of planets around the sun.",
 	}
 
-	fmt.Printf("- Loading model weights ...")
+	fmt.Printf(" - Loading model weights ...\r")
 	start := time.Now()
 	must(testModel.LoadContext(testBackend, testCtx))
 	for range 3 {
@@ -566,4 +569,42 @@ func TestSimilarity(t *testing.T) {
 	fmt.Printf("- Expected: %v\n", want)
 	got := tensors.MustCopyFlatData[float32](similarities)
 	require.InDeltaSlicef(t, want, got, 1e-2, "Similaries don't match!")
+}
+
+// TestReadAllShards simply read all the shard files into /dev/null, used only
+// to test the speed.
+func TestReadAllShards(t *testing.T) {
+	var buf [1 << 20]byte
+	var f *os.File
+	defer func() {
+		if f != nil {
+			f.Close()
+		}
+	}()
+
+	fmt.Printf("- Reading all shards ...")
+	start := time.Now()
+	for filename, err := range testRepo.IterFileNames() {
+		if err != nil {
+			t.Fatalf("Failed to iterate over file names: %v", err)
+		}
+		if !strings.HasSuffix(filename, ".safetensors") {
+			continue
+		}
+		localPath := must1(testRepo.DownloadFile(filename))
+		f = must1(os.Open(localPath))
+		for {
+			_, err = f.Read(buf[:])
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+				must(err)
+			}
+		}
+
+		f.Close()
+		f = nil
+	}
+	fmt.Printf("done (%v)\n", time.Since(start))
 }

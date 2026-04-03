@@ -2,7 +2,9 @@ package safetensors
 
 import (
 	"io"
+	"iter"
 	"os"
+	"sync"
 
 	"github.com/gomlx/gomlx/backends"
 	"github.com/gomlx/gomlx/pkg/core/shapes"
@@ -109,4 +111,188 @@ func (mr *TensorReader) ReadTensor(backend backends.Backend, tensorName string) 
 	}
 
 	return t, nil
+}
+
+// IterTensors reads multiple tensors from the file, yielding them one by one.
+// It uses a 3-stage pipeline (create, read IO, move to device) so that while a tensor
+// is being read from IO, the previous one is being moved to device and the next one
+// is being created in parallel.
+func (mr *TensorReader) IterTensors(backend backends.Backend, tensorNames []string) iter.Seq2[TensorAndName, error] {
+	return func(yield func(TensorAndName, error) bool) {
+		done := make(chan struct{})
+		var wg sync.WaitGroup
+
+		defer wg.Wait()
+		defer close(done)
+
+		type tensorData struct {
+			name          string
+			tensor        *tensors.Tensor
+			err           error
+			tensorOffset  int64
+			expectedBytes int64
+		}
+
+		chRead := make(chan tensorData, 10)
+		wg.Go(func() {
+			defer close(chRead)
+			for _, name := range tensorNames {
+				select {
+				case <-done:
+					return
+				default:
+				}
+
+				meta, ok := mr.Header.Tensors[name]
+				if !ok {
+					select {
+					case chRead <- tensorData{err: errors.Errorf("tensor %s not found", name)}:
+					case <-done:
+					}
+					return
+				}
+
+				dtype, err := dtypeToGoMLX(meta.Dtype)
+				if err != nil {
+					select {
+					case chRead <- tensorData{err: err}:
+					case <-done:
+					}
+					return
+				}
+
+				shape := shapes.Make(dtype, meta.Shape...)
+				t, err := tensors.FromShapeForBackend(backend, shape)
+				if err != nil {
+					select {
+					case chRead <- tensorData{err: errors.Wrapf(err, "failed to create tensor %q with shape %s", name, shape)}:
+					case <-done:
+					}
+					return
+				}
+
+				expectedBytes := int64(shape.Size()) * int64(dtype.Size())
+				tensorOffset := mr.dataOffset + meta.DataOffsets[0]
+
+				select {
+				case <-done:
+					return
+				case chRead <- tensorData{
+					name:          name,
+					tensor:        t,
+					tensorOffset:  tensorOffset,
+					expectedBytes: expectedBytes,
+				}:
+				}
+			}
+		})
+
+		chDevice := make(chan tensorData, 10)
+		wg.Go(func() {
+			defer close(chDevice)
+			for {
+				select {
+				case <-done:
+					return
+				case data, ok := <-chRead:
+					if !ok {
+						return
+					}
+					if data.err != nil {
+						select {
+						case <-done:
+						case chDevice <- data:
+						}
+						return
+					}
+
+					var readErr error
+					data.tensor.MutableBytes(func(b []byte) {
+						if int64(len(b)) != data.expectedBytes {
+							readErr = errors.Errorf("tensor shape %s expected %d bytes, but got %d bytes", data.tensor.Shape(), data.expectedBytes, len(b))
+							return
+						}
+						if data.tensorOffset != mr.currentOffset {
+							_, err := mr.reader.Seek(data.tensorOffset, io.SeekStart)
+							if err != nil {
+								readErr = errors.Wrapf(err, "failed to seek to offset %d for tensor %s", data.tensorOffset, data.name)
+								return
+							}
+							mr.currentOffset = data.tensorOffset
+						}
+						var n int
+						n, readErr = io.ReadFull(mr.reader, b)
+						mr.currentOffset += int64(n)
+						if readErr != nil && readErr != io.EOF {
+							readErr = errors.Wrapf(readErr, "failed to read tensor %s", data.name)
+						} else {
+							readErr = nil
+						}
+					})
+
+					if readErr != nil {
+						data.err = readErr
+					}
+
+					select {
+					case <-done:
+						return
+					case chDevice <- data:
+						if data.err != nil {
+							return
+						}
+					}
+				}
+			}
+		})
+
+		chOut := make(chan tensorData, 10)
+		wg.Go(func() {
+			defer close(chOut)
+			for {
+				select {
+				case <-done:
+					return
+				case data, ok := <-chDevice:
+					if !ok {
+						return
+					}
+					if data.err != nil {
+						select {
+						case <-done:
+						case chOut <- data:
+						}
+						return
+					}
+
+					if backend != nil {
+						err := data.tensor.ToDevice(backend, 0)
+						if err != nil {
+							data.err = errors.WithMessagef(err, "failed to move tensor %q (%s) to backend's device #0", data.name, data.tensor.Shape())
+						}
+					}
+
+					select {
+					case <-done:
+						return
+					case chOut <- data:
+						if data.err != nil {
+							return
+						}
+					}
+				}
+			}
+		})
+
+		defer wg.Wait()
+		for data := range chOut {
+			if data.err != nil {
+				yield(TensorAndName{}, data.err)
+				return
+			}
+			if !yield(TensorAndName{Name: data.name, Tensor: data.tensor}, nil) {
+				return
+			}
+		}
+	}
 }

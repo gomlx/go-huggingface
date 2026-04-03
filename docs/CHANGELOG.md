@@ -34,7 +34,8 @@
 - Package `safetensors` and `gguf`:
   - `IterTensors` and `IterTensorsFromRepo` now take an optional (nil-lable) backend for reading tensors directly into
     a backend.
-- Examples:
+  - `safetensors` now use normal file reader (as opposed to `mmap`), since it's better supported and there was no performance difference.
+- Examples (`/examples/...`):
   - Added [Tecent's KaLM-Gemma3 12B model](https://huggingface.co/tencent/KaLM-Embedding-Gemma3-12B-2511) sentence embedder example.
   - Added [MSMARCO Dataset](https://huggingface.co/datasets/microsoft/ms_marco) example.
 
