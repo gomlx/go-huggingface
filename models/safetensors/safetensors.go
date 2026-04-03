@@ -246,9 +246,9 @@ func (m *Model) GetTensorFromFile(backend backends.Backend, fileName, tensorName
 		return nil, errors.New("model empty (not loaded) call Load first")
 	}
 
-	reader, err := m.NewMMapReader(fileName)
+	reader, err := m.NewTensorReader(fileName)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to create MMapReader for %s", fileName)
+		return nil, errors.Wrapf(err, "failed to create TensorReader for %s", fileName)
 	}
 	tensor, err := reader.ReadTensor(backend, tensorName)
 	if err != nil {
@@ -282,9 +282,9 @@ func (m *Model) IterTensors(backend backends.Backend) func(yield func(TensorAndN
 		// Process each shard file with one mmap
 		for _, fileName := range xslices.SortedKeys(shardToTensors) {
 			// Create reader for shard.
-			reader, err := m.NewMMapReader(fileName)
+			reader, err := m.NewTensorReader(fileName)
 			if err != nil {
-				yield(TensorAndName{}, errors.Wrapf(err, "failed to create MMapReader for %s", fileName))
+				yield(TensorAndName{}, errors.Wrapf(err, "failed to create TensorReader for %s", fileName))
 				return
 			}
 

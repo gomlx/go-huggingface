@@ -2,23 +2,24 @@ package safetensors
 
 import (
 	"io"
+	"os"
 
 	"github.com/gomlx/gomlx/backends"
 	"github.com/gomlx/gomlx/pkg/core/shapes"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/pkg/errors"
-	"golang.org/x/exp/mmap"
 )
 
-// MMapReader provides streaming access to tensor data via io.ReaderAt.
-type MMapReader struct {
-	reader     *mmap.ReaderAt
-	dataOffset int64
-	Header     *Header
+// TensorReader provides streaming access to tensor data via io.ReadSeeker.
+type TensorReader struct {
+	reader        io.ReadSeeker
+	dataOffset    int64
+	currentOffset int64
+	Header        *Header
 }
 
-// NewMMapReader creates a new MMapReader for a specific .safetensors file.
-func (m *Model) NewMMapReader(fileName string) (*MMapReader, error) {
+// NewTensorReader creates a new TensorReader for a specific .safetensors file.
+func (m *Model) NewTensorReader(fileName string) (*TensorReader, error) {
 	localPath, err := m.Repo.DownloadFile(fileName)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to download %s", fileName)
@@ -29,27 +30,30 @@ func (m *Model) NewMMapReader(fileName string) (*MMapReader, error) {
 		return nil, errors.Wrapf(err, "failed to parse header for %s", localPath)
 	}
 
-	// Open mmap for reading
-	reader, err := mmap.Open(localPath)
+	// Open file for reading
+	f, err := os.Open(localPath)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to mmap %s", localPath)
+		return nil, errors.Wrapf(err, "failed to open %s", localPath)
 	}
 
-	// Create MMapReader
-	return &MMapReader{
-		reader:     reader,
+	// Create TensorReader
+	return &TensorReader{
+		reader:     f,
 		dataOffset: dataOffset,
 		Header:     header,
 	}, nil
 }
 
-// Close closes the underlying memory-mapped file.
-func (sr *MMapReader) Close() error {
-	return sr.reader.Close()
+// Close closes the underlying file if it implements io.Closer.
+func (sr *TensorReader) Close() error {
+	if closer, ok := sr.reader.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
 }
 
-// ReadTensor reads a tensor by name from the memory-mapped file.
-func (mr *MMapReader) ReadTensor(backend backends.Backend, tensorName string) (*tensors.Tensor, error) {
+// ReadTensor reads a tensor by name from the file.
+func (mr *TensorReader) ReadTensor(backend backends.Backend, tensorName string) (*tensors.Tensor, error) {
 	meta, ok := mr.Header.Tensors[tensorName]
 	if !ok {
 		return nil, errors.Errorf("tensor %s not found", tensorName)
@@ -68,7 +72,7 @@ func (mr *MMapReader) ReadTensor(backend backends.Backend, tensorName string) (*
 		return nil, errors.Wrapf(err, "failed to create tensor %q with shape %s", tensorName, shape)
 	}
 
-	// Read from mmap directly into tensor memory
+	// Read directly into tensor memory
 	tensorOffset := mr.dataOffset + meta.DataOffsets[0]
 	var readErr error
 	t.MutableBytes(func(data []byte) {
@@ -77,7 +81,17 @@ func (mr *MMapReader) ReadTensor(backend backends.Backend, tensorName string) (*
 			readErr = errors.Errorf("tensor shape %s expected %d bytes, but got %d bytes", t.Shape(), expectedBytes, len(data))
 			return
 		}
-		_, readErr = mr.reader.ReadAt(data, tensorOffset)
+		if tensorOffset != mr.currentOffset {
+			_, err := mr.reader.Seek(tensorOffset, io.SeekStart)
+			if err != nil {
+				readErr = errors.Wrapf(err, "failed to seek to offset %d for tensor %s", tensorOffset, tensorName)
+				return
+			}
+			mr.currentOffset = tensorOffset
+		}
+		var n int
+		n, readErr = io.ReadFull(mr.reader, data)
+		mr.currentOffset += int64(n)
 		if readErr != nil && readErr != io.EOF {
 			readErr = errors.Wrapf(readErr, "failed to read tensor %s", tensorName)
 		}

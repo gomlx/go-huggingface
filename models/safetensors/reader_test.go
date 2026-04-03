@@ -2,6 +2,7 @@ package safetensors
 
 import (
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/gomlx/go-huggingface/hub"
@@ -9,11 +10,10 @@ import (
 	"github.com/gomlx/gomlx/pkg/core/shapes"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/exp/mmap"
 )
 
-// TestMMapReaderReadTensor tests reading a tensor using MMapReader.
-func TestMMapReaderReadTensor(t *testing.T) {
+// TestTensorReaderReadTensor tests reading a tensor using TensorReader.
+func TestTensorReaderReadTensor(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m := NewEmpty(repo)
 
@@ -25,13 +25,13 @@ func TestMMapReaderReadTensor(t *testing.T) {
 	header, dataOffset, err := m.parseHeader(localPath)
 	require.NoError(t, err)
 
-	// Open mmap
-	reader, err := mmap.Open(localPath)
+	// Open file
+	reader, err := os.Open(localPath)
 	require.NoError(t, err)
 	defer reader.Close()
 
-	// Create MMapReader
-	mmapReader := &MMapReader{
+	// Create TensorReader
+	tensorReader := &TensorReader{
 		reader:     reader,
 		dataOffset: dataOffset,
 		Header:     header,
@@ -39,14 +39,14 @@ func TestMMapReaderReadTensor(t *testing.T) {
 
 	// Read a known tensor
 	tensorName := "embeddings.position_embeddings.weight"
-	tensor, err := mmapReader.ReadTensor(nil, tensorName)
+	tensor, err := tensorReader.ReadTensor(nil, tensorName)
 	require.NoError(t, err)
 	assert.NotNil(t, tensor)
 	assert.Greater(t, tensor.Shape().Size(), 0)
 }
 
-// TestMMapReaderReadTensorNotFound tests reading a non-existent tensor.
-func TestMMapReaderReadTensorNotFound(t *testing.T) {
+// TestTensorReaderReadTensorNotFound tests reading a non-existent tensor.
+func TestTensorReaderReadTensorNotFound(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m, err := New(repo)
 	require.NoError(t, err)
@@ -57,28 +57,28 @@ func TestMMapReaderReadTensorNotFound(t *testing.T) {
 	header, dataOffset, err := m.parseHeader(localPath)
 	require.NoError(t, err)
 
-	reader, err := mmap.Open(localPath)
+	reader, err := os.Open(localPath)
 	require.NoError(t, err)
 	defer reader.Close()
 
-	mmapReader := &MMapReader{
+	tensorReader := &TensorReader{
 		reader:     reader,
 		dataOffset: dataOffset,
 		Header:     header,
 	}
 
 	// Try to read non-existent tensor
-	_, err = mmapReader.ReadTensor(nil, "non_existent_tensor")
+	_, err = tensorReader.ReadTensor(nil, "non_existent_tensor")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
 
-// TestMMapReaderMetadata tests the Metadata method.
-func TestMMapReaderMetadata(t *testing.T) {
+// TestTensorReaderMetadata tests the Metadata method.
+func TestTensorReaderMetadata(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m, err := New(repo)
 	require.NoError(t, err)
-	reader, err := m.NewMMapReader("model.safetensors")
+	reader, err := m.NewTensorReader("model.safetensors")
 	require.NoError(t, err)
 	defer reader.Close()
 
@@ -88,11 +88,11 @@ func TestMMapReaderMetadata(t *testing.T) {
 	require.True(t, ok)
 }
 
-func TestMMapReaderTensor(t *testing.T) {
+func TestTensorReaderTensor(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m, err := New(repo)
 	require.NoError(t, err)
-	reader, err := m.NewMMapReader("model.safetensors")
+	reader, err := m.NewTensorReader("model.safetensors")
 	require.NoError(t, err)
 
 	// Read a known tensor
