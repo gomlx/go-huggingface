@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gomlx/go-huggingface/hub"
+	"github.com/gomlx/go-huggingface/internal/humanize"
 	"github.com/gomlx/go-huggingface/models/safetensors"
 	"github.com/gomlx/go-huggingface/models/transformer"
 	"github.com/gomlx/go-huggingface/tokenizers/api"
@@ -615,14 +616,24 @@ func TestReadAllShards(t *testing.T) {
 
 func TestUploadSafetensors(t *testing.T) {
 	model := safetensors.NewEmpty(testRepo)
+	maxSize := int64(0)
 	for fileInfo, err := range model.IterSafetensors() {
 		require.NoError(t, err)
 		// Sort tensor names for deterministic output
 		tensorNames := xslices.SortedKeys(fileInfo.Header.Tensors)
 		for _, name := range tensorNames {
 			meta := fileInfo.Header.Tensors[name]
+			shape, err := meta.GoMLXShape()
+			require.NoError(t, err)
 			size := meta.DataOffsets[1] - meta.DataOffsets[0]
-			fmt.Printf("%s: shape=%v, size=%d\n", name, meta.Shape, size)
+			if int64(shape.Memory()) != size {
+				t.Fatalf("Tensor %s has shape %v and size %s, but offset size is %s", name, shape,
+					humanize.Bytes(int64(shape.Memory())),
+					humanize.Bytes(int64(size)))
+			}
+			fmt.Printf(" - %s: shape=%v, size=%s\n", name, shape, humanize.Bytes(int64(shape.Memory())))
+			maxSize = max(maxSize, size)
 		}
 	}
+	fmt.Printf("Max size: %s\n", humanize.Bytes(int64(maxSize)))
 }
