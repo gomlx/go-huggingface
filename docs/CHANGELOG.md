@@ -31,10 +31,13 @@
     - `GetTaskPrompt` returns the prompt string for the given task code.
   - `LoadContext` now accepts an optional (nil-lable) backend and loads the variables directly into the backend.
   - Fixed mask support for batches with padding.
-- Package `safetensors` and `gguf`:
+- Package `safetensors`:
   - `IterTensors` and `IterTensorsFromRepo` now take an optional (nil-lable) backend for reading tensors directly into
     a backend.
-  - `safetensors` now use normal file reader (as opposed to `mmap`), since it's better supported and there was no performance difference.
+  - `IterTensors` now use normal file reader (as opposed to `mmap`), since it's better supported and there was no performance difference.
+  - `IterTensorsFromRepo` implemented separately with `github.com/edsrzf/mmap-go` (to avoid one kernel buffer copy to normal memory) and a parallelized
+    pipeline (including parallelizing transfers to the GPU, to ensure XLA will optimize them in a queue) for loading model throughput.
+  - Loading of KaLM-Gemma3 12B model (with 22 GB of weights) now takes ~1.5s where previously it took ~8.5s (and slightly faster than in Python using 1.72s).
 - Examples (`/examples/...`):
   - Added [Tecent's KaLM-Gemma3 12B model](https://huggingface.co/tencent/KaLM-Embedding-Gemma3-12B-2511) sentence embedder example.
   - Added [MSMARCO Dataset](https://huggingface.co/datasets/microsoft/ms_marco) example.

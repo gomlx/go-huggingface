@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/dustin/go-humanize v1.0.1
+	github.com/edsrzf/mmap-go v1.2.0
 	github.com/eliben/go-sentencepiece v0.7.0
 	github.com/gofrs/flock v0.13.0
 	github.com/gomlx/gomlx v0.27.3-0.20260402105318-bf1606661086
