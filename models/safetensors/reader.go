@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/gomlx/gomlx/backends"
-	"github.com/gomlx/gomlx/pkg/core/shapes"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/pkg/errors"
 )
@@ -61,14 +60,11 @@ func (mr *TensorReader) ReadTensor(backend backends.Backend, tensorName string) 
 		return nil, errors.Errorf("tensor %s not found", tensorName)
 	}
 
-	// Convert dtype
-	dtype, err := dtypeToGoMLX(meta.Dtype)
+	// Create shape & tensor.
+	shape, err := meta.GoMLXShape()
 	if err != nil {
 		return nil, err
 	}
-
-	// Convert shape to ints
-	shape := shapes.Make(dtype, meta.Shape...)
 	t, err := tensors.FromShapeForBackend(backend, shape)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create tensor %q with shape %s", tensorName, shape)
@@ -78,7 +74,7 @@ func (mr *TensorReader) ReadTensor(backend backends.Backend, tensorName string) 
 	tensorOffset := mr.dataOffset + meta.DataOffsets[0]
 	var readErr error
 	t.MutableBytes(func(data []byte) {
-		expectedBytes := int64(t.Shape().Size()) * int64(dtype.Size())
+		expectedBytes := int64(t.Shape().Memory())
 		if int64(len(data)) != expectedBytes {
 			readErr = errors.Errorf("tensor shape %s expected %d bytes, but got %d bytes", t.Shape(), expectedBytes, len(data))
 			return
@@ -152,7 +148,7 @@ func (mr *TensorReader) IterTensors(backend backends.Backend, tensorNames []stri
 					return
 				}
 
-				dtype, err := dtypeToGoMLX(meta.Dtype)
+				shape, err := meta.GoMLXShape()
 				if err != nil {
 					select {
 					case chRead <- tensorData{err: err}:
@@ -161,7 +157,6 @@ func (mr *TensorReader) IterTensors(backend backends.Backend, tensorNames []stri
 					return
 				}
 
-				shape := shapes.Make(dtype, meta.Shape...)
 				t, err := tensors.FromShapeForBackend(backend, shape)
 				if err != nil {
 					select {
@@ -171,7 +166,7 @@ func (mr *TensorReader) IterTensors(backend backends.Backend, tensorNames []stri
 					return
 				}
 
-				expectedBytes := int64(shape.Size()) * int64(dtype.Size())
+				expectedBytes := int64(shape.Memory())
 				tensorOffset := mr.dataOffset + meta.DataOffsets[0]
 
 				select {

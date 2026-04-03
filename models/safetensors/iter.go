@@ -10,7 +10,6 @@ import (
 
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/gomlx/backends"
-	"github.com/gomlx/gomlx/pkg/core/shapes"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -170,8 +169,9 @@ func iterFromRepoDownload(backend backends.Backend, repo *hub.Repo, done <-chan 
 			default:
 			}
 
+			// Create shape.
 			meta := header.Tensors[name]
-			dtype, err := dtypeToGoMLX(meta.Dtype)
+			shape, err := meta.GoMLXShape()
 			if err != nil {
 				start := time.Now()
 				select {
@@ -181,8 +181,6 @@ func iterFromRepoDownload(backend backends.Backend, repo *hub.Repo, done <-chan 
 				}
 				return
 			}
-
-			shape := shapes.Make(dtype, meta.Shape...)
 			t, err := tensors.FromShapeForBackend(backend, shape)
 			if err != nil {
 				start := time.Now()
@@ -194,7 +192,7 @@ func iterFromRepoDownload(backend backends.Backend, repo *hub.Repo, done <-chan 
 				return
 			}
 
-			expectedBytes := int64(shape.Size()) * int64(dtype.Size())
+			expectedBytes := int64(shape.Memory())
 			tensorOffset := dataOffset + meta.DataOffsets[0]
 			closeFile := (i == len(tensorNames)-1)
 
