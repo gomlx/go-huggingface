@@ -31,7 +31,8 @@ import (
 var (
 	flagUseCausalMask = flag.Bool("use_causal_mask", true, "Use causal mask in the transformer: the paper suggests one shouldn't, "+
 		"but for testing it makes the result closer to Python's using HF transformer library, which seems to use it.")
-	flagListPrompts = flag.Bool("prompts", false, "During initialization lists prompts from the dataset and exit immediately.")
+	flagListPrompts        = flag.Bool("prompts", false, "During initialization lists prompts from the dataset and exit immediately.")
+	flagSkipLoadingWeights = flag.Bool("skip_loading_weights", false, "Skip loading weights from the model.")
 )
 
 var (
@@ -116,13 +117,15 @@ func TestMain(m *testing.M) {
 		"Gravity is a force that attracts two bodies towards each other. It gives weight to physical objects and is responsible for the movement of planets around the sun.",
 	}
 
-	fmt.Printf(" - Loading model weights ...\r")
-	start := time.Now()
-	must(testModel.LoadContext(testBackend, testCtx))
-	for range 3 {
-		runtime.GC()
+	if !*flagSkipLoadingWeights {
+		fmt.Printf(" - Loading model weights ...\r")
+		start := time.Now()
+		must(testModel.LoadContext(testBackend, testCtx))
+		for range 3 {
+			runtime.GC()
+		}
+		fmt.Printf("\r✅ Loading model weights: done (%v)\n", time.Since(start))
 	}
-	fmt.Printf("\r✅ Loading model weights: done (%v)\n", time.Since(start))
 
 	// Run the tests
 	code := m.Run()
