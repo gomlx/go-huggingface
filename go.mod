@@ -7,7 +7,7 @@ require (
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/eliben/go-sentencepiece v0.7.0
 	github.com/gofrs/flock v0.13.0
-	github.com/gomlx/gomlx v0.27.3-0.20260402105318-bf1606661086
+	github.com/gomlx/gomlx v0.27.3-0.20260404061055-f74f4d34df24
 	github.com/google/uuid v1.6.0
 	github.com/parquet-go/parquet-go v0.29.0
 	github.com/pkg/errors v0.9.1
