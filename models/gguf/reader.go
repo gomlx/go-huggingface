@@ -41,7 +41,7 @@ func (r *Reader) ReadTensor(backend backends.Backend, tensorName string) (*tenso
 	}
 	dtype, dims := info.GoMLXShape()
 	shape := shapes.Make(dtype, dims...)
-	t, err := tensors.FromShapeForBackend(backend, shape)
+	t, err := tensors.FromShapeForBackend(backend, 0, shape)
 	if err != nil {
 		return nil, errors.Wrapf(err, "gguf: failed to create tensor %q with shape %s", tensorName, shape)
 	}
