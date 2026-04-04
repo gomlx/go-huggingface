@@ -2,6 +2,7 @@ package safetensors
 
 import (
 	"github.com/gomlx/go-huggingface/hub"
+	"github.com/gomlx/gomlx/pkg/core/shapes"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/pkg/errors"
 )
@@ -91,6 +92,14 @@ type TensorMetadata struct {
 	Dtype       string   `json:"dtype"`        // Data type: F32, F64, I32, I64, etc.
 	Shape       []int    `json:"shape"`        // Tensor dimensions
 	DataOffsets [2]int64 `json:"data_offsets"` // [start, end] byte offsets in file
+}
+
+func (t *TensorMetadata) GoMLXShape() (shapes.Shape, error) {
+	dtype, err := dtypeToGoMLX(t.Dtype)
+	if err != nil {
+		return shapes.Shape{}, err
+	}
+	return shapes.Make(dtype, t.Shape...), nil
 }
 
 // TensorAndName holds a tensor name and its GoMLX tensor data.
