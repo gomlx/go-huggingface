@@ -613,22 +613,44 @@ func TestReadAllShards(t *testing.T) {
 	fmt.Printf("done (%v)\n", time.Since(start))
 }
 
-func TestIterTensorsFromRepo(t *testing.T) {
+func TestSafetensors(t *testing.T) {
 	if !*flagSkipLoadingWeights {
 		t.Skip("Skipping TestIterTensorsFromRepo because -skip_loading_weights flag is not set: it may not have enough accelerator space to load the model twice.")
 	}
-	start := time.Now()
-	var allTensors []safetensors.TensorAndName
-	for tan, err := range safetensors.IterTensorsFromRepo(testBackend, testRepo) {
-		require.NoError(t, err)
-		allTensors = append(allTensors, tan)
-	}
-	fmt.Printf("- %d tensors loaded in %v\n", len(allTensors), time.Since(start))
 
-	start = time.Now()
-	for _, tan := range allTensors {
-		err := tan.Tensor.FinalizeAll()
+	t.Run("IterTensorsFromRepo", func(t *testing.T) {
+		start := time.Now()
+		var allTensors []safetensors.TensorAndName
+		for tan, err := range safetensors.IterTensorsFromRepo(testBackend, testRepo) {
+			require.NoError(t, err)
+			allTensors = append(allTensors, tan)
+		}
+		fmt.Printf("- %d tensors loaded in %v\n", len(allTensors), time.Since(start))
+
+		start = time.Now()
+		for _, tan := range allTensors {
+			err := tan.Tensor.FinalizeAll()
+			require.NoError(t, err)
+		}
+		fmt.Printf("- %d tensors finalized in %v\n", len(allTensors), time.Since(start))
+	})
+
+	t.Run("Model.IterTensors", func(t *testing.T) {
+		stModel, err := safetensors.New(testRepo)
 		require.NoError(t, err)
-	}
-	fmt.Printf("- %d tensors finalized in %v\n", len(allTensors), time.Since(start))
+		start := time.Now()
+		var allTensors []safetensors.TensorAndName
+		for tan, err := range stModel.IterTensors(testBackend) {
+			require.NoError(t, err)
+			allTensors = append(allTensors, tan)
+		}
+		fmt.Printf("- %d tensors loaded in %v\n", len(allTensors), time.Since(start))
+
+		start = time.Now()
+		for _, tan := range allTensors {
+			err := tan.Tensor.FinalizeAll()
+			require.NoError(t, err)
+		}
+		fmt.Printf("- %d tensors finalized in %v\n", len(allTensors), time.Since(start))
+	})
 }
