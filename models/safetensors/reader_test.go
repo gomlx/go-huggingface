@@ -2,7 +2,6 @@ package safetensors
 
 import (
 	"fmt"
-	"os"
 	"testing"
 
 	"github.com/gomlx/go-huggingface/hub"
@@ -17,25 +16,9 @@ func TestTensorReaderReadTensor(t *testing.T) {
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m := NewEmpty(repo)
 
-	// Download file
-	localPath, err := repo.DownloadFile("model.safetensors")
+	tensorReader, err := m.NewTensorReader("model.safetensors")
 	require.NoError(t, err)
-
-	// Parse header
-	header, dataOffset, err := m.parseHeader(localPath)
-	require.NoError(t, err)
-
-	// Open file
-	reader, err := os.Open(localPath)
-	require.NoError(t, err)
-	defer reader.Close()
-
-	// Create TensorReader
-	tensorReader := &TensorReader{
-		reader:     reader,
-		dataOffset: dataOffset,
-		Header:     header,
-	}
+	defer tensorReader.Close()
 
 	// Read a known tensor
 	tensorName := "embeddings.position_embeddings.weight"
@@ -51,21 +34,9 @@ func TestTensorReaderReadTensorNotFound(t *testing.T) {
 	m, err := New(repo)
 	require.NoError(t, err)
 
-	localPath, err := repo.DownloadFile("model.safetensors")
+	tensorReader, err := m.NewTensorReader("model.safetensors")
 	require.NoError(t, err)
-
-	header, dataOffset, err := m.parseHeader(localPath)
-	require.NoError(t, err)
-
-	reader, err := os.Open(localPath)
-	require.NoError(t, err)
-	defer reader.Close()
-
-	tensorReader := &TensorReader{
-		reader:     reader,
-		dataOffset: dataOffset,
-		Header:     header,
-	}
+	defer tensorReader.Close()
 
 	// Try to read non-existent tensor
 	_, err = tensorReader.ReadTensor(nil, "non_existent_tensor")
