@@ -94,8 +94,8 @@ func (mr *TensorReader) ReadTensor(backend backends.Backend, tensorName string) 
 	// Get bytes directly from memory-mapped file
 	tensorOffset := mr.dataOffset + meta.DataOffsets[0]
 	tensorEnd := mr.dataOffset + meta.DataOffsets[1]
-	
-	expectedBytes := int64(shape.Memory())
+
+	expectedBytes := int64(shape.ByteSize())
 	if tensorEnd-tensorOffset != expectedBytes {
 		return nil, errors.Errorf("tensor shape %s expected %d bytes, but got %d bytes in file", shape, expectedBytes, tensorEnd-tensorOffset)
 	}
@@ -159,7 +159,7 @@ func (mr *TensorReader) IterTensors(backend backends.Backend, tensorNames []stri
 
 				tensorOffset := mr.dataOffset + meta.DataOffsets[0]
 				tensorEnd := mr.dataOffset + meta.DataOffsets[1]
-				expectedBytes := int64(shape.Memory())
+				expectedBytes := int64(shape.ByteSize())
 				if tensorEnd-tensorOffset != expectedBytes {
 					select {
 					case chParse <- tensorData{err: errors.Errorf("tensor shape %s expected %d bytes, but got %d bytes in file", shape, expectedBytes, tensorEnd-tensorOffset)}:

@@ -112,7 +112,7 @@ func (m *Model) LoadContext(backend backends.Backend, ctx *context.Context) erro
 		// Track size
 		shape := tensorToLoad.Shape()
 		totalParams += int64(shape.Size())
-		totalBytes += int64(shape.Memory())
+		totalBytes += int64(shape.ByteSize())
 
 		scopeCtx := ctx
 		for _, scope := range scopePath {
