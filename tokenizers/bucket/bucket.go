@@ -104,6 +104,9 @@ type Bucket struct {
 	// References, with Shape.BatchSize references.
 	References []Reference
 
+	// NonPadTokens is the number of non-pad tokens in the batch.
+	NonPadTokens int
+
 	// Error, if any, that occurred during tokenization.
 	// Errors are returned in individual buckets, with Shape.BatchSize == 1,
 	// and References set to the failing SentenceRef.
@@ -238,6 +241,7 @@ func (b *Bucketizer) addTokenized(pb *pendingBucket, ref SentenceRef, ids []int)
 	dst := pb.bucket.Batch[idx*pb.shape.SentenceLength : (idx+1)*pb.shape.SentenceLength]
 	copy(dst, ids[:length])
 
+	pb.bucket.NonPadTokens += length
 	pb.count++
 }
 
