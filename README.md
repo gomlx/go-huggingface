@@ -129,6 +129,39 @@ Sentence:	The book is on the table.
 Tokens:  	[651 2870 603 611 573 3037 235265]
 ```
 
+### Tokenize and "Bucketize" sentences (using "two-bits" bucketing strategy)
+
+The library also provides the `github.com/gomlx/go-huggingface/tokenizers/bucket` package to
+bucket sentences in similar length ones, which can then be used to create batches of tokens
+with minimal padding.
+
+If provides different bucketing strategies (e.g.: Power-of-2, Power-of-X, Two-Bits, etc.), 
+and maximum latency waiting for buckets (for online usage), parallelization of tokenization,
+and is very simple to use:
+
+Example:
+* Write individual sentences to `bucketsInputChan`.
+* Read "batched" buckets from `bucketsOutputChan`.
+* Close `bucketsInputChan` when done, it will automatically close
+  `bucketsOutputChan` once all the buffers are drained.
+* Wait for `wg` to finish.
+
+```go
+tokenizer := ... // see previous example
+
+// Start bucket runner in a separate goroutine.
+var wg sync.WaitGroup
+bucketsInputChan := make(chan bucket.SentenceRef)
+bucketsOutputChan := make(chan bucket.Bucket, 10)
+bkt := bucket.New(tokenizer).
+	ByTwoBitBucketBudget(8*1024, 16).  // ~8K total tokens per bucket, ~20% padding overhead
+	WithMaxParallelization(-1)
+wg.Go(func() {
+	bkt.Run(bucketsInputChan, bucketsOutputChan)
+})
+...
+```
+
 ### Tokenize for a [Sentence Transformer](https://www.sbert.net/) derived model, using Rust's based [github.com/daulet/tokenizers](https://github.com/daulet/tokenizers) tokenizer
 
 For most tokenizers in HuggingFace though, there is no Go-only version yet, and for now we use the 
