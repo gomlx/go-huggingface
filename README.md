@@ -12,7 +12,8 @@ Simple APIs for downloading (`hub`), tokenizing (`tokenizers`), (**experimental*
 
 Each component is independent, and only depends on what it needs -- `hub` has no dependency on `GoMLX`, `tokenizers` has no dependence on `parquet-go` (to parse datasets), etc.
 
-🚧 **EXPERIMENTAL and IN DEVELOPMENT**: By no means it covers all models/tokenizers/dataset types in HuggingFace, but support is continuously expanding (we add support for the models we are using, or when someone asks for). Models are easy to run, datasets are easy to scan, tokenizers come configured from HuggingFace, etc. But ... it is still under development -- and on that note: contributions and suggestions are most welcome.
+It also provides a `bucket` library to bucketize sentences to be tokenized into buckets of increasing sizes (e.g.: powers-of-2, two-bits, etc.) with automatic padding, and
+maximum delay configuration (for online systems).
 
 See examples:
  
@@ -20,6 +21,9 @@ See examples:
   a small library that makes it easy access to this specific dataset, and serves as an example to access others.
 * [Tencent's KaLM-Embedding-Gemma3-12B-2511 Sentence Encoder](https://github.com/gomlx/go-huggingface/tree/main/examples/kalmgemma3): 
   a small library that makes it trivial to use this model and serves as an example how to use others.
+
+
+🚧 **EXPERIMENTAL and IN DEVELOPMENT**: By no means it covers all models/tokenizers/dataset types in HuggingFace, but support is continuously expanding (we add support for the models we are using, or when someone asks for). Models are easy to run, datasets are easy to scan, tokenizers come configured from HuggingFace, etc. But ... it is still under development -- and on that note: contributions and suggestions are most welcome.
 
 ## Packages `hub`: Downloding info and files from a repository
 
