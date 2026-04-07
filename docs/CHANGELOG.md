@@ -16,6 +16,7 @@
 - Package `tokenizers/bucket`
   - Added `bucket` package for streaming tokenization of sentences into buckets (or batches) of discrete sizes, 
     to minimize padding.
+  - Added "Two-Bits Bucketing" strategy.
 - Package `datasets`:
   - Added `datasets` package for downloading and iterating over parquet files of datasets from the HuggingFace Hub.
   - Added `cmd/generate_dataset_structs` for generating Go structs for dataset records.

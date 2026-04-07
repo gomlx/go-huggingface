@@ -102,6 +102,85 @@ func TestByPowerBudget(t *testing.T) {
 	}
 }
 
+func TestTwoBitBucket(t *testing.T) {
+	t.Run("TwoBitBucketLen", func(t *testing.T) {
+		testCases := []struct {
+			length int
+			want   int
+		}{
+			{1, 1},
+			{2, 2},
+			{3, 3},
+			{4, 4},
+			{5, 6},
+			{6, 6},
+			{7, 8},
+			{8, 8},
+			{9, 12},
+			{12, 12},
+			{13, 16},
+			{17, 24},
+			{32, 32},
+			{33, 48},
+		}
+
+		for _, tc := range testCases {
+			got := TwoBitBucketLen(tc.length)
+			if got != tc.want {
+				t.Errorf("TwoBitBucketLen(%d) = %d, want %d", tc.length, got, tc.want)
+			}
+		}
+	})
+
+	t.Run("Bucketizer.ByTwoBitBucket", func(t *testing.T) {
+		b := &Bucketizer{}
+		b.ByTwoBitBucket(32, 4)
+
+		testCases := []struct {
+			length int
+			want   Shape
+		}{
+			{1, Shape{BatchSize: 32, SentenceLength: 4}}, // max(1, 4) -> 4 -> 4
+			{3, Shape{BatchSize: 32, SentenceLength: 4}},
+			{4, Shape{BatchSize: 32, SentenceLength: 4}},
+			{5, Shape{BatchSize: 32, SentenceLength: 6}},
+			{7, Shape{BatchSize: 32, SentenceLength: 8}},
+			{9, Shape{BatchSize: 32, SentenceLength: 12}},
+		}
+
+		for _, tc := range testCases {
+			got := b.shapeFn(tc.length)
+			if got != tc.want {
+				t.Errorf("ByTwoBitBucket(length: %d) = %+v, want %+v", tc.length, got, tc.want)
+			}
+		}
+	})
+
+	t.Run("Bucketizer.ByTwoBitBucketBudget", func(t *testing.T) {
+		b := &Bucketizer{}
+		b.ByTwoBitBucketBudget(128, 4)
+
+		testCases := []struct {
+			length int
+			want   Shape
+		}{
+			{1, Shape{BatchSize: 32, SentenceLength: 4}},    // 128 / 4 = 32
+			{5, Shape{BatchSize: 21, SentenceLength: 6}},    // 128 / 6 = 21
+			{7, Shape{BatchSize: 16, SentenceLength: 8}},    // 128 / 8 = 16
+			{9, Shape{BatchSize: 10, SentenceLength: 12}},   // 128 / 12 = 10
+			{128, Shape{BatchSize: 1, SentenceLength: 128}}, // 128 / 128 = 1
+			{129, Shape{BatchSize: 1, SentenceLength: 192}}, // 128 / 192 = 0 -> max(0, 1) = 1
+		}
+
+		for _, tc := range testCases {
+			got := b.shapeFn(tc.length)
+			if got != tc.want {
+				t.Errorf("ByTwoBitBucketBudget(length: %d) = %+v, want %+v", tc.length, got, tc.want)
+			}
+		}
+	})
+}
+
 // mockTokenizer for testing. It returns TokenIDs [1, 2, ..., len(text)].
 type mockTokenizer struct {
 	padID int
