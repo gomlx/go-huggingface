@@ -29,6 +29,7 @@ package bucket
 
 import (
 	"math"
+	"math/bits"
 	"runtime"
 	"sync"
 	"time"
@@ -160,6 +161,8 @@ func (b *Bucketizer) WithShapeFn(shapeFn ShapeFn) *Bucketizer {
 // The minSentenceLength is the smallest sentenceLength bucket.
 //
 // See also ByPowerBudget, if you want to round to a fixed tokens budget.
+//
+// For full control on the bucketing function, see WithShapeFn.
 func (b *Bucketizer) ByPower(batchSize, minSentenceLength int, base float64) *Bucketizer {
 	return b.WithShapeFn(func(sentenceLength int) Shape {
 		sentenceLength = max(sentenceLength, minSentenceLength)
@@ -178,6 +181,8 @@ func (b *Bucketizer) ByPower(batchSize, minSentenceLength int, base float64) *Bu
 // and hopefully the downstream tasks run on +/- constant time.
 //
 // For sentence lengths > tokenBudget, it simply uses batchSize = 1.
+//
+// For full control on the bucketing function, see WithShapeFn.
 func (b *Bucketizer) ByPowerBudget(tokensBudget, minSentenceLength int, base float64) *Bucketizer {
 	return b.WithShapeFn(func(sentenceLength int) Shape {
 		sentenceLength = max(sentenceLength, minSentenceLength)
@@ -188,6 +193,77 @@ func (b *Bucketizer) ByPowerBudget(tokensBudget, minSentenceLength int, base flo
 			SentenceLength: bucketSentenceLen,
 		}
 	})
+}
+
+// ByTwoBitBucket configures the bucketizer to use buckets of sentence-length sized to the
+// next value that can be represented with 2 bits. So: 1, 2, 3, 4, 6, 8, 12, 16, ...
+//
+// This is a "2-bit semi-log bucketing", and each size is separated from the other by
+// a factor of 1.5 or 1.333 alternatingly, on average, by a factor of 1.414 (sqrt(2)),
+// but results in numbers that are "friendlier" for binary addressing (and memory pages, etc.).
+//
+// For full control on the bucketing function, see WithShapeFn.
+func (b *Bucketizer) ByTwoBitBucket(batchSize, minSentenceLength int) *Bucketizer {
+	return b.WithShapeFn(func(sentenceLength int) Shape {
+		sentenceLength = max(sentenceLength, minSentenceLength)
+		bucketSentenceLen := TwoBitBucketLen(sentenceLength)
+		return Shape{
+			BatchSize:      batchSize,
+			SentenceLength: bucketSentenceLen,
+		}
+	})
+}
+
+// ByTwoBitBucketBudget configures the bucketizer to use buckets of sentence-length sized to the
+// next value that can be represented with 2 bits. So: 1, 2, 3, 4, 6, 8, 12, 16, ...
+//
+// This is a "2-bit semi-log bucketing", and each size is separated from the other by
+// a factor of 1.5 or 1.333 alternatingly, on average, by a factor of 1.414 (sqrt(2)),
+// but results in numbers that are "friendlier" for binary addressing (and memory pages, etc.).
+//
+// For full control on the bucketing function, see WithShapeFn.
+func (b *Bucketizer) ByTwoBitBucketBudget(tokensBudget, minSentenceLength int) *Bucketizer {
+	return b.WithShapeFn(func(sentenceLength int) Shape {
+		sentenceLength = max(sentenceLength, minSentenceLength)
+		bucketSentenceLen := TwoBitBucketLen(sentenceLength)
+		batchSize := max(tokensBudget/bucketSentenceLen, 1)
+		return Shape{
+			BatchSize:      batchSize,
+			SentenceLength: bucketSentenceLen,
+		}
+	})
+}
+
+// TwoBitBucketLen returns the smallest size >= unpaddedLen that uses only
+// the two highest bits (either 2^n or 1.5 * 2^n).
+//
+// It is used by Bucketizer.ByTwoBitBucket and Bucketizer.ByTwoBitBucketBudget.
+func TwoBitBucketLen(unpaddedLen int) int {
+	if unpaddedLen <= 2 {
+		return unpaddedLen
+	}
+
+	// Find the position of the most significant bit (MSB).
+	// bits.Len returns the number of bits required to represent the uint.
+	// For 5 (101), Len is 3.
+	msbPos := bits.Len(uint(unpaddedLen)) - 1
+	msbValue := 1 << msbPos
+
+	// Case 1: Exact power of 2
+	if unpaddedLen == msbValue {
+		return msbValue
+	}
+
+	// Case 2: Check the "1.5" threshold (the two highest bits)
+	// Example: If msbValue is 4 (100), threshold is 6 (110)
+	threshold := msbValue | (msbValue >> 1)
+
+	if unpaddedLen <= threshold {
+		return threshold
+	}
+
+	// Case 3: Above the 1.5 threshold, jump to the next power of 2
+	return msbValue << 1
 }
 
 // WithMaxParallelization sets the maximum number of sentences to tokenize in parallel.
