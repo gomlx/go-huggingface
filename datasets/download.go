@@ -15,6 +15,8 @@ import (
 
 // ListFiles returns the parquet files that match the given config and split.
 // If config or split are empty, they are not used for filtering.
+//
+// They are returned in the order they are listed in the dataset info.
 func (d *Dataset) ListFiles(config, split string) ([]ParquetFile, error) {
 	allFiles, err := d.GetParquetFiles()
 	if err != nil {

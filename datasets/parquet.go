@@ -57,6 +57,52 @@ func IterParquetFromFile[T any](filePath string) iter.Seq2[T, error] {
 	}
 }
 
+// CreateParquetReader creates a parquet reader for the given dataset, config and split.
+// This is more flexible than an iterator because it allows for random reads.
+//
+// It groups together all the files for the given config and split and creates a single reader for them.
+// It will fix the schema to match the given type T.
+func CreateParquetReader[T any](ds *Dataset, config, split string) (*parquet.GenericReader[T], error) {
+	filesSelection, err := ds.ListFiles(config, split)
+	if err != nil {
+		return nil, errors.WithMessage(err, "failed to get parquet files info for dataset")
+	}
+	downloadedPaths, err := ds.DownloadCtx(context.Background(), filesSelection...)
+	if err != nil {
+		return nil, errors.WithMessage(err, "failed to download parquet files for dataset")
+	}
+
+	// Fix the schema first
+	fixedSchema, err := ParquetFixListSchema[T](downloadedPaths[0])
+	if err != nil {
+		return nil, err
+	}
+	if klog.V(1).Enabled() {
+		klog.Infof("Fixed schema: %s\n\n", fixedSchema)
+	}
+
+	// Open each file and append them as "rowGroup"
+	var rowGroups []parquet.RowGroup
+	for _, filePath := range downloadedPaths {
+		f, err := os.Open(filePath)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to open %q", filePath)
+		}
+		stat, err := f.Stat()
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to stat %q", filePath)
+		}
+		pf, err := parquet.OpenFile(f, stat.Size())
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to open parquet from %q", filePath)
+		}
+		rowGroups = append(rowGroups, pf.RowGroups()...)
+	}
+	multiGroup := parquet.MultiRowGroup(rowGroups...)
+	reader := parquet.NewGenericRowGroupReader[T](multiGroup, fixedSchema)
+	return reader, nil
+}
+
 // IterParquetFromDataset downloads all Parquet files associated with the dataset's config and split
 // and iterates over all their records sequentially.
 // It will yield an error and stop if there's an issue acquiring or reading the files.
