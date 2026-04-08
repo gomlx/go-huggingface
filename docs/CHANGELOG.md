@@ -22,6 +22,8 @@
   - Added `cmd/generate_dataset_structs` for generating Go structs for dataset records.
   - Added `ParquetFixListSchema` for fixing list schema parsed from Go struct (a bug? in parquet-go where it hard-codes
     the group/element node names in lists).
+  - Added `CreateParquetReader` for creating a parquet reader for the given dataset, config and split.
+    Less convenient than an iterator, but allows for random access.
 - Package `transformer`
   - Renamed main method to `AllLayers`: it returns both the final hidden state and all layer outputs; 
     it added RoPE positional embeddings support; added support for scaling factor.
