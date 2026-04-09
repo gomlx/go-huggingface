@@ -135,6 +135,59 @@ func IterParquetFromDataset[T any](ds *Dataset, config, split string) iter.Seq2[
 	}
 }
 
+// IterParquetFromDatasetAt provides the same functionality as IterParquetFromDataset
+// but starts at the given record.
+//
+// It uses CreateParquetReader to seek to the required position.
+// It will yield an error and stop if there's an issue acquiring or reading the files.
+func IterParquetFromDatasetAt[T any](ds *Dataset, config, split string, at int64) iter.Seq2[T, error] {
+	return func(yield func(T, error) bool) {
+		reader, err := CreateParquetReader[T](ds, config, split)
+		if err != nil {
+			var zero T
+			yield(zero, errors.WithMessage(err, "failed to create parquet reader for dataset"))
+			return
+		}
+		defer reader.Close()
+
+		numRows := reader.NumRows()
+		startRow := at
+
+		if startRow > numRows {
+			startRow = numRows
+		}
+		if startRow < 0 {
+			startRow = 0
+		}
+
+		if startRow > 0 {
+			if err := reader.SeekToRow(startRow); err != nil {
+				var zero T
+				yield(zero, errors.WithMessagef(err, "failed to seek to row %d", startRow))
+				return
+			}
+		}
+
+		batch := make([]T, 100)
+		for {
+			n, err := reader.Read(batch)
+			for i := range n {
+				if !yield(batch[i], nil) {
+					return
+				}
+			}
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				var zero T
+				yield(zero, errors.WithMessage(err, "error reading parquet dataset"))
+				break
+			}
+		}
+	}
+}
+
 // ParquetFixListSchema recursively transforms a struct-based schema to match a file's naming.
 func ParquetFixListSchema[T any](filePath string) (*parquet.Schema, error) {
 	f, err := os.Open(filePath)
