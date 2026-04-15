@@ -274,6 +274,17 @@ func (b *Bucketizer) WithMaxParallelization(maxParallelization int) *Bucketizer 
 	return b
 }
 
+// WithBatchPadding sets whether partially emitted batches should be padded with
+// empty sentences to match the maximum BatchSize.
+//
+// This can be useful with WithMaxDelay -- it can also be configured there --
+// and if processing batches, to use on the final batches, when flushing the
+// last buffered sentences.
+func (b *Bucketizer) WithBatchPadding(useBatchPadding bool) *Bucketizer {
+	b.useBatchPadding = useBatchPadding
+	return b
+}
+
 // WithMaxDelay sets the maximum time a bucket can wait for more sentences
 // before it is emitted partially.
 //

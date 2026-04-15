@@ -32,11 +32,14 @@ type AddedToken struct {
 
 // Normalizer represents the normalizer configuration.
 type Normalizer struct {
-	Type        string       `json:"type"`
-	Lowercase   bool         `json:"lowercase"`
-	Normalizer  *Normalizer  `json:"normalizer"`
-	Pattern     *Pattern     `json:"pattern"`
-	Normalizers []Normalizer `json:"normalizers"`
+	Type               string       `json:"type"`
+	Lowercase          bool         `json:"lowercase"`
+	CleanText          bool         `json:"clean_text"`
+	HandleChineseChars bool         `json:"handle_chinese_chars"`
+	StripAccents       *bool        `json:"strip_accents"`
+	Normalizer         *Normalizer  `json:"normalizer"`
+	Pattern            *Pattern     `json:"pattern"`
+	Normalizers        []Normalizer `json:"normalizers"`
 }
 
 // Pattern for regex-based operations.

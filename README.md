@@ -19,10 +19,12 @@ See examples:
  
 * [MS MARCO dataset](https://github.com/gomlx/go-huggingface/tree/main/examples/msmarco): 
   a small library that makes it easy access to this specific dataset, and serves as an example to access others.
+  It includes [benchmark_embed](https://github.com/gomlx/go-huggingface/tree/main/examples/msmarco/benchmark_embed/),
+  a command-line benchmark of sentence embeddings, that also serves as an example of how to use the library.
 * [Tencent's KaLM-Embedding-Gemma3-12B-2511 Sentence Encoder](https://github.com/gomlx/go-huggingface/tree/main/examples/kalmgemma3): 
   a small library that makes it trivial to use this model and serves as an example how to use others.
-
-
+* [BAAI (Beijing Academy of Artificial Intelligence) BGE Small Sentence Embedder (English) v1.5](https://github.com/gomlx/go-huggingface/tree/main/examples/BAAI-bge-small-en-v1.5): a small and very performatic sentence embedder (BERT based).
+  
 🚧 **EXPERIMENTAL and IN DEVELOPMENT**: By no means it covers all models/tokenizers/dataset types in HuggingFace, but support is continuously expanding (we add support for the models we are using, or when someone asks for). Models are easy to run, datasets are easy to scan, tokenizers come configured from HuggingFace, etc. But ... it is still under development -- and on that note: contributions and suggestions are most welcome.
 
 ## Packages `hub`: Downloding info and files from a repository

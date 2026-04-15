@@ -14,6 +14,7 @@ type Config struct {
 	IntermediateSize  int      `json:"intermediate_size"`
 	NumKeyValueHeads  int      `json:"num_key_value_heads"`
 	RMSNormEps        float64  `json:"rms_norm_eps"`
+	LayerNormEps      float64  `json:"layer_norm_eps"`
 
 	// RoPE Positional Embedder
 	RoPETheta   float64     `json:"rope_theta"`
@@ -23,6 +24,7 @@ type Config struct {
 	RoPELocalBaseFreq float64 `json:"rope_local_base_freq"`
 
 	HiddenActivation      string `json:"hidden_activation"`
+	HiddenAct             string `json:"hidden_act"`
 	MaxPositionEmbeddings int    `json:"max_position_embeddings"`
 	ModelType             string `json:"model_type"`
 	TorchDtype            string `json:"torch_dtype"`

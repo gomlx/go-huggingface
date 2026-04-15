@@ -44,6 +44,9 @@
 - Examples (`/examples/...`):
   - Added [Tecent's KaLM-Gemma3 12B model](https://huggingface.co/tencent/KaLM-Embedding-Gemma3-12B-2511) sentence embedder example.
   - Added [MSMARCO Dataset](https://huggingface.co/datasets/microsoft/ms_marco) example.
+  - Added [BAAI (Beijing Academy of Artificial Intelligence) BGE Small Sentence Embedder (English) v1.5](https://github.com/gomlx/go-huggingface/tree/main/examples/BAAI-bge-small-en-v1.5): a small and very performatic sentence embedder (BERT based).
+  - Added [MSMARCO `benchmark_embed`](https://github.com/gomlx/go-huggingface/tree/main/examples/msmarco/benchmark_embed/) 
+    command-line benchmark of sentence embeddings, that also serves as an example of how to use the library.
 
 ## v0.3.4
 
