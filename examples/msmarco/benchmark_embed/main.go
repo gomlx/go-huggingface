@@ -40,8 +40,8 @@ var (
 		"Bucket budget in number of tokens: sentences will be batched in buckets of this number of tokens in total. "+
 			"So sentences with 128 tokens, if the budget is 1K, the batchsSize will be 8. "+
 			"The buckets use the 'two-bits' algorithm to minimize padding -- e.g.: sizes 8, 12, 16, 24, 32, 48, etc.")
-	flagParallelEmbedders = flag.Int("embedders", 1, "Number of parallel embedders. "+
-		"The optimal value depends on the backend and the bucket size (-bucket), for GPUs usually 1 is enough.")
+	flagParallelEmbedders = flag.Int("num_embedders", 1, "Number of parallel embedders. "+
+		"The optimal value depends on the backend and the bucket size (-bucket), for GPUs usually 1 or 2 is enough.")
 )
 
 func MapHas[K comparable, V any](m map[K]V, k K) bool {
