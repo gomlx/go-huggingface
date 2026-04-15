@@ -40,6 +40,8 @@ var (
 		"Bucket budget in number of tokens: sentences will be batched in buckets of this number of tokens in total. "+
 			"So sentences with 128 tokens, if the budget is 1K, the batchsSize will be 8. "+
 			"The buckets use the 'two-bits' algorithm to minimize padding -- e.g.: sizes 8, 12, 16, 24, 32, 48, etc.")
+	flagParallelEmbedders = flag.Int("embedders", 1, "Number of parallel embedders. "+
+		"The optimal value depends on the backend and the bucket size (-bucket), for GPUs usually 1 is enough.")
 )
 
 func MapHas[K comparable, V any](m map[K]V, k K) bool {
@@ -163,69 +165,16 @@ func main() {
 	var emaSpeed float64
 	var emaInitialized bool
 
+	fmt.Printf("- Starting processing:\n")
+	numSentencesProcessedChan := make(chan int)
+	var emaMu sync.RWMutex
+
 	wg.Go(func() {
-		fmt.Printf("- Starting processing:\n")
 		lastReportTime := time.Now()
 		var sentencesPerSecond float64
-		for bk := range bucketsOutputChan {
-			if bk.Error != nil {
-				klog.Fatalf("Tokenization error: %v", bk.Error)
-			}
-
-			batchSize := bk.Shape.BatchSize
-			seqLen := bk.Shape.SentenceLength
-
-			rawData := dtypes.UnsafeByteSlice(bk.Batch)
-			var dtype dtypes.DType
-			switch bits.UintSize {
-			case 32:
-				dtype = dtypes.Int32
-			case 64:
-				dtype = dtypes.Int64
-			default:
-				klog.Fatalf("Unsupported int of %d-bits architecture", bits.UintSize)
-			}
-			inputTensor, err := tensors.FromRaw(backend, 0, shapes.Make(dtype, batchSize, seqLen), rawData)
-			if err != nil {
-				klog.Fatalf("Failed to create input tensor: %+v", err)
-			}
-
-			batchStartTime := time.Now()
-			var outTensor *tensors.Tensor
-			errPanic := exceptions.TryCatch[error](func() {
-				outTensor, err = embedExec.Exec1(inputTensor)
-			})
-			if errPanic != nil {
-				fmt.Println()
-				klog.Fatalf("Panic on execute embeddings for %s: %+v", inputTensor.Shape(), errPanic)
-			}
-			if err != nil {
-				fmt.Println()
-				klog.Fatalf("Failed to execute embeddings for %s: %+v", inputTensor.Shape(), err)
-			}
-			numTokensProcessed += int64(len(bk.Batch))
-			numNonPadTokensProcessed += int64(bk.NonPadTokens)
-
-			// Here we simply discard the embeddings.
-			// In a real application, you would save them or use them.
-
-			inputTensor.FinalizeAll()
-			outTensor.FinalizeAll()
-
-			// Moving average of (non-padding) tokens per second speed.
-			batchDuration := time.Since(batchStartTime).Seconds()
-			if batchDuration > 0 {
-				currentSpeed := float64(bk.NonPadTokens) / batchDuration
-				if !emaInitialized {
-					emaSpeed = currentSpeed
-					emaInitialized = true
-				} else {
-					emaSpeed = 0.1*currentSpeed + 0.9*emaSpeed
-				}
-			}
-
-			// Count sentences processed.
-			numSentencesProcessed += batchSize
+		for count := range numSentencesProcessedChan {
+			// fmt.Printf("\r- Got %d sentences processed%s\n", count, humanize.EraseToEndOfLine)
+			numSentencesProcessed += count
 
 			// Report progress every second.
 			if time.Since(lastReportTime) > time.Second {
@@ -243,15 +192,102 @@ func main() {
 						eta = "done"
 					}
 				}
+				emaMu.RLock()
+				speed := emaSpeed
+				emaMu.RUnlock()
 				fmt.Printf("\r   - Processed %s / %s passages (%s, %s non-padding) -- ETA %s ...%s",
 					humanize.Count(int64(numSentencesProcessed)), humanize.Count(int64(expectedTotalSentences)), humanize.Speed(sentencesPerSecond, "passages"),
-					humanize.Speed(emaSpeed, "tokens"), eta, humanize.EraseToEndOfLine)
+					humanize.Speed(speed, "tokens"), eta, humanize.EraseToEndOfLine)
 			}
 		}
 		expectedTotalSentences := 10 * expectedNumQueries
+		emaMu.RLock()
+		speed := emaSpeed
+		emaMu.RUnlock()
 		fmt.Printf("\r  ✅ Processed %s / %s passages (%s, %s non-padding) -- done.%s\n",
 			humanize.Count(int64(numSentencesProcessed)), humanize.Count(int64(expectedTotalSentences)), humanize.Speed(sentencesPerSecond, "passages"),
-			humanize.Speed(emaSpeed, "tokens"), humanize.EraseToEndOfLine)
+			humanize.Speed(speed, "tokens"), humanize.EraseToEndOfLine)
+	})
+
+	var embeddersWg sync.WaitGroup
+	for i := 0; i < *flagParallelEmbedders; i++ {
+		embeddersWg.Go(func() {
+			for bk := range bucketsOutputChan {
+				if bk.Error != nil {
+					klog.Fatalf("Tokenization error: %v", bk.Error)
+				}
+				// fmt.Printf("\r- Processing batch shaped [%d, %d] (%d non-padding tokens)%s\n",
+				// 	bk.Shape.BatchSize, bk.Shape.SentenceLength, bk.NonPadTokens, humanize.EraseToEndOfLine)
+
+				batchSize := bk.Shape.BatchSize
+				seqLen := bk.Shape.SentenceLength
+
+				rawData := dtypes.UnsafeByteSlice(bk.Batch)
+				var dtype dtypes.DType
+				switch bits.UintSize {
+				case 32:
+					dtype = dtypes.Int32
+				case 64:
+					dtype = dtypes.Int64
+				default:
+					klog.Fatalf("Unsupported int of %d-bits architecture", bits.UintSize)
+				}
+				inputTensor, err := tensors.FromRaw(backend, 0, shapes.Make(dtype, batchSize, seqLen), rawData)
+				if err != nil {
+					klog.Fatalf("Failed to create input tensor: %+v", err)
+				}
+
+				batchStartTime := time.Now()
+				var outTensor *tensors.Tensor
+				errPanic := exceptions.TryCatch[error](func() {
+					outTensor, err = embedExec.Exec1(inputTensor)
+				})
+				if errPanic != nil {
+					fmt.Println()
+					klog.Fatalf("Panic on execute embeddings for %s: %+v", inputTensor.Shape(), errPanic)
+				}
+				if err != nil {
+					fmt.Println()
+					klog.Fatalf("Failed to execute embeddings for %s: %+v", inputTensor.Shape(), err)
+				}
+				atomic.AddInt64(&numTokensProcessed, int64(len(bk.Batch)))
+				atomic.AddInt64(&numNonPadTokensProcessed, int64(bk.NonPadTokens))
+
+				// Here we simply discard the embeddings.
+				// In a real application, you would save them or use them.
+
+				inputTensor.FinalizeAll()
+				outTensor.FinalizeAll()
+
+				// Moving average of (non-padding) tokens per second speed.
+				batchDuration := time.Since(batchStartTime).Seconds()
+				if batchDuration > 0 {
+					currentSpeed := float64(bk.NonPadTokens) / batchDuration
+					emaMu.Lock()
+					if !emaInitialized {
+						emaSpeed = currentSpeed
+						emaInitialized = true
+					} else {
+						emaSpeed = 0.1*currentSpeed + 0.9*emaSpeed
+					}
+					emaMu.Unlock()
+				}
+
+				// Count sentences processed.
+				count := 0
+				for _, ref := range bk.References {
+					if ref != nil {
+						count++
+					}
+				}
+				numSentencesProcessedChan <- count
+			}
+		})
+	}
+
+	wg.Go(func() {
+		embeddersWg.Wait()
+		close(numSentencesProcessedChan)
 	})
 
 	wg.Wait()
