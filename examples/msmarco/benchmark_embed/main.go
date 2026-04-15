@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
 
-	"github.com/gomlx/exceptions"
 	"github.com/gomlx/go-huggingface/datasets"
 	bge "github.com/gomlx/go-huggingface/examples/BAAI-bge-small-en-v1.5"
 	"github.com/gomlx/go-huggingface/examples/kalmgemma3"
@@ -239,13 +238,7 @@ func main() {
 
 				batchStartTime := time.Now()
 				var outTensor *tensors.Tensor
-				errPanic := exceptions.TryCatch[error](func() {
-					outTensor, err = embedExec.Exec1(inputTensor)
-				})
-				if errPanic != nil {
-					fmt.Println()
-					klog.Fatalf("Panic on execute embeddings for %s: %+v", inputTensor.Shape(), errPanic)
-				}
+				outTensor, err = embedExec.Exec1(inputTensor)
 				if err != nil {
 					fmt.Println()
 					klog.Fatalf("Failed to execute embeddings for %s: %+v", inputTensor.Shape(), err)
