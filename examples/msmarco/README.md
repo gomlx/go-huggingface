@@ -12,3 +12,17 @@ For more information see:
 * https://pkg.go.dev/github.com/gomlx/go-huggingface/datasets : The `datasets` package documentation.
 * https://huggingface.co/datasets/microsoft/ms_marco : The dataset page on HuggingFace Hub.
 * https://microsoft.github.io/msmarco/ : Microsoft's MS MARCO page.
+
+## `benchmark_embed`
+
+It includes this small binary that will attempt to embed all the MSMARCO passages using the given model,
+and print out the speed. It simply discards the embeddings.
+
+It's provides 3 functionalities:
+
+- Check that a model works.
+- Benchmark it in any supporting backend.
+- Example for someone who needs to do something similar.
+
+It only embeds the passages, because generally the "document" doesn't require any instruction, while
+queries usually require instructions, and there is not a general way to specify them.
