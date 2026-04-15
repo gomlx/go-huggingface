@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gomlx/go-huggingface/hub"
+	hftesting "github.com/gomlx/go-huggingface/internal/testing"
 	"github.com/gomlx/go-huggingface/models/safetensors"
 	"github.com/gomlx/go-huggingface/models/transformer"
 	"github.com/gomlx/go-huggingface/tokenizers/api"
@@ -304,7 +305,7 @@ func TestTransformerLayers(t *testing.T) {
 						// Verify values of the first len(tokens) only, we don't need to check the padding.
 						gotLayer.ConstFlatData(func(flatAny any) {
 							gotFlat := flatAny.([]float32)
-							validateTensor(t, gotFlat, expectedFlat, name, 1, sentenceLen, len(tokens))
+							hftesting.ValidateEmbeddingTensor(t, gotFlat, expectedFlat, name, 1, sentenceLen, len(tokens))
 						})
 					}
 				})
@@ -313,111 +314,13 @@ func TestTransformerLayers(t *testing.T) {
 	}
 }
 
-// validateTensor validates the values of a tensor.
-// It checks the values of the first expectedSentenceLen tokens only, ignoring the padding in
-// case gotSentencenLen > expectedSentenceLen.
-func validateTensor(t *testing.T, got []float32, expected []float32, name string,
-	batchSize, gotSentenceLen, expectedSentenceLen int) {
-
-	gotHiddenDim := len(got) / batchSize / gotSentenceLen
-	expectedHiddenDim := len(expected) / batchSize / expectedSentenceLen
-	if gotHiddenDim == 0 || gotHiddenDim != expectedHiddenDim || gotSentenceLen < expectedSentenceLen {
-		t.Fatalf("[%s] Shape mismatch: expected %d flat floats ([%d, %d, %d]?), got %d ([%d, %d, %d])",
-			name, len(expected), batchSize, expectedSentenceLen, expectedHiddenDim,
-			len(got), batchSize, gotSentenceLen, gotHiddenDim)
-	}
-
-	// Find mapping from expected indices to got indices.
-	expectedShape := shapes.Make(dtypes.Float32, batchSize, expectedSentenceLen, expectedHiddenDim)
-	gotShape := shapes.Make(dtypes.Float32, batchSize, gotSentenceLen, gotHiddenDim)
-	gotStrides := gotShape.Strides()
-	gotFlatIdxFn := func(indices []int) int {
-		flatIdx := 0
-		for i, idx := range indices {
-			flatIdx += idx * gotStrides[i]
-		}
-		return flatIdx
-	}
-
-	var sumAbsDiff, sumAbsExpected float64
-	const minRelDenominator = 0.2
-	for flatIdx, expectedIndices := range expectedShape.Iter() {
-		expectValue := float64(expected[flatIdx])
-		gotValueF64 := float64(got[gotFlatIdxFn(expectedIndices)])
-		absDiff := math.Abs(gotValueF64 - expectValue)
-		sumAbsDiff += absDiff
-		sumAbsExpected += math.Abs(expectValue)
-	}
-	meanAbsDiff := sumAbsDiff / float64(len(got))
-	meanAbsExpected := sumAbsExpected / float64(len(got))
-
-	var maxRelDiff float64
-	var maxRelDiffIdx int
-	for flatIdx, expectedIndices := range expectedShape.Iter() {
-		expectValue := float64(expected[flatIdx])
-		gotValueF64 := float64(got[gotFlatIdxFn(expectedIndices)])
-		absDiff := math.Abs(gotValueF64 - expectValue)
-		relDenominator := math.Max(math.Abs(expectValue), math.Abs(gotValueF64))
-		relDenominator = max(relDenominator, meanAbsExpected)
-		relDiff := absDiff / relDenominator
-		if relDiff > maxRelDiff {
-			maxRelDiff = relDiff
-			maxRelDiffIdx = flatIdx
-		}
-	}
-
-	maxRelTolerance := 5.0
-	meanTolerance := 0.1
-
-	if maxRelDiff > maxRelTolerance || meanAbsDiff >= meanTolerance*meanAbsExpected {
-		t.Errorf("[%s] Mismatch in values: Max rel diff: %.3g at idx %d (ex %f, got %f) / "+
-			"Mean abs diff: %.3g (== %.1f%% of the mean absolute values %.3g)",
-			name, maxRelDiff, maxRelDiffIdx, expected[maxRelDiffIdx], got[maxRelDiffIdx],
-			meanAbsDiff, 100*meanAbsDiff/meanAbsExpected, meanAbsExpected)
-		for flatIdx, expectedIndices := range expectedShape.Iter() {
-			expectValue := float64(expected[flatIdx])
-			gotValueF64 := float64(got[gotFlatIdxFn(expectedIndices)])
-			if flatIdx > 10 && flatIdx < len(expected)-10 {
-				continue
-			}
-			fmt.Printf("\t- Value #%d:\tgot %.3g,\t expected %.3g\n", flatIdx, gotValueF64, expectValue)
-		}
-	} else {
-		t.Logf("[%s] Match! Max rel diff: %.3g, Mean abs diff: %.3g (== %.1f%% of %.3g is the mean absolute)",
-			name, maxRelDiff, meanAbsDiff, 100*meanAbsDiff/meanAbsExpected, meanAbsExpected)
-	}
-}
-
-func readPythonEmbeddingsList(path string) ([]float32, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	var results []float32
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		val, err := strconv.ParseFloat(line, 32)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse float: %v", err)
-		}
-		results = append(results, float32(val))
-	}
-	return results, scanner.Err()
-}
-
 func TestSentenceEmbedding(t *testing.T) {
 	prompts := make([]string, 0, len(testQueries)+len(testDocs))
 	prompts = append(prompts, testQueries...)
 	prompts = append(prompts, testDocs...)
 
 	pythonPath := "similarity_embeddings.txt"
-	expectedFlatData, err := readPythonEmbeddingsList(pythonPath)
+	expectedFlatData, err := hftesting.ReadPythonEmbeddingsList(pythonPath)
 	if err != nil {
 		t.Skipf("Skipping test because %s is not available: %v", pythonPath, err)
 	}
@@ -456,7 +359,7 @@ func TestSentenceEmbedding(t *testing.T) {
 		outTensor.ConstFlatData(func(flatAny any) {
 			flat := flatAny.([]float32)
 			expectedData := expectedFlatData[i*hiddenSize : (i+1)*hiddenSize]
-			validateTensor(t, flat, expectedData, fmt.Sprintf("Sentence Embedding %d", i),
+			hftesting.ValidateEmbeddingTensor(t, flat, expectedData, fmt.Sprintf("Sentence Embedding %d", i),
 				1, len(tokens), len(tokens))
 		})
 	}
@@ -468,7 +371,7 @@ func TestSentenceBatchEmbedding(t *testing.T) {
 	prompts = append(prompts, testDocs...)
 
 	pythonPath := "similarity_embeddings.txt"
-	expectedFlatData, err := readPythonEmbeddingsList(pythonPath)
+	expectedFlatData, err := hftesting.ReadPythonEmbeddingsList(pythonPath)
 	if err != nil {
 		t.Skipf("Skipping test because %s is not available: %v", pythonPath, err)
 	}
@@ -542,7 +445,7 @@ func TestSentenceBatchEmbedding(t *testing.T) {
 		for i := range prompts {
 			gotData := flat[i*hiddenSize : (i+1)*hiddenSize]
 			expectedData := expectedFlatData[i*hiddenSize : (i+1)*hiddenSize]
-			validateTensor(t, gotData, expectedData, fmt.Sprintf("Sentence Batch Embedding %d", i),
+			hftesting.ValidateEmbeddingTensor(t, gotData, expectedData, fmt.Sprintf("Sentence Batch Embedding %d", i),
 				1, 1, 1)
 		}
 	})
