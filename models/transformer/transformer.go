@@ -44,8 +44,13 @@ func (m *Model) ForwardGraph(ctx *context.Context, tokens, mask *graph.Node) *gr
 	return lastLayer
 }
 
-// CreateGoMLXModel initializes the base ml_transformer.Model configuration using the loaded fields.
-func (m *Model) CreateGoMLXModel() *mltransformer.Model {
+// CreateGoMLXModel initializes the base GoMLX ml_transformer.Model configuration using the loaded fields.
+//
+// Usually, you won't call this directly, instead you would use the Model.SentenceEmbedding or Model.AllLayers.
+// But you can use it for something custom.
+//
+// It takes the context ctx with the loaded variables.
+func (m *Model) CreateGoMLXModel(ctx *context.Context) *mltransformer.Model {
 	headDim := m.Config.HeadDim
 	if headDim == 0 && m.Config.NumAttentionHeads > 0 {
 		headDim = m.Config.HiddenSize / m.Config.NumAttentionHeads
@@ -54,6 +59,8 @@ func (m *Model) CreateGoMLXModel() *mltransformer.Model {
 	if ropeTheta == 0 {
 		ropeTheta = 10000.0
 	}
+
+	isBert := m.Config.ModelType == "bert" || (len(m.Config.Architectures) > 0 && m.Config.Architectures[0] == "BertModel")
 
 	tm := mltransformer.New(
 		m.Config.VocabSize,
@@ -64,40 +71,68 @@ func (m *Model) CreateGoMLXModel() *mltransformer.Model {
 	).
 		WithFFNDim(m.Config.IntermediateSize).
 		WithMaxPosEmbed(m.Config.MaxPositionEmbeddings).
-		WithArchitecture(mltransformer.ArchitectureGemma3). // FIXME: Should use m.Config.Architectures to map Architecture
 		WithTransposedWeights(true).
-		WithNormalization(layers.NormalizationRMSNorm).
-		WithNormEpsilon(m.Config.RMSNormEps).
-		WithActivation(activations.FromName(m.Config.HiddenActivation)).
-		WithNumKVHeads(m.Config.NumKeyValueHeads).
-		WithBias(false).
-		WithCausalMask(m.useCausalMask).
-		WithFinalNormalization(layers.NormalizationRMSNorm)
+		WithCausalMask(m.useCausalMask)
 
-	tm.WithSlidingWindow(m.Config.SlidingWindow)
-	if len(m.Config.LayerTypes) > 0 {
-		layerTypes := make([]mltransformer.LayerType, m.Config.NumHiddenLayers)
-		for i, lt := range m.Config.LayerTypes {
-			if lt == "sliding_attention" {
-				layerTypes[i] = mltransformer.SlidingAttention
-			} else {
-				layerTypes[i] = mltransformer.FullAttention
-			}
+	if isBert {
+		tm.WithArchitecture(mltransformer.ArchitectureStandard).
+			WithNormalization(layers.NormalizationLayerNorm).
+			WithBias(true).
+			WithCausalMask(false)
+
+		if m.Config.LayerNormEps > 0 {
+			tm.WithNormEpsilon(m.Config.LayerNormEps)
+		} else if m.Config.RMSNormEps > 0 {
+			tm.WithNormEpsilon(m.Config.RMSNormEps)
 		}
-		tm.WithLayerTypes(layerTypes)
-	}
 
-	defaultRope := pos.NewRoPE(ropeTheta)
-	if m.Config.RoPEScaling.Type == "linear" {
-		defaultRope.WithLinearScaling(m.Config.RoPEScaling.Factor)
-	}
-	tm.WithPositionalEncoder(defaultRope)
+		activation := m.Config.HiddenActivation
+		if activation == "" {
+			activation = m.Config.HiddenAct
+		}
+		tm.WithActivation(activations.FromName(activation))
 
-	if m.Config.RoPELocalBaseFreq > 0 {
-		slidingRope := pos.NewRoPE(m.Config.RoPELocalBaseFreq)
-		for i, lt := range m.Config.LayerTypes {
-			if lt == "sliding_attention" {
-				tm.WithLayerPositionalEncoder(i, slidingRope)
+		tm.WithPositionalEncoder(pos.NewLearned(ctx, m.Config.MaxPositionEmbeddings, m.Config.HiddenSize))
+		tm.WithEmbedNormalization(layers.NormalizationLayerNorm)
+
+		if typeVocabSize, ok := m.Config.Extra["type_vocab_size"].(float64); ok && typeVocabSize > 0 {
+			tm.WithTokenTypeEmbedding(int(typeVocabSize))
+		}
+
+	} else {
+		tm.WithArchitecture(mltransformer.ArchitectureGemma3). // FIXME: Should use m.Config.Architectures to map Architecture
+									WithNormalization(layers.NormalizationRMSNorm).
+									WithNormEpsilon(m.Config.RMSNormEps).
+									WithActivation(activations.FromName(m.Config.HiddenActivation)).
+									WithNumKVHeads(m.Config.NumKeyValueHeads).
+									WithBias(false).
+									WithFinalNormalization(layers.NormalizationRMSNorm)
+
+		tm.WithSlidingWindow(m.Config.SlidingWindow)
+		if len(m.Config.LayerTypes) > 0 {
+			layerTypes := make([]mltransformer.LayerType, m.Config.NumHiddenLayers)
+			for i, lt := range m.Config.LayerTypes {
+				if lt == "sliding_attention" {
+					layerTypes[i] = mltransformer.SlidingAttention
+				} else {
+					layerTypes[i] = mltransformer.FullAttention
+				}
+			}
+			tm.WithLayerTypes(layerTypes)
+		}
+
+		defaultRope := pos.NewRoPE(ropeTheta)
+		if m.Config.RoPEScaling.Type == "linear" {
+			defaultRope.WithLinearScaling(m.Config.RoPEScaling.Factor)
+		}
+		tm.WithPositionalEncoder(defaultRope)
+
+		if m.Config.RoPELocalBaseFreq > 0 {
+			slidingRope := pos.NewRoPE(m.Config.RoPELocalBaseFreq)
+			for i, lt := range m.Config.LayerTypes {
+				if lt == "sliding_attention" {
+					tm.WithLayerPositionalEncoder(i, slidingRope)
+				}
 			}
 		}
 	}
@@ -150,6 +185,6 @@ func (m *Model) AllLayers(ctx *context.Context, tokens, mask *graph.Node) (lastL
 	}
 
 	// Create GoMLXModel and build the graph for all the layers.
-	tm := m.CreateGoMLXModel()
+	tm := m.CreateGoMLXModel(ctx)
 	return tm.AllLayers(ctx, tokens, mask, false, 0)
 }

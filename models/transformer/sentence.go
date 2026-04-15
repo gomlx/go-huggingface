@@ -138,6 +138,14 @@ func (m *Model) ApplySentencePooling(hiddenStates, mask *graph.Node) *graph.Node
 	case cfg.PoolingModeMeanTokens:
 		// Plain mean pooling over the sequence tokens (assuming no padding for now).
 		return graph.MaskedReduceMean(hiddenStates, mask, 1) // [batch, hidden]
+
+	case cfg.PoolingModeClsToken:
+		// CLS token is typically the first token (index 0).
+		// hiddenStates: [batchSize, seqLen, hiddenSize]
+		// We take the slice [batchSize, 0, hiddenSize]
+		clsTokenEmbeddings := graph.Slice(hiddenStates, graph.AxisRange(), graph.AxisElem(0)) // [batchSize, 1, hiddenSize]
+		clsTokenEmbeddings = graph.Squeeze(clsTokenEmbeddings, 1)                            // [batchSize, hiddenSize]
+		return clsTokenEmbeddings
 	}
 
 	exceptions.Panicf("unsupported pooling mode in PoolingConfig, please add an issue in github.com/gomlx/go-huggingface to add support for it: %+v", cfg)

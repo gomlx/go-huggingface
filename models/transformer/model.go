@@ -97,12 +97,18 @@ func (m *Model) LoadContext(backend backends.Backend, ctx *context.Context) erro
 	var totalParams int64
 	var totalBytes int64
 
+	isBert := m.Config.ModelType == "bert" || (len(m.Config.Architectures) > 0 && m.Config.Architectures[0] == "BertModel")
+
 	for tensorAndName, err := range safetensors.IterTensorsFromRepo(backend, m.Repo) {
 		if err != nil {
 			return errors.WithMessagef(err, "failed loading variables of models %q", m.Repo.ID)
 		}
 		scopePath, varName, ok := mapTensorName(tensorAndName.Name)
 		if !ok {
+			name := strings.TrimPrefix(tensorAndName.Name, "model.")
+			if isBert && (name == "embeddings.position_ids" || strings.HasPrefix(name, "pooler.")) {
+				continue
+			}
 			fmt.Printf("Skipping unmapped tensor: %s\n", tensorAndName.Name)
 			continue
 		}
@@ -189,6 +195,70 @@ func (m *Model) estimateSizeFromIndex() {
 // GoMLX format: layer_{N}/{component}/rms_norm/scale, layer_{N}/self_attn/..., etc.
 func mapTensorName(safetensorsName string) (scopePath []string, varName string, ok bool) {
 	safetensorsName = strings.TrimPrefix(safetensorsName, "model.")
+
+	// BERT specific mappings
+	if strings.HasPrefix(safetensorsName, "embeddings.") {
+		name := strings.TrimPrefix(safetensorsName, "embeddings.")
+		switch name {
+		case "word_embeddings.weight":
+			return []string{"token_embed"}, "embeddings", true
+		case "position_embeddings.weight":
+			return []string{"pos_embed"}, "embeddings", true
+		case "token_type_embeddings.weight":
+			return []string{"token_type_embed"}, "embeddings", true
+		case "LayerNorm.weight":
+			return []string{"embed_norm", "layer_normalization"}, "gain", true
+		case "LayerNorm.bias":
+			return []string{"embed_norm", "layer_normalization"}, "offset", true
+		}
+	}
+
+	if strings.HasPrefix(safetensorsName, "encoder.layer.") {
+		parts := strings.Split(safetensorsName, ".")
+		// parts: [encoder layer {N} component ...]
+		if len(parts) >= 4 {
+			var layerNum int
+			fmt.Sscanf(parts[2], "%d", &layerNum)
+			layerScope := fmt.Sprintf("layer_%d", layerNum)
+			component := strings.Join(parts[3:], ".")
+
+			switch component {
+			case "attention.self.query.weight":
+				return []string{layerScope, "attn", "MultiHeadAttention", "query", "dense"}, "weights", true
+			case "attention.self.query.bias":
+				return []string{layerScope, "attn", "MultiHeadAttention", "query", "dense"}, "biases", true
+			case "attention.self.key.weight":
+				return []string{layerScope, "attn", "MultiHeadAttention", "key", "dense"}, "weights", true
+			case "attention.self.key.bias":
+				return []string{layerScope, "attn", "MultiHeadAttention", "key", "dense"}, "biases", true
+			case "attention.self.value.weight":
+				return []string{layerScope, "attn", "MultiHeadAttention", "value", "dense"}, "weights", true
+			case "attention.self.value.bias":
+				return []string{layerScope, "attn", "MultiHeadAttention", "value", "dense"}, "biases", true
+			case "attention.output.dense.weight":
+				return []string{layerScope, "attn", "MultiHeadAttention", "output", "dense"}, "weights", true
+			case "attention.output.dense.bias":
+				return []string{layerScope, "attn", "MultiHeadAttention", "output", "dense"}, "biases", true
+			case "attention.output.LayerNorm.weight":
+				return []string{layerScope, "norm1", "layer_normalization"}, "gain", true
+				case "attention.output.LayerNorm.bias":
+				return []string{layerScope, "norm1", "layer_normalization"}, "offset", true
+
+			case "intermediate.dense.weight":
+				return []string{layerScope, "ff1", "dense"}, "weights", true
+			case "intermediate.dense.bias":
+				return []string{layerScope, "ff1", "dense"}, "biases", true
+			case "output.dense.weight":
+				return []string{layerScope, "ff2", "dense"}, "weights", true
+			case "output.dense.bias":
+				return []string{layerScope, "ff2", "dense"}, "biases", true
+			case "output.LayerNorm.weight":
+				return []string{layerScope, "norm2", "layer_normalization"}, "gain", true
+			case "output.LayerNorm.bias":
+				return []string{layerScope, "norm2", "layer_normalization"}, "offset", true
+			}
+		}
+	}
 
 	if safetensorsName == "embed_tokens.weight" {
 		return []string{"token_embed"}, "embeddings", true
