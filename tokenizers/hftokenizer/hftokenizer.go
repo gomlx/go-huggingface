@@ -477,18 +477,30 @@ func (t *Tokenizer) applyNormalizerWithSpans(text string, n *Normalizer) (string
 				origPos += runeLen
 				continue
 			}
-			if isWhitespace(r) {
+
+			if n.HandleChineseChars && isChineseChar(r) {
 				result.WriteRune(' ')
 				offsets = append(offsets, origPos)
-			} else if n.Lowercase {
-				lower := strings.ToLower(string(r))
-				for range lower {
-					offsets = append(offsets, origPos)
-				}
-				result.WriteString(lower)
-			} else {
 				result.WriteRune(r)
 				offsets = append(offsets, origPos)
+				result.WriteRune(' ')
+				offsets = append(offsets, origPos)
+			} else if isWhitespace(r) {
+				result.WriteRune(' ')
+				offsets = append(offsets, origPos)
+			} else {
+				// Potential accent stripping and lowercasing
+				s := string(r)
+				if (n.StripAccents != nil && *n.StripAccents) || (n.StripAccents == nil && n.Lowercase) {
+					s = removeAccents(norm.NFD.String(s))
+				}
+				if n.Lowercase {
+					s = strings.ToLower(s)
+				}
+				for range s {
+					offsets = append(offsets, origPos)
+				}
+				result.WriteString(s)
 			}
 			origPos += runeLen
 		}
@@ -627,7 +639,16 @@ func (t *Tokenizer) applyNormalizer(text string, n *Normalizer) string {
 		return removeAccents(norm.NFD.String(text))
 	case "BertNormalizer":
 		// Clean text, handle Chinese chars, strip accents, lowercase
-		result := cleanText(text)
+		result := text
+		if n.CleanText {
+			result = cleanText(result)
+		}
+		if n.HandleChineseChars {
+			result = tokenizeChineseChars(result)
+		}
+		if (n.StripAccents != nil && *n.StripAccents) || (n.StripAccents == nil && n.Lowercase) {
+			result = removeAccents(norm.NFD.String(result))
+		}
 		if n.Lowercase {
 			result = strings.ToLower(result)
 		}
@@ -713,13 +734,49 @@ func (t *Tokenizer) Config() *api.Config {
 
 // Helper functions
 
+func isChineseChar(r rune) bool {
+	// CJK Unified Ideographs: 4E00-9FFF
+	// CJK Unified Ideographs Extension A: 3400-4DBF
+	// CJK Unified Ideographs Extension B: 20000-2A6DF
+	// ...
+	if (r >= 0x4E00 && r <= 0x9FFF) ||
+		(r >= 0x3400 && r <= 0x4DBF) ||
+		(r >= 0x20000 && r <= 0x2A6DF) ||
+		(r >= 0x2A700 && r <= 0x2B73F) ||
+		(r >= 0x2B740 && r <= 0x2B81F) ||
+		(r >= 0x2B820 && r <= 0x2CEAF) ||
+		(r >= 0xF900 && r <= 0xFAFF) ||
+		(r >= 0x2F800 && r <= 0x2FA1F) {
+		return true
+	}
+	return false
+}
+
+func tokenizeChineseChars(text string) string {
+	var result strings.Builder
+	for _, r := range text {
+		if isChineseChar(r) {
+			result.WriteRune(' ')
+			result.WriteRune(r)
+			result.WriteRune(' ')
+		} else {
+			result.WriteRune(r)
+		}
+	}
+	return result.String()
+}
+
 func cleanText(text string) string {
 	var result strings.Builder
 	for _, r := range text {
 		if r == 0 || r == 0xFFFD || isControl(r) {
 			continue
 		}
-		if isWhitespace(r) {
+		if isChineseChar(r) {
+			result.WriteRune(' ')
+			result.WriteRune(r)
+			result.WriteRune(' ')
+		} else if isWhitespace(r) {
 			result.WriteRune(' ')
 		} else {
 			result.WriteRune(r)

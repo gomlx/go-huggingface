@@ -125,6 +125,27 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+func TestTokenization(t *testing.T) {
+	tokenizer := must1(testModel.GetTokenizer())
+	expectedQueries := [][]int{
+		{101, 100, 100, 100, 100, 1816, 1910, 1854, 100, 1923, 100, 100, 100, 100, 100, 1919, 100, 1861, 1932, 1993, 2054, 2003, 1996, 3007, 1997, 2859, 1029, 102},
+		{101, 100, 100, 100, 100, 1816, 1910, 1854, 100, 1923, 100, 100, 100, 100, 100, 1919, 100, 1861, 1932, 1993, 4863, 8992, 102},
+	}
+
+	for i, q := range testQueries {
+		got := tokenizer.Encode(q)
+		expected := expectedQueries[i]
+		if len(got) != len(expected) {
+			t.Errorf("Query %d: expected length %d, got %d", i, len(expected), len(got))
+		}
+		for j := 0; j < len(got) && j < len(expected); j++ {
+			if got[j] != expected[j] {
+				t.Errorf("Query %d at index %d: expected %d, got %d", i, j, expected[j], got[j])
+			}
+		}
+	}
+}
+
 func TestSentenceEmbedding(t *testing.T) {
 	prompts := make([]string, 0, len(testQueries)+len(testDocs))
 	prompts = append(prompts, testQueries...)
