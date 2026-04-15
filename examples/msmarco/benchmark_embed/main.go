@@ -93,7 +93,9 @@ func main() {
 	bucketsOutputChan := make(chan bucket.Bucket, 10)
 	bkt := bucket.New(tokenizer).
 		ByTwoBitBucketBudget(*flagBucketBudget, 8).
-		WithMaxParallelization(-1)
+		WithMaxParallelization(-1).
+		WithBatchPadding(true)
+
 	wg.Go(func() {
 		bkt.Run(bucketsInputChan, bucketsOutputChan)
 	})
