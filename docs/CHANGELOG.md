@@ -1,6 +1,6 @@
 # `go-huggingface` Changelog
 
-## Next
+## v0.3.5 Added `datasets`, `tokenizers/bucket`, significant improvements on `transformer` and `safetensors`.
 
 - Added `.github` with continuous integration (CI) workflow: only for Linux/amd64 because it should work the
   same on other platforms.
