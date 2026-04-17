@@ -3,10 +3,10 @@ package transformer
 import (
 	"fmt"
 
+	"github.com/gomlx/compute/dtypes"
+	"github.com/gomlx/compute/shapes"
 	"github.com/gomlx/gomlx/backends"
-	"github.com/gomlx/gomlx/pkg/core/dtypes"
 	"github.com/gomlx/gomlx/pkg/core/graph"
-	"github.com/gomlx/gomlx/pkg/core/shapes"
 	"github.com/gomlx/gomlx/pkg/ml/context"
 	"github.com/gomlx/gomlx/pkg/support/exceptions"
 )
@@ -144,7 +144,7 @@ func (m *Model) ApplySentencePooling(hiddenStates, mask *graph.Node) *graph.Node
 		// hiddenStates: [batchSize, seqLen, hiddenSize]
 		// We take the slice [batchSize, 0, hiddenSize]
 		clsTokenEmbeddings := graph.Slice(hiddenStates, graph.AxisRange(), graph.AxisElem(0)) // [batchSize, 1, hiddenSize]
-		clsTokenEmbeddings = graph.Squeeze(clsTokenEmbeddings, 1)                            // [batchSize, hiddenSize]
+		clsTokenEmbeddings = graph.Squeeze(clsTokenEmbeddings, 1)                             // [batchSize, hiddenSize]
 		return clsTokenEmbeddings
 	}
 
