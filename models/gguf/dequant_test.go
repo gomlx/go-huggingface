@@ -13,7 +13,7 @@ import (
 // float32ToFloat16Bits converts a float32 to its IEEE 754 half-precision representation.
 // Used only in tests to construct known test vectors.
 func float32ToFloat16Bits(f float32) uint16 {
-	return float16.Fromfloat32(f).Bits()
+	return float16.FromFloat32(f).Bits()
 }
 
 func TestF16(t *testing.T) {
