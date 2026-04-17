@@ -3,8 +3,8 @@ package gguf
 import (
 	"encoding/binary"
 
+	"github.com/gomlx/compute/dtypes/float16"
 	"github.com/pkg/errors"
-	"github.com/x448/float16"
 )
 
 // dequantFunc dequantizes a single block of quantized data.

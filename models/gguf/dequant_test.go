@@ -5,9 +5,9 @@ import (
 	"math"
 	"testing"
 
+	"github.com/gomlx/compute/dtypes/float16"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/x448/float16"
 )
 
 // float32ToFloat16Bits converts a float32 to its IEEE 754 half-precision representation.
