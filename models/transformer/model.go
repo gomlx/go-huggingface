@@ -10,7 +10,7 @@ import (
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/models/safetensors"
 	"github.com/gomlx/go-huggingface/tokenizers"
-	"github.com/gomlx/gomlx/backends"
+	"github.com/gomlx/compute"
 	"github.com/gomlx/gomlx/pkg/ml/context"
 	"github.com/pkg/errors"
 )
@@ -93,7 +93,7 @@ func LoadModel(repo *hub.Repo) (*Model, error) {
 //
 // For distributed execution, better to leave backend and nil, and let the executor decide
 // on which devices to place the variables.
-func (m *Model) LoadContext(backend backends.Backend, ctx *context.Context) error {
+func (m *Model) LoadContext(backend compute.Backend, ctx *context.Context) error {
 	var totalParams int64
 	var totalBytes int64
 

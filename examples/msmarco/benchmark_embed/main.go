@@ -22,7 +22,7 @@ import (
 	"github.com/gomlx/go-huggingface/tokenizers"
 	tapi "github.com/gomlx/go-huggingface/tokenizers/api"
 	"github.com/gomlx/go-huggingface/tokenizers/bucket"
-	"github.com/gomlx/gomlx/backends"
+	"github.com/gomlx/compute"
 	_ "github.com/gomlx/gomlx/backends/default"
 	"github.com/gomlx/gomlx/pkg/core/graph"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
@@ -65,8 +65,8 @@ func main() {
 		return model.GetTokenizer()
 	})
 
-	backend := mustRunWithElapsedTime("Initializing backend", func() (backends.Backend, error) {
-		return backends.New()
+	backend := mustRunWithElapsedTime("Initializing backend", func() (compute.Backend, error) {
+		return compute.New()
 	})
 	ctx := context.New()
 

@@ -34,7 +34,7 @@ import (
 	"strings"
 
 	"github.com/gomlx/compute/support/xslices"
-	"github.com/gomlx/gomlx/backends"
+	"github.com/gomlx/compute"
 	"github.com/pkg/errors"
 )
 
@@ -223,7 +223,7 @@ func (m *Model) IterSafetensors() func(yield func(FileInfo, error) bool) {
 //
 // The tensor will be directly created on the given backend, if it is not nil.
 // Otherwise, it creates a local (on-host) tensor.
-func (m *Model) GetTensor(backend backends.Backend, tensorName string) (*TensorAndName, error) {
+func (m *Model) GetTensor(backend compute.Backend, tensorName string) (*TensorAndName, error) {
 	filename, err := m.GetTensorFilename(tensorName)
 	if err != nil {
 		return nil, err
@@ -237,7 +237,7 @@ func (m *Model) GetTensor(backend backends.Backend, tensorName string) (*TensorA
 //
 // The tensor will be directly created on the given backend, if it is not nil.
 // Otherwise, it creates a local (on-host) tensor.
-func (m *Model) GetTensorFromFile(backend backends.Backend, fileName, tensorName string) (*TensorAndName, error) {
+func (m *Model) GetTensorFromFile(backend compute.Backend, fileName, tensorName string) (*TensorAndName, error) {
 	if m.Repo == nil {
 		return nil, errors.New("repo is nil!?")
 	}
@@ -261,7 +261,7 @@ func (m *Model) GetTensorFromFile(backend backends.Backend, fileName, tensorName
 //
 // Tensors are loaded into the backend directly (e.g.: GPU, or a shared memory tensor on CPU, etc).
 // If the backend is nil, it instead loads them in host memory.
-func (m *Model) IterTensors(backend backends.Backend) func(yield func(TensorAndName, error) bool) {
+func (m *Model) IterTensors(backend compute.Backend) func(yield func(TensorAndName, error) bool) {
 	return func(yield func(TensorAndName, error) bool) {
 		if m.Repo == nil {
 			yield(TensorAndName{}, errors.New("repo is nil!?"))

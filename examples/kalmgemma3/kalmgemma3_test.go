@@ -21,7 +21,7 @@ import (
 	"github.com/gomlx/go-huggingface/models/safetensors"
 	"github.com/gomlx/go-huggingface/models/transformer"
 	"github.com/gomlx/go-huggingface/tokenizers/api"
-	"github.com/gomlx/gomlx/backends"
+	"github.com/gomlx/compute"
 	_ "github.com/gomlx/gomlx/backends/default"
 	"github.com/gomlx/gomlx/pkg/core/graph"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
@@ -38,7 +38,7 @@ var (
 )
 
 var (
-	testBackend backends.Backend
+	testBackend compute.Backend
 	testRepo    *hub.Repo
 	testCtx     *context.Context
 	testModel   *transformer.Model
@@ -69,7 +69,7 @@ func TestMain(m *testing.M) {
 	}
 
 	var err error
-	testBackend, err = backends.New()
+	testBackend, err = compute.New()
 	if err != nil {
 		fmt.Printf("Failed to initialize backend: %v\n", err)
 		os.Exit(1)

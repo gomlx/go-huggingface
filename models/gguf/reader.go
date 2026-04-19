@@ -6,7 +6,7 @@ import (
 	"unsafe"
 
 	"github.com/gomlx/compute/shapes"
-	"github.com/gomlx/gomlx/backends"
+	"github.com/gomlx/compute"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/pkg/errors"
 )
@@ -34,7 +34,7 @@ func (r *Reader) Close() error {
 // ReadTensor reads a tensor by name:
 // native types (F32, F16, BF16, I8, etc.) are loaded directly;
 // GGUF quantized types are dequantized to Float32.
-func (r *Reader) ReadTensor(backend backends.Backend, tensorName string) (*tensors.Tensor, error) {
+func (r *Reader) ReadTensor(backend compute.Backend, tensorName string) (*tensors.Tensor, error) {
 	info, ok := r.gguf.GetTensorInfo(tensorName)
 	if !ok {
 		return nil, errors.Errorf("gguf: tensor %q not found", tensorName)

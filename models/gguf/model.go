@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	"github.com/gomlx/go-huggingface/hub"
-	"github.com/gomlx/gomlx/backends"
+	"github.com/gomlx/compute"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/pkg/errors"
 )
@@ -133,7 +133,7 @@ func (m *Model) Architecture() string {
 }
 
 // GetTensor loads a single tensor by name, dequantizing if needed.
-func (m *Model) GetTensor(backend backends.Backend, tensorName string) (*TensorAndName, error) {
+func (m *Model) GetTensor(backend compute.Backend, tensorName string) (*TensorAndName, error) {
 	if m.File == nil {
 		return nil, errors.Errorf("gguf: model not loaded, call Load() first")
 	}
@@ -155,7 +155,7 @@ func (m *Model) GetTensor(backend backends.Backend, tensorName string) (*TensorA
 //
 // Tensors are loaded into the backend directly (e.g.: GPU, or a shared memory tensor on CPU, etc).
 // If the backend is nil, it instead loads them in host memory.
-func (m *Model) IterTensors(backend backends.Backend) func(yield func(TensorAndName, error) bool) {
+func (m *Model) IterTensors(backend compute.Backend) func(yield func(TensorAndName, error) bool) {
 	return func(yield func(TensorAndName, error) bool) {
 		if m.File == nil {
 			yield(TensorAndName{}, errors.Errorf("gguf: model not loaded, call Load() first"))
@@ -186,7 +186,7 @@ func (m *Model) IterTensors(backend backends.Backend) func(yield func(TensorAndN
 //
 // Tensors are loaded into the backend directly (e.g.: GPU, or a shared memory tensor on CPU, etc).
 // If the backend is nil, it instead loads them in host memory.
-func IterTensorsFromRepo(backend backends.Backend, repo *hub.Repo) func(yield func(TensorAndName, error) bool) {
+func IterTensorsFromRepo(backend compute.Backend, repo *hub.Repo) func(yield func(TensorAndName, error) bool) {
 	return func(yield func(TensorAndName, error) bool) {
 		m, err := New(repo)
 		if err != nil {
