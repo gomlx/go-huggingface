@@ -33,8 +33,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/gomlx/compute/support/xslices"
 	"github.com/gomlx/compute"
+	"github.com/gomlx/compute/support/xslices"
 	"github.com/pkg/errors"
 )
 

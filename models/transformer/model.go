@@ -6,11 +6,11 @@ import (
 	"os"
 	"strings"
 
+	"github.com/gomlx/compute"
 	"github.com/gomlx/compute/support/xslices"
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/models/safetensors"
 	"github.com/gomlx/go-huggingface/tokenizers"
-	"github.com/gomlx/compute"
 	"github.com/gomlx/gomlx/pkg/ml/context"
 	"github.com/pkg/errors"
 )

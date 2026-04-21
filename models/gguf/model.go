@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/compute"
+	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/pkg/errors"
 )

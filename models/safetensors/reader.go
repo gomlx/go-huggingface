@@ -6,8 +6,8 @@ import (
 	"sync"
 
 	"github.com/edsrzf/mmap-go"
-	"github.com/gomlx/compute/shapes"
 	"github.com/gomlx/compute"
+	"github.com/gomlx/compute/shapes"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/pkg/errors"
 )
