@@ -14,6 +14,7 @@ import (
 	"github.com/gomlx/compute"
 	"github.com/gomlx/compute/dtypes"
 	"github.com/gomlx/compute/shapes"
+	"github.com/gomlx/compute/support/humanize"
 	"github.com/gomlx/go-huggingface/datasets"
 	bge "github.com/gomlx/go-huggingface/examples/BAAI-bge-small-en-v1.5"
 	"github.com/gomlx/go-huggingface/examples/kalmgemma3"
@@ -27,7 +28,6 @@ import (
 	"github.com/gomlx/gomlx/pkg/core/graph"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/gomlx/gomlx/pkg/ml/context"
-	"github.com/gomlx/gomlx/pkg/support/humanize"
 	"k8s.io/klog/v2"
 )
 

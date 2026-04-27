@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gomlx/compute/support/humanize"
 	"github.com/gomlx/go-huggingface/hub"
-	"github.com/gomlx/gomlx/pkg/support/humanize"
 )
 
 // Dataset from which one wants to download files or get info.
