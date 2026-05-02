@@ -31,7 +31,7 @@ import (
 	"math"
 	"slices"
 
-	"github.com/gomlx/gomlx/pkg/core/dtypes"
+	"github.com/gomlx/compute/dtypes"
 )
 
 // TensorType represents the data type or quantization format of a tensor in a GGUF file.

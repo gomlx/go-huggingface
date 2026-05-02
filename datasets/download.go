@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dustin/go-humanize"
+	"github.com/gomlx/compute/support/humanize"
 	"github.com/gomlx/go-huggingface/internal/files"
 	"github.com/pkg/errors"
 )

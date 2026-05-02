@@ -5,15 +5,15 @@ import (
 	"math"
 	"testing"
 
+	"github.com/gomlx/compute/dtypes/float16"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/x448/float16"
 )
 
 // float32ToFloat16Bits converts a float32 to its IEEE 754 half-precision representation.
 // Used only in tests to construct known test vectors.
 func float32ToFloat16Bits(f float32) uint16 {
-	return float16.Fromfloat32(f).Bits()
+	return float16.FromFloat32(f).Bits()
 }
 
 func TestF16(t *testing.T) {

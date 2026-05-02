@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/edsrzf/mmap-go"
+	"github.com/gomlx/compute"
+	"github.com/gomlx/compute/shapes"
 	"github.com/gomlx/go-huggingface/hub"
-	"github.com/gomlx/gomlx/backends"
-	"github.com/gomlx/gomlx/pkg/core/shapes"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -59,7 +59,7 @@ type iterTensorData struct {
 //
 // This is a more performant version of `Model.IterTensors` that avoids the overhead of creating a `Model` struct and
 // parallelizes allocations and copying around.
-func IterTensorsFromRepo(backend backends.Backend, repo *hub.Repo) func(yield func(TensorAndName, error) bool) {
+func IterTensorsFromRepo(backend compute.Backend, repo *hub.Repo) func(yield func(TensorAndName, error) bool) {
 	return func(yield func(TensorAndName, error) bool) {
 		done := make(chan struct{})
 		var wg sync.WaitGroup
@@ -95,7 +95,7 @@ func IterTensorsFromRepo(backend backends.Backend, repo *hub.Repo) func(yield fu
 	}
 }
 
-func iterFromRepoDownload(backend backends.Backend, repo *hub.Repo, done <-chan struct{}, chDevice chan<- iterTensorData, openFiles *[]*fileRef, filesMu *sync.Mutex) {
+func iterFromRepoDownload(backend compute.Backend, repo *hub.Repo, done <-chan struct{}, chDevice chan<- iterTensorData, openFiles *[]*fileRef, filesMu *sync.Mutex) {
 	start := time.Now()
 	var waitTime time.Duration
 	if klog.V(1).Enabled() {
@@ -210,7 +210,7 @@ func iterFromRepoDownload(backend backends.Backend, repo *hub.Repo, done <-chan 
 
 var MaxParallelBufferTransfers = 4
 
-func iterFromRepoToDevice(backend backends.Backend, done <-chan struct{}, chDevice <-chan iterTensorData, chOut chan<- iterTensorData) {
+func iterFromRepoToDevice(backend compute.Backend, done <-chan struct{}, chDevice <-chan iterTensorData, chOut chan<- iterTensorData) {
 	defer close(chOut)
 	start := time.Now()
 	var totalWaitTime atomic.Int64

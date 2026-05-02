@@ -2,8 +2,8 @@ package hftokenizer
 
 import (
 	"encoding/json"
-	"regexp"
 	"github.com/gomlx/go-huggingface/tokenizers/api"
+	"regexp"
 )
 
 // TokenizerJSON represents the structure of HuggingFace's tokenizer.json file.

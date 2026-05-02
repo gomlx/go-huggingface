@@ -6,12 +6,12 @@ import (
 	"os"
 	"strings"
 
+	"github.com/gomlx/compute"
+	"github.com/gomlx/compute/support/xslices"
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/models/safetensors"
 	"github.com/gomlx/go-huggingface/tokenizers"
-	"github.com/gomlx/gomlx/backends"
 	"github.com/gomlx/gomlx/pkg/ml/context"
-	"github.com/gomlx/gomlx/pkg/support/xslices"
 	"github.com/pkg/errors"
 )
 
@@ -93,7 +93,7 @@ func LoadModel(repo *hub.Repo) (*Model, error) {
 //
 // For distributed execution, better to leave backend and nil, and let the executor decide
 // on which devices to place the variables.
-func (m *Model) LoadContext(backend backends.Backend, ctx *context.Context) error {
+func (m *Model) LoadContext(backend compute.Backend, ctx *context.Context) error {
 	var totalParams int64
 	var totalBytes int64
 
@@ -241,7 +241,7 @@ func mapTensorName(safetensorsName string) (scopePath []string, varName string, 
 				return []string{layerScope, "attn", "MultiHeadAttention", "output", "dense"}, "biases", true
 			case "attention.output.LayerNorm.weight":
 				return []string{layerScope, "norm1", "layer_normalization"}, "gain", true
-				case "attention.output.LayerNorm.bias":
+			case "attention.output.LayerNorm.bias":
 				return []string{layerScope, "norm1", "layer_normalization"}, "offset", true
 
 			case "intermediate.dense.weight":

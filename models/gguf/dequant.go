@@ -3,8 +3,8 @@ package gguf
 import (
 	"encoding/binary"
 
+	"github.com/gomlx/compute/dtypes/float16"
 	"github.com/pkg/errors"
-	"github.com/x448/float16"
 )
 
 // dequantFunc dequantizes a single block of quantized data.
@@ -44,7 +44,7 @@ func getDequantFunc(t TensorType) (dequantFunc, error) {
 // f16 reads a little-endian IEEE 754 half-precision float from a 2-byte slice
 // and returns it as float32. Used throughout dequant functions for scale/min reads.
 func f16(src []byte) float32 {
-	return float16.Frombits(binary.LittleEndian.Uint16(src)).Float32()
+	return float16.FromBits(binary.LittleEndian.Uint16(src)).Float32()
 }
 
 // dequantQ8_0 dequantizes a Q8_0 block (34 bytes → 32 float32 values).

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/gomlx/compute/dtypes"
+	"github.com/gomlx/compute/shapes"
 	"github.com/gomlx/go-huggingface/hub"
-	"github.com/gomlx/gomlx/pkg/core/dtypes"
-	"github.com/gomlx/gomlx/pkg/core/shapes"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

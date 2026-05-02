@@ -13,19 +13,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gomlx/compute"
+	"github.com/gomlx/compute/dtypes"
+	"github.com/gomlx/compute/shapes"
+	"github.com/gomlx/compute/support/xslices"
 	"github.com/gomlx/go-huggingface/hub"
 	hftesting "github.com/gomlx/go-huggingface/internal/testing"
 	"github.com/gomlx/go-huggingface/models/safetensors"
 	"github.com/gomlx/go-huggingface/models/transformer"
 	"github.com/gomlx/go-huggingface/tokenizers/api"
-	"github.com/gomlx/gomlx/backends"
 	_ "github.com/gomlx/gomlx/backends/default"
-	"github.com/gomlx/gomlx/pkg/core/dtypes"
 	"github.com/gomlx/gomlx/pkg/core/graph"
-	"github.com/gomlx/gomlx/pkg/core/shapes"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/gomlx/gomlx/pkg/ml/context"
-	"github.com/gomlx/gomlx/pkg/support/xslices"
 	"github.com/stretchr/testify/require"
 	"k8s.io/klog/v2"
 )
@@ -38,7 +38,7 @@ var (
 )
 
 var (
-	testBackend backends.Backend
+	testBackend compute.Backend
 	testRepo    *hub.Repo
 	testCtx     *context.Context
 	testModel   *transformer.Model
@@ -69,7 +69,7 @@ func TestMain(m *testing.M) {
 	}
 
 	var err error
-	testBackend, err = backends.New()
+	testBackend, err = compute.New()
 	if err != nil {
 		fmt.Printf("Failed to initialize backend: %v\n", err)
 		os.Exit(1)

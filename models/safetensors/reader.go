@@ -6,8 +6,8 @@ import (
 	"sync"
 
 	"github.com/edsrzf/mmap-go"
-	"github.com/gomlx/gomlx/backends"
-	"github.com/gomlx/gomlx/pkg/core/shapes"
+	"github.com/gomlx/compute"
+	"github.com/gomlx/compute/shapes"
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	"github.com/pkg/errors"
 )
@@ -75,7 +75,7 @@ func (sr *TensorReader) Close() error {
 }
 
 // ReadTensor reads a tensor by name from the file.
-func (mr *TensorReader) ReadTensor(backend backends.Backend, tensorName string) (*tensors.Tensor, error) {
+func (mr *TensorReader) ReadTensor(backend compute.Backend, tensorName string) (*tensors.Tensor, error) {
 	meta, ok := mr.Header.Tensors[tensorName]
 	if !ok {
 		return nil, errors.Errorf("tensor %s not found", tensorName)
@@ -113,7 +113,7 @@ func (mr *TensorReader) ReadTensor(backend backends.Backend, tensorName string) 
 // IterTensors reads multiple tensors from the file, yielding them one by one.
 // It uses a 2-stage pipeline (parse, upload to device) so that while a tensor
 // is being parsed, the previous one is being moved to device in parallel.
-func (mr *TensorReader) IterTensors(backend backends.Backend, tensorNames []string) iter.Seq2[TensorAndName, error] {
+func (mr *TensorReader) IterTensors(backend compute.Backend, tensorNames []string) iter.Seq2[TensorAndName, error] {
 	return func(yield func(TensorAndName, error) bool) {
 		done := make(chan struct{})
 		var wg sync.WaitGroup

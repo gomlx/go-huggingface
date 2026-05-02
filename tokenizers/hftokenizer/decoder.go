@@ -1,11 +1,11 @@
 package hftokenizer
 
 import (
-	"regexp"
-	"strings"
 	"fmt"
 	"github.com/pkg/errors"
+	"regexp"
 	"sort"
+	"strings"
 )
 
 func compileDecoderRegex(decoder *Decoder) error {
