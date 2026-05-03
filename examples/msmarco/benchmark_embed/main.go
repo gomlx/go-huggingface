@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"math/bits"
+	"net/http"
+	_ "net/http/pprof"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -41,6 +43,9 @@ var (
 			"The buckets use the 'two-bits' algorithm to minimize padding -- e.g.: sizes 8, 12, 16, 24, 32, 48, etc.")
 	flagParallelEmbedders = flag.Int("num_embedders", 1, "Number of parallel embedders. "+
 		"The optimal value depends on the backend and the bucket size (-bucket), for GPUs usually 1 or 2 is enough.")
+	flagProfile = flag.Bool("profile", false, "Enable profiling.")
+	flagWarmup  = flag.Bool("warmup", false, "Do a warmup run over the dataset first, compiling the execution graph for each new batch shape encountered.")
+	flagShapes  = flag.Bool("shapes", false, "Report the shapes of the batches encountered during the warmup run.")
 )
 
 func MapHas[K comparable, V any](m map[K]V, k K) bool {
@@ -51,6 +56,13 @@ func MapHas[K comparable, V any](m map[K]V, k K) bool {
 func main() {
 	klog.InitFlags(nil)
 	flag.Parse()
+
+	if *flagProfile {
+		go func() {
+			klog.Info("Starting pprof server on :6060")
+			klog.Fatal(http.ListenAndServe("localhost:6060", nil))
+		}()
+	}
 
 	repo := hub.New(*flagModel)
 	if err := repo.DownloadInfo(false); err != nil {
@@ -86,21 +98,6 @@ func main() {
 		return graph.ConvertDType(x, dtypes.Float32)
 	})
 
-	// Structured concurrency (keep track of goroutines).
-	var wg sync.WaitGroup
-
-	// Start bucket runner in a separate goroutine.
-	bucketsInputChan := make(chan bucket.SentenceRef, 5)
-	bucketsOutputChan := make(chan bucket.Bucket, 10)
-	bkt := bucket.New(tokenizer).
-		ByTwoBitBucketBudget(*flagBucketBudget, 8).
-		WithMaxParallelization(-1).
-		WithBatchPadding(true)
-
-	wg.Go(func() {
-		bkt.Run(bucketsInputChan, bucketsOutputChan)
-	})
-
 	// Dataset preparation and stats.
 	ds := datasets.New(msmarco.ID)
 	limit := *flagLimit
@@ -117,6 +114,35 @@ func main() {
 	if limit > 0 {
 		limit = min(limit, int(totalQueries))
 	}
+
+	if *flagWarmup {
+		fmt.Printf("\n--- Warmup Run ---\n")
+		runBenchmark(backend, tokenizer, embedExec, ds, limit, int(totalQueries), true)
+	}
+
+	fmt.Printf("\n--- Benchmark Run ---\n")
+	runBenchmark(backend, tokenizer, embedExec, ds, limit, int(totalQueries), false)
+}
+
+type shapeKey struct {
+	batchSize, seqLen int
+}
+
+func runBenchmark(backend compute.Backend, tokenizer tokenizers.Tokenizer, embedExec *context.Exec, ds *datasets.Dataset, limit, totalQueries int, isWarmup bool) {
+	// Structured concurrency (keep track of goroutines).
+	var wg sync.WaitGroup
+
+	// Start bucket runner in a separate goroutine.
+	bucketsInputChan := make(chan bucket.SentenceRef, 5)
+	bucketsOutputChan := make(chan bucket.Bucket, 10)
+	bkt := bucket.New(tokenizer).
+		ByTwoBitBucketBudget(*flagBucketBudget, 8).
+		WithMaxParallelization(-1).
+		WithBatchPadding(true)
+
+	wg.Go(func() {
+		bkt.Run(bucketsInputChan, bucketsOutputChan)
+	})
 
 	var numSentencesRead int32
 
@@ -159,7 +185,7 @@ func main() {
 	var numSentencesProcessed int
 	expectedNumQueries := limit
 	if expectedNumQueries <= 0 {
-		expectedNumQueries = int(totalQueries)
+		expectedNumQueries = totalQueries
 	}
 	var emaSpeed float64
 	var emaInitialized bool
@@ -208,6 +234,7 @@ func main() {
 			humanize.Speed(speed, "tokens"), humanize.EraseToEndOfLine)
 	})
 
+	var seenShapes sync.Map
 	var embeddersWg sync.WaitGroup
 	for i := 0; i < *flagParallelEmbedders; i++ {
 		embeddersWg.Go(func() {
@@ -220,6 +247,24 @@ func main() {
 
 				batchSize := bk.Shape.BatchSize
 				seqLen := bk.Shape.SentenceLength
+
+				if isWarmup {
+					key := shapeKey{batchSize, seqLen}
+					if _, loaded := seenShapes.LoadOrStore(key, true); loaded {
+						// Already seen, discard batch
+						count := 0
+						for _, ref := range bk.References {
+							if ref != nil {
+								count++
+							}
+						}
+						numSentencesProcessedChan <- count
+						continue
+					}
+					if *flagShapes {
+						fmt.Printf("\n  - Shape [%d, %d], %d total tokens\n", batchSize, seqLen, len(bk.Batch))
+					}
+				}
 
 				rawData := dtypes.UnsafeByteSlice(bk.Batch)
 				var dtype dtypes.DType
@@ -295,6 +340,11 @@ func main() {
 		humanize.Speed(float64(numTokensProcessed)/elapsed.Seconds(), "tokens"),
 		humanize.Speed(float64(numNonPadTokensProcessed)/elapsed.Seconds(), "tokens"),
 	}
+	if isWarmup {
+		names = append(names, "Unique Shapes")
+		totals = append(totals, humanize.Count(mapLen(&seenShapes)))
+		speeds = append(speeds, "N/A")
+	}
 	baseStyle := lipgloss.NewStyle().Padding(0, 1)
 	t := table.New().
 		Border(lipgloss.NormalBorder()).
@@ -329,4 +379,13 @@ func mustRunWithElapsedTime[T any](name string, f func() (T, error)) T {
 	}
 	fmt.Printf("done (%s)\n", humanize.Duration(time.Since(start)))
 	return ret
+}
+
+func mapLen(m *sync.Map) int {
+	length := 0
+	m.Range(func(_, _ any) bool {
+		length++
+		return true
+	})
+	return length
 }
