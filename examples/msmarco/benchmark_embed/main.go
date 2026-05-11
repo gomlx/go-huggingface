@@ -6,6 +6,8 @@ import (
 	"math/bits"
 	"net/http"
 	_ "net/http/pprof"
+	"os"
+	"runtime/pprof"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,6 +46,7 @@ var (
 	flagParallelEmbedders = flag.Int("num_embedders", 1, "Number of parallel embedders. "+
 		"The optimal value depends on the backend and the bucket size (-bucket), for GPUs usually 1 or 2 is enough.")
 	flagProfile = flag.Bool("profile", false, "Enable profiling.")
+	flagCPUProf = flag.String("cpuprof", "", "Write CPU profile to file.")
 	flagWarmup  = flag.Bool("warmup", false, "Do a warmup run over the dataset first, compiling the execution graph for each new batch shape encountered.")
 	flagShapes  = flag.Bool("shapes", false, "Report the shapes of the batches encountered during the warmup run.")
 )
@@ -56,6 +59,18 @@ func MapHas[K comparable, V any](m map[K]V, k K) bool {
 func main() {
 	klog.InitFlags(nil)
 	flag.Parse()
+
+	if *flagCPUProf != "" {
+		f, err := os.Create(*flagCPUProf)
+		if err != nil {
+			klog.Fatalf("Could not create CPU profile: %v", err)
+		}
+		defer f.Close()
+		if err := pprof.StartCPUProfile(f); err != nil {
+			klog.Fatalf("Could not start CPU profile: %v", err)
+		}
+		defer pprof.StopCPUProfile()
+	}
 
 	if *flagProfile {
 		go func() {
