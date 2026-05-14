@@ -3,8 +3,8 @@ package transformer
 import (
 	"strings"
 
-	. "github.com/gomlx/gomlx/pkg/core/graph"
-	"github.com/gomlx/gomlx/pkg/support/exceptions"
+	. "github.com/gomlx/gomlx/core/graph"
+	"github.com/gomlx/gomlx/support/exceptions"
 )
 
 // Similiarity across all queries and documents, based on the model similarity configuration.
