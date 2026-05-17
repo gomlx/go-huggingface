@@ -5,7 +5,7 @@ import (
 
 	"github.com/gomlx/compute/dtypes"
 	"github.com/gomlx/gomlx/core/graph"
-	"github.com/gomlx/gomlx/pkg/ml/context"
+	"github.com/gomlx/gomlx/ml/model"
 	"github.com/gomlx/gomlx/pkg/ml/layers"
 	"github.com/gomlx/gomlx/pkg/ml/layers/activations"
 	"github.com/gomlx/gomlx/pkg/ml/layers/attention/pos"
@@ -34,7 +34,7 @@ func (m *Model) WithCausalMask(useCausalMask bool) *Model {
 // If the model was trained as an embedding model (e.g. sentence-transformers), it will return the sentence embeddings,
 // usually as [batchSize, embedSize].
 // Otherwise, it will return the final hidden states of all layers, usually as [batchSize, seqLen, hiddenSize].
-func (m *Model) ForwardGraph(ctx *context.Context, tokens, mask *graph.Node) *graph.Node {
+func (m *Model) ForwardGraph(ctx *model.Context, tokens, mask *graph.Node) *graph.Node {
 	if len(m.Modules) > 0 || m.PoolingConfig != nil {
 		return m.SentenceEmbeddingGraph(ctx, tokens, mask)
 	}
@@ -50,7 +50,7 @@ func (m *Model) ForwardGraph(ctx *context.Context, tokens, mask *graph.Node) *gr
 // But you can use it for something custom.
 //
 // It takes the context ctx with the loaded variables.
-func (m *Model) CreateGoMLXModel(ctx *context.Context) *mltransformer.Model {
+func (m *Model) CreateGoMLXModel(ctx *model.Context) *mltransformer.Model {
 	headDim := m.Config.HeadDim
 	if headDim == 0 && m.Config.NumAttentionHeads > 0 {
 		headDim = m.Config.HiddenSize / m.Config.NumAttentionHeads
@@ -164,7 +164,7 @@ func (m *Model) CreateGoMLXModel(ctx *context.Context) *mltransformer.Model {
 //   - allLayers: the input to the first layer and the output of each layer.
 //     It follows the HuggingFace convention, where the allLayers[0] is the input to the first attention layer,
 //     and the following nodes in allLayers are the outputs of all NumHiddenLayers attention layers.
-func (m *Model) AllLayers(ctx *context.Context, tokens, mask *graph.Node) (lastLayer *graph.Node, allLayers []*graph.Node) {
+func (m *Model) AllLayers(ctx *model.Context, tokens, mask *graph.Node) (lastLayer *graph.Node, allLayers []*graph.Node) {
 	// Sanity checking.
 	if tokens.Rank() == 1 {
 		// Add batch dimension if not present.

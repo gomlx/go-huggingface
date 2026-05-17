@@ -22,7 +22,7 @@ func TestDatasetInfo(t *testing.T) {
 
 	info, err := ds.Info()
 	require.NoError(t, err)
-	err = ds.DownloadParquetFilesInfo(context.Background(), false)
+	err = ds.DownloadParquetFilesInfo(model.Background(), false)
 	require.NoError(t, err)
 
 	require.NotNil(t, info, "Dataset info should not be nil")

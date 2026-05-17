@@ -147,7 +147,7 @@ func (c *ConfigInfo) String() string {
 // Try DownloadDatasetInfo to get an error.
 func (d *Dataset) Info() (*Info, error) {
 	if d.info == nil {
-		err := d.DownloadDatasetInfo(context.Background(), false)
+		err := d.DownloadDatasetInfo(model.Background(), false)
 		if err != nil {
 			return nil, errors.WithMessagef(err, "failed to download info for dataset %q", d.ID)
 		}
@@ -164,7 +164,7 @@ func (d *Dataset) datasetServerURL() string {
 // DownloadDatasetInfo downloads the dataset info using the datasets-server.
 //
 // If forceDownload is set to true, it ignores the cached one.
-func (d *Dataset) DownloadDatasetInfo(ctx context.Context, forceDownload bool) error {
+func (d *Dataset) DownloadDatasetInfo(ctx model.Context, forceDownload bool) error {
 	if d.info != nil && !forceDownload {
 		return nil
 	}
@@ -208,7 +208,7 @@ func (d *Dataset) datasetServerParquetURL() string {
 // If it hasn't been downloaded or loaded from the cache yet, it loads it first.
 func (d *Dataset) GetParquetFiles() ([]ParquetFile, error) {
 	if d.Files == nil {
-		err := d.DownloadParquetFilesInfo(context.Background(), false)
+		err := d.DownloadParquetFilesInfo(model.Background(), false)
 		if err != nil {
 			return nil, errors.WithMessagef(err, "failed to download parquet files info for dataset %q", d.ID)
 		}
@@ -219,7 +219,7 @@ func (d *Dataset) GetParquetFiles() ([]ParquetFile, error) {
 // DownloadParquetFilesInfo downloads the parquet info using the datasets-server.
 //
 // If forceDownload is set to true, it ignores the cached one.
-func (d *Dataset) DownloadParquetFilesInfo(ctx context.Context, forceDownload bool) error {
+func (d *Dataset) DownloadParquetFilesInfo(ctx model.Context, forceDownload bool) error {
 	if d.Files != nil && !forceDownload {
 		return nil
 	}

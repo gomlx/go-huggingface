@@ -17,7 +17,7 @@ import (
 // It downloads the file to filePath+".tmp" and then atomically move it to filePath.
 //
 // It uses a temporary filePath+".lock" to coordinate multiple processes/programs trying to download the same file at the same time.
-func (m *Manager) LockedDownload(ctx context.Context, url, filePath string, forceDownload bool, progressCallback ProgressCallback) error {
+func (m *Manager) LockedDownload(ctx model.Context, url, filePath string, forceDownload bool, progressCallback ProgressCallback) error {
 	if files.Exists(filePath) {
 		if !forceDownload {
 			return nil

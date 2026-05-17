@@ -59,7 +59,7 @@ func main() {
 			}
 			sort.Strings(configs)
 			fmt.Printf("Multiple configs available: \"%s\"\n", strings.Join(configs, "\", \""))
-			err = ds.DownloadParquetFilesInfo(context.Background(), false)
+			err = ds.DownloadParquetFilesInfo(model.Background(), false)
 			if err != nil {
 				klog.Fatalf("Failed to download parquet files info: %+v", err)
 			}

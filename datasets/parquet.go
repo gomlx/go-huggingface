@@ -67,7 +67,7 @@ func CreateParquetReader[T any](ds *Dataset, config, split string) (*parquet.Gen
 	if err != nil {
 		return nil, errors.WithMessage(err, "failed to get parquet files info for dataset")
 	}
-	downloadedPaths, err := ds.DownloadCtx(context.Background(), filesSelection...)
+	downloadedPaths, err := ds.DownloadCtx(model.Background(), filesSelection...)
 	if err != nil {
 		return nil, errors.WithMessage(err, "failed to download parquet files for dataset")
 	}
@@ -114,7 +114,7 @@ func IterParquetFromDataset[T any](ds *Dataset, config, split string) iter.Seq2[
 			yield(zero, errors.WithMessage(err, "failed to get parquet files info for dataset"))
 			return
 		}
-		downloadedPaths, err := ds.DownloadCtx(context.Background(), filesSelection...)
+		downloadedPaths, err := ds.DownloadCtx(model.Background(), filesSelection...)
 		if err != nil {
 			var zero T
 			yield(zero, errors.WithMessage(err, "failed to download parquet files for dataset"))

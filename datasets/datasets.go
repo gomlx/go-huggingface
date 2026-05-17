@@ -71,7 +71,7 @@ func (d *Dataset) String() string {
 	var buf bytes.Buffer
 	buf.WriteString(fmt.Sprintf("Dataset ID: %s\n", d.ID))
 
-	err = d.DownloadParquetFilesInfo(context.Background(), false)
+	err = d.DownloadParquetFilesInfo(model.Background(), false)
 	if err != nil {
 		buf.WriteString(fmt.Sprintf(" - Failed to retrieve parquet files info: %+v", err))
 	}

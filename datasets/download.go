@@ -34,11 +34,11 @@ func (d *Dataset) ListFiles(config, split string) ([]ParquetFile, error) {
 // Download downloads the given parquet files.
 // It returns the list of absolute paths where the files were downloaded.
 func (d *Dataset) Download(files ...ParquetFile) ([]string, error) {
-	return d.DownloadCtx(context.Background(), files...)
+	return d.DownloadCtx(model.Background(), files...)
 }
 
 // DownloadCtx is like Download but accepts a context for cancellation support.
-func (d *Dataset) DownloadCtx(ctx context.Context, parquetFiles ...ParquetFile) (downloadedPaths []string, err error) {
+func (d *Dataset) DownloadCtx(ctx model.Context, parquetFiles ...ParquetFile) (downloadedPaths []string, err error) {
 	if len(parquetFiles) == 0 {
 		return nil, nil
 	}
@@ -50,7 +50,7 @@ func (d *Dataset) DownloadCtx(ctx context.Context, parquetFiles ...ParquetFile) 
 		return nil, err
 	}
 
-	ctx, cancelFn := context.WithCancel(ctx)
+	ctx, cancelFn := model.WithCancel(ctx)
 	defer cancelFn()
 
 	downloadedPaths = make([]string, len(parquetFiles))

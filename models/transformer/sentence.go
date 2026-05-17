@@ -7,7 +7,7 @@ import (
 	"github.com/gomlx/compute/dtypes"
 	"github.com/gomlx/compute/shapes"
 	"github.com/gomlx/gomlx/core/graph"
-	"github.com/gomlx/gomlx/pkg/ml/context"
+	"github.com/gomlx/gomlx/ml/model"
 	"github.com/gomlx/gomlx/support/exceptions"
 )
 
@@ -20,7 +20,7 @@ import (
 //     in which case no mask is used and it's assumed all elements of the sentence are used.
 //
 // It returns the final pooled embedding (usually [batchSize, embedSize]) for the sentence.
-func (m *Model) SentenceEmbeddingGraph(ctx *context.Context, tokens, mask *graph.Node) *graph.Node {
+func (m *Model) SentenceEmbeddingGraph(ctx *model.Context, tokens, mask *graph.Node) *graph.Node {
 	var x *graph.Node
 	// Add a batch axis if not present.
 	if tokens.Rank() == 1 {
@@ -82,8 +82,8 @@ func (m *Model) SentenceEmbeddingGraph(ctx *context.Context, tokens, mask *graph
 
 // SingleSentenceEmbeddingExec returns a context.Exec that can be used to compute sentence embeddings.
 // No padding, not bucketing, the exec takes as input a single sentence [seqLen] and returns the embedding [embedDim].
-func (m *Model) SingleSentenceEmbeddingExec(backend compute.Backend, ctx *context.Context) (*context.Exec, error) {
-	return context.NewExec(backend, ctx, func(ctx *context.Context, tokens *graph.Node) *graph.Node {
+func (m *Model) SingleSentenceEmbeddingExec(backend compute.Backend, ctx *model.Context) (*model.Exec, error) {
+	return model.NewExec(backend, ctx, func(ctx *model.Context, tokens *graph.Node) *graph.Node {
 		output := graph.ConvertDType(m.SentenceEmbeddingGraph(ctx, tokens, nil), dtypes.Float32)
 		if output.Rank() == 2 && output.Shape().Dimensions[0] == 1 {
 			// Remove the batch dimension, since we are expecting a single sentence.

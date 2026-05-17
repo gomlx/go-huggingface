@@ -104,11 +104,11 @@ func cleanRelativeFilePath(repoFileName string) string {
 // The returned downloadPaths can be read, but shouldn't be modified, since there may be other programs using the same
 // files.
 func (r *Repo) DownloadFiles(repoFiles ...string) (downloadedPaths []string, err error) {
-	return r.DownloadFilesCtx(context.Background(), repoFiles...)
+	return r.DownloadFilesCtx(model.Background(), repoFiles...)
 }
 
 // DownloadFilesCtx is like DownloadFiles but accepts a context for cancellation support.
-func (r *Repo) DownloadFilesCtx(ctx context.Context, repoFiles ...string) (downloadedPaths []string, err error) {
+func (r *Repo) DownloadFilesCtx(ctx model.Context, repoFiles ...string) (downloadedPaths []string, err error) {
 	if len(repoFiles) == 0 {
 		return nil, nil
 	}
@@ -133,7 +133,7 @@ func (r *Repo) DownloadFilesCtx(ctx context.Context, repoFiles ...string) (downl
 	// Create context to stop any downloading of files if any error occur.
 	// The deferred cancel both cleans up the context, and also stops any pending/ongoing
 	// transfer that may be happening if an error occurs and the function exits.
-	ctx, cancelFn := context.WithCancel(ctx)
+	ctx, cancelFn := model.WithCancel(ctx)
 	defer cancelFn()
 
 	// Store results.
@@ -279,11 +279,11 @@ func (r *Repo) DownloadFilesCtx(ctx context.Context, repoFiles ...string) (downl
 
 // DownloadFile is a shortcut to DownloadFiles with only one file.
 func (r *Repo) DownloadFile(file string) (downloadedPath string, err error) {
-	return r.DownloadFileCtx(context.Background(), file)
+	return r.DownloadFileCtx(model.Background(), file)
 }
 
 // DownloadFileCtx is like DownloadFile but accepts a context for cancellation support.
-func (r *Repo) DownloadFileCtx(ctx context.Context, file string) (downloadedPath string, err error) {
+func (r *Repo) DownloadFileCtx(ctx model.Context, file string) (downloadedPath string, err error) {
 	res, err := r.DownloadFilesCtx(ctx, file)
 	if err != nil {
 		return "", err

@@ -25,7 +25,7 @@ import (
 	_ "github.com/gomlx/gomlx/backends/default"
 	"github.com/gomlx/gomlx/core/graph"
 	"github.com/gomlx/gomlx/core/tensors"
-	"github.com/gomlx/gomlx/pkg/ml/context"
+	"github.com/gomlx/gomlx/ml/model"
 	"github.com/stretchr/testify/require"
 	"k8s.io/klog/v2"
 )
@@ -40,7 +40,7 @@ var (
 var (
 	testBackend compute.Backend
 	testRepo    *hub.Repo
-	testCtx     *context.Context
+	testCtx     *model.Context
 	testModel   *transformer.Model
 	taskPrompts TaskPrompts
 	testQueries []string
@@ -75,7 +75,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	testCtx = context.New().Checked(false)
+	testCtx = model.New().Checked(false)
 	testRepo, err = LoadRepo()
 	if err != nil {
 		fmt.Printf("Failed to LoadRepo: %v\n", err)
@@ -208,7 +208,7 @@ func TestTransformerLayers(t *testing.T) {
 		}
 	}
 
-	exec, err := context.NewExec(testBackend, testCtx.Reuse(), func(ctx *context.Context, tokens *graph.Node) []*graph.Node {
+	exec, err := model.NewExec(testBackend, testCtx.Reuse(), func(ctx *model.Context, tokens *graph.Node) []*graph.Node {
 		_, allLayers := testModel.AllLayers(ctx, tokens, nil)
 		var converted []*graph.Node
 		for _, o := range allLayers {
@@ -325,7 +325,7 @@ func TestSentenceEmbedding(t *testing.T) {
 		t.Skipf("Skipping test because %s is not available: %v", pythonPath, err)
 	}
 
-	exec, err := context.NewExec(testBackend, testCtx.Checked(false), func(ctx *context.Context, tokens *graph.Node) *graph.Node {
+	exec, err := model.NewExec(testBackend, testCtx.Checked(false), func(ctx *model.Context, tokens *graph.Node) *graph.Node {
 		x := testModel.SentenceEmbeddingGraph(ctx, tokens, nil)
 		return graph.ConvertDType(x, dtypes.Float32)
 	})
@@ -376,7 +376,7 @@ func TestSentenceBatchEmbedding(t *testing.T) {
 		t.Skipf("Skipping test because %s is not available: %v", pythonPath, err)
 	}
 
-	exec, err := context.NewExec(testBackend, testCtx.Checked(false), func(ctx *context.Context, tokens *graph.Node) *graph.Node {
+	exec, err := model.NewExec(testBackend, testCtx.Checked(false), func(ctx *model.Context, tokens *graph.Node) *graph.Node {
 		mask := graph.NotEqual(tokens, graph.Const(tokens.Graph(), testPadID))
 		x := testModel.SentenceEmbeddingGraph(ctx, tokens, mask)
 		return graph.ConvertDType(x, dtypes.Float32)

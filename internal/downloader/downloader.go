@@ -73,7 +73,7 @@ func (m *Manager) setRequestHeader(req *http.Request) {
 // Progress of download is reported back to the given callback, if not nil.
 //
 // The context ctx can be used to interrupt the downloading.
-func (m *Manager) Download(ctx context.Context, url string, filePath string, callback ProgressCallback) error {
+func (m *Manager) Download(ctx model.Context, url string, filePath string, callback ProgressCallback) error {
 	m.semaphore.Acquire()
 	defer m.semaphore.Release()
 
@@ -170,7 +170,7 @@ func (m *Manager) Download(ctx context.Context, url string, filePath string, cal
 // Notice it may lock on the maximum number of parallel requests, so consider calling this on a separate goroutine.
 //
 // The context ctx can be used to interrupt the downloading.
-func (m *Manager) FetchHeader(ctx context.Context, url string) (header http.Header, contentLength int64, err error) {
+func (m *Manager) FetchHeader(ctx model.Context, url string) (header http.Header, contentLength int64, err error) {
 	m.semaphore.Acquire()
 	defer m.semaphore.Release()
 

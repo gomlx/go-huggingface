@@ -156,7 +156,7 @@ func (d *Dataset) GenerateGoStruct(config, split string) (string, error) {
 	}
 
 	// Just download the first file to get the schema
-	downloadedPaths, err := d.DownloadCtx(context.Background(), filesSelection[0])
+	downloadedPaths, err := d.DownloadCtx(model.Background(), filesSelection[0])
 	if err != nil {
 		return "", errors.WithMessage(err, "failed to download parquet file for dataset")
 	}

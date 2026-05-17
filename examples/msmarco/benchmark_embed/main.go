@@ -31,7 +31,7 @@ import (
 	_ "github.com/gomlx/gomlx/backends/default"
 	"github.com/gomlx/gomlx/core/graph"
 	"github.com/gomlx/gomlx/core/tensors"
-	"github.com/gomlx/gomlx/pkg/ml/context"
+	"github.com/gomlx/gomlx/ml/model"
 	"k8s.io/klog/v2"
 )
 
@@ -95,7 +95,7 @@ func main() {
 	backend := mustRunWithElapsedTime("Initializing backend", func() (compute.Backend, error) {
 		return compute.New()
 	})
-	ctx := context.New()
+	ctx := model.New()
 
 	mustRunWithElapsedTime("Loading variables into context", func() (any, error) {
 		return nil, model.LoadContext(backend, ctx)
@@ -106,7 +106,7 @@ func main() {
 		padID = id
 	}
 
-	embedExec, err := context.NewExec(backend, ctx.Checked(false), func(ctx *context.Context, tokens *graph.Node) *graph.Node {
+	embedExec, err := model.NewExec(backend, ctx.Checked(false), func(ctx *model.Context, tokens *graph.Node) *graph.Node {
 		constPadID := graph.Scalar(tokens.Graph(), tokens.DType(), padID)
 		mask := graph.NotEqual(tokens, constPadID)
 		x := model.SentenceEmbeddingGraph(ctx, tokens, mask)
@@ -143,7 +143,7 @@ type shapeKey struct {
 	batchSize, seqLen int
 }
 
-func runBenchmark(backend compute.Backend, tokenizer tokenizers.Tokenizer, embedExec *context.Exec, ds *datasets.Dataset, limit, totalQueries int, isWarmup bool) {
+func runBenchmark(backend compute.Backend, tokenizer tokenizers.Tokenizer, embedExec *model.Exec, ds *datasets.Dataset, limit, totalQueries int, isWarmup bool) {
 	// Structured concurrency (keep track of goroutines).
 	var wg sync.WaitGroup
 
