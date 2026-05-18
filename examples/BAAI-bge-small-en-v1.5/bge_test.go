@@ -30,7 +30,7 @@ var (
 var (
 	testBackend compute.Backend
 	testRepo    *hub.Repo
-	testCtx     *model.Context
+	testCtx     *model.Scope
 	testModel   *transformer.Model
 	testQueries = []string{
 		QueryInstruction + "What is the capital of China?",
@@ -70,7 +70,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	testCtx = model.New().Checked(false)
+	testCtx = model.NewStore().Checked(false)
 	testRepo = hub.New(Repository)
 	if err := testRepo.DownloadInfo(false); err != nil {
 		fmt.Printf("Failed to LoadRepo: %v\n", err)
@@ -161,8 +161,8 @@ func TestSentenceEmbedding(t *testing.T) {
 			pythonPath, len(expectedFlatData), len(prompts), EmbeddingDim, len(prompts)*EmbeddingDim)
 	}
 
-	exec, err := model.NewExec(testBackend, testCtx.Checked(false), func(ctx *model.Context, tokens *graph.Node) *graph.Node {
-		x := testModel.SentenceEmbeddingGraph(ctx, tokens, nil)
+	exec, err := model.NewExec(testBackend, testCtx.Checked(false), func(scope *model.Scope, tokens *graph.Node) *graph.Node {
+		x := testModel.SentenceEmbeddingGraph(scope, tokens, nil)
 		return graph.ConvertDType(x, dtypes.Float32)
 	})
 	if err != nil {

@@ -20,7 +20,7 @@ import (
 //     in which case no mask is used and it's assumed all elements of the sentence are used.
 //
 // It returns the final pooled embedding (usually [batchSize, embedSize]) for the sentence.
-func (m *Model) SentenceEmbeddingGraph(ctx *model.Context, tokens, mask *graph.Node) *graph.Node {
+func (m *Model) SentenceEmbeddingGraph(scope *model.Scope, tokens, mask *graph.Node) *graph.Node {
 	var x *graph.Node
 	// Add a batch axis if not present.
 	if tokens.Rank() == 1 {
@@ -39,7 +39,7 @@ func (m *Model) SentenceEmbeddingGraph(ctx *model.Context, tokens, mask *graph.N
 		case "sentence_transformers.models.Transformer":
 			// The base transformer output is the list of layer outputs.
 			// The last item is the final hidden state.
-			lastLayer, _ := m.AllLayers(ctx, tokens, mask)
+			lastLayer, _ := m.AllLayers(scope, tokens, mask)
 			x = lastLayer
 
 		case "sentence_transformers.models.Pooling":
@@ -69,7 +69,7 @@ func (m *Model) SentenceEmbeddingGraph(ctx *model.Context, tokens, mask *graph.N
 
 	if x == nil {
 		// Fallback if modules.json is not present or didn't contain sentence_transformers layers
-		lastLayer, _ := m.AllLayers(ctx, tokens, mask)
+		lastLayer, _ := m.AllLayers(scope, tokens, mask)
 		x = lastLayer
 		// and apply default pooling if a pooling config exists
 		if m.PoolingConfig != nil {
@@ -82,9 +82,9 @@ func (m *Model) SentenceEmbeddingGraph(ctx *model.Context, tokens, mask *graph.N
 
 // SingleSentenceEmbeddingExec returns a context.Exec that can be used to compute sentence embeddings.
 // No padding, not bucketing, the exec takes as input a single sentence [seqLen] and returns the embedding [embedDim].
-func (m *Model) SingleSentenceEmbeddingExec(backend compute.Backend, ctx *model.Context) (*model.Exec, error) {
-	return model.NewExec(backend, ctx, func(ctx *model.Context, tokens *graph.Node) *graph.Node {
-		output := graph.ConvertDType(m.SentenceEmbeddingGraph(ctx, tokens, nil), dtypes.Float32)
+func (m *Model) SingleSentenceEmbeddingExec(backend compute.Backend, scope *model.Scope) (*model.Exec, error) {
+	return model.NewExec(backend, scope, func(scope *model.Scope, tokens *graph.Node) *graph.Node {
+		output := graph.ConvertDType(m.SentenceEmbeddingGraph(scope, tokens, nil), dtypes.Float32)
 		if output.Rank() == 2 && output.Shape().Dimensions[0] == 1 {
 			// Remove the batch dimension, since we are expecting a single sentence.
 			return graph.Squeeze(output, 0)

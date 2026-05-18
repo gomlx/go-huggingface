@@ -93,7 +93,7 @@ func LoadModel(repo *hub.Repo) (*Model, error) {
 //
 // For distributed execution, better to leave backend and nil, and let the executor decide
 // on which devices to place the variables.
-func (m *Model) LoadContext(backend compute.Backend, ctx *model.Context) error {
+func (m *Model) LoadContext(backend compute.Backend, scope *model.Scope) error {
 	var totalParams int64
 	var totalBytes int64
 
@@ -120,7 +120,7 @@ func (m *Model) LoadContext(backend compute.Backend, ctx *model.Context) error {
 		totalParams += int64(shape.Size())
 		totalBytes += int64(shape.ByteSize())
 
-		scopeCtx := ctx
+		scopeCtx := scope
 		for _, scope := range scopePath {
 			scopeCtx = scopeCtx.In(scope)
 		}

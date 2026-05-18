@@ -95,10 +95,10 @@ func main() {
 	backend := mustRunWithElapsedTime("Initializing backend", func() (compute.Backend, error) {
 		return compute.New()
 	})
-	ctx := model.New()
+	scope := model.New()
 
 	mustRunWithElapsedTime("Loading variables into context", func() (any, error) {
-		return nil, model.LoadContext(backend, ctx)
+		return nil, model.LoadContext(backend, scope)
 	})
 
 	padID := 0
@@ -106,10 +106,10 @@ func main() {
 		padID = id
 	}
 
-	embedExec, err := model.NewExec(backend, ctx.Checked(false), func(ctx *model.Context, tokens *graph.Node) *graph.Node {
+	embedExec, err := model.NewExec(backend, scope.Checked(false), func(scope *model.Scope, tokens *graph.Node) *graph.Node {
 		constPadID := graph.Scalar(tokens.Graph(), tokens.DType(), padID)
 		mask := graph.NotEqual(tokens, constPadID)
-		x := model.SentenceEmbeddingGraph(ctx, tokens, mask)
+		x := model.SentenceEmbeddingGraph(scope, tokens, mask)
 		return graph.ConvertDType(x, dtypes.Float32)
 	})
 

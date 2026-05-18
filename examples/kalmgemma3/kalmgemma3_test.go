@@ -40,7 +40,7 @@ var (
 var (
 	testBackend compute.Backend
 	testRepo    *hub.Repo
-	testCtx     *model.Context
+	testCtx     *model.Scope
 	testModel   *transformer.Model
 	taskPrompts TaskPrompts
 	testQueries []string
@@ -75,7 +75,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	testCtx = model.New().Checked(false)
+	testCtx = model.NewStore().Checked(false)
 	testRepo, err = LoadRepo()
 	if err != nil {
 		fmt.Printf("Failed to LoadRepo: %v\n", err)
@@ -208,8 +208,8 @@ func TestTransformerLayers(t *testing.T) {
 		}
 	}
 
-	exec, err := model.NewExec(testBackend, testCtx.Reuse(), func(ctx *model.Context, tokens *graph.Node) []*graph.Node {
-		_, allLayers := testModel.AllLayers(ctx, tokens, nil)
+	exec, err := model.NewExec(testBackend, testCtx.Reuse(), func(scope *model.Scope, tokens *graph.Node) []*graph.Node {
+		_, allLayers := testModel.AllLayers(scope, tokens, nil)
 		var converted []*graph.Node
 		for _, o := range allLayers {
 			converted = append(converted, graph.ConvertDType(o, dtypes.Float32))
@@ -325,8 +325,8 @@ func TestSentenceEmbedding(t *testing.T) {
 		t.Skipf("Skipping test because %s is not available: %v", pythonPath, err)
 	}
 
-	exec, err := model.NewExec(testBackend, testCtx.Checked(false), func(ctx *model.Context, tokens *graph.Node) *graph.Node {
-		x := testModel.SentenceEmbeddingGraph(ctx, tokens, nil)
+	exec, err := model.NewExec(testBackend, testCtx.Checked(false), func(scope *model.Scope, tokens *graph.Node) *graph.Node {
+		x := testModel.SentenceEmbeddingGraph(scope, tokens, nil)
 		return graph.ConvertDType(x, dtypes.Float32)
 	})
 	if err != nil {
@@ -376,9 +376,9 @@ func TestSentenceBatchEmbedding(t *testing.T) {
 		t.Skipf("Skipping test because %s is not available: %v", pythonPath, err)
 	}
 
-	exec, err := model.NewExec(testBackend, testCtx.Checked(false), func(ctx *model.Context, tokens *graph.Node) *graph.Node {
+	exec, err := model.NewExec(testBackend, testCtx.Checked(false), func(scope *model.Scope, tokens *graph.Node) *graph.Node {
 		mask := graph.NotEqual(tokens, graph.Const(tokens.Graph(), testPadID))
-		x := testModel.SentenceEmbeddingGraph(ctx, tokens, mask)
+		x := testModel.SentenceEmbeddingGraph(scope, tokens, mask)
 		return graph.ConvertDType(x, dtypes.Float32)
 	})
 	if err != nil {
