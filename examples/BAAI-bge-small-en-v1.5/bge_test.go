@@ -30,7 +30,7 @@ var (
 var (
 	testBackend compute.Backend
 	testRepo    *hub.Repo
-	testCtx     *model.Scope
+	testStore   *model.Store
 	testModel   *transformer.Model
 	testQueries = []string{
 		QueryInstruction + "What is the capital of China?",
@@ -70,7 +70,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	testCtx = model.NewStore().Checked(false)
+	testStore = model.NewStore()
 	testRepo = hub.New(Repository)
 	if err := testRepo.DownloadInfo(false); err != nil {
 		fmt.Printf("Failed to LoadRepo: %v\n", err)
@@ -111,7 +111,7 @@ func TestMain(m *testing.M) {
 	if !*flagSkipLoadingWeights {
 		fmt.Printf(" - Loading model weights ...\r")
 		start := time.Now()
-		must(testModel.LoadContext(testBackend, testCtx))
+		must(testModel.LoadContext(testBackend, testStore))
 		for range 3 {
 			runtime.GC()
 		}
@@ -161,7 +161,7 @@ func TestSentenceEmbedding(t *testing.T) {
 			pythonPath, len(expectedFlatData), len(prompts), EmbeddingDim, len(prompts)*EmbeddingDim)
 	}
 
-	exec, err := model.NewExec(testBackend, testCtx.Checked(false), func(scope *model.Scope, tokens *graph.Node) *graph.Node {
+	exec, err := model.NewExec(testBackend, testStore, func(scope *model.Scope, tokens *graph.Node) *graph.Node {
 		x := testModel.SentenceEmbeddingGraph(scope, tokens, nil)
 		return graph.ConvertDType(x, dtypes.Float32)
 	})

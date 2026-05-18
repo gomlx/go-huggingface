@@ -40,7 +40,7 @@ var (
 var (
 	testBackend compute.Backend
 	testRepo    *hub.Repo
-	testCtx     *model.Scope
+	testStore   *model.Store
 	testModel   *transformer.Model
 	taskPrompts TaskPrompts
 	testQueries []string
@@ -75,7 +75,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	testCtx = model.NewStore().Checked(false)
+	testStore = model.NewStore()
 	testRepo, err = LoadRepo()
 	if err != nil {
 		fmt.Printf("Failed to LoadRepo: %v\n", err)
@@ -122,7 +122,7 @@ func TestMain(m *testing.M) {
 	if !*flagSkipLoadingWeights {
 		fmt.Printf(" - Loading model weights ...\r")
 		start := time.Now()
-		must(testModel.LoadContext(testBackend, testCtx))
+		must(testModel.LoadContext(testBackend, testStore))
 		for range 3 {
 			runtime.GC()
 		}
@@ -192,9 +192,9 @@ func readPythonEmbeddings(path string, layersToRead []int) (map[int][]float32, e
 
 func TestTransformerLayers(t *testing.T) {
 	// Ensure the weights were loaded.
-	varName := "embeddings"
-	if testCtx.In("token_embed").InspectVariableInScope(varName) == nil {
-		t.Fatalf("Variable token_embed/%s not loaded in context", varName)
+	varPath := "/token_embed/embeddings"
+	if testStore.GetVariable(varPath) == nil {
+		t.Fatalf("Variable %q not loaded in store", varPath)
 	}
 
 	layersToCheck := []int{0, 1, 2, 10, 20, 30, 40, testModel.Config.NumHiddenLayers}
@@ -208,7 +208,7 @@ func TestTransformerLayers(t *testing.T) {
 		}
 	}
 
-	exec, err := model.NewExec(testBackend, testCtx.Reuse(), func(scope *model.Scope, tokens *graph.Node) []*graph.Node {
+	exec, err := model.NewExec(testBackend, testStore, func(scope *model.Scope, tokens *graph.Node) []*graph.Node {
 		_, allLayers := testModel.AllLayers(scope, tokens, nil)
 		var converted []*graph.Node
 		for _, o := range allLayers {
@@ -325,7 +325,7 @@ func TestSentenceEmbedding(t *testing.T) {
 		t.Skipf("Skipping test because %s is not available: %v", pythonPath, err)
 	}
 
-	exec, err := model.NewExec(testBackend, testCtx.Checked(false), func(scope *model.Scope, tokens *graph.Node) *graph.Node {
+	exec, err := model.NewExec(testBackend, testStore.Checked(false), func(scope *model.Scope, tokens *graph.Node) *graph.Node {
 		x := testModel.SentenceEmbeddingGraph(scope, tokens, nil)
 		return graph.ConvertDType(x, dtypes.Float32)
 	})
@@ -376,7 +376,7 @@ func TestSentenceBatchEmbedding(t *testing.T) {
 		t.Skipf("Skipping test because %s is not available: %v", pythonPath, err)
 	}
 
-	exec, err := model.NewExec(testBackend, testCtx.Checked(false), func(scope *model.Scope, tokens *graph.Node) *graph.Node {
+	exec, err := model.NewExec(testBackend, testStore.Checked(false), func(scope *model.Scope, tokens *graph.Node) *graph.Node {
 		mask := graph.NotEqual(tokens, graph.Const(tokens.Graph(), testPadID))
 		x := testModel.SentenceEmbeddingGraph(scope, tokens, mask)
 		return graph.ConvertDType(x, dtypes.Float32)
@@ -459,7 +459,7 @@ func TestSimilarity(t *testing.T) {
 	prompts = append(prompts, testQueries...)
 	prompts = append(prompts, testDocs...)
 	allEmbeddings := make([]*tensors.Tensor, 0, len(prompts))
-	embedder := must1(testModel.SingleSentenceEmbeddingExec(testBackend, testCtx))
+	embedder := must1(testModel.SingleSentenceEmbeddingExec(testBackend, testStore))
 	for _, prompt := range prompts {
 		tokens := must1(testModel.GetTokenizer()).Encode(prompt)
 		allEmbeddings = append(allEmbeddings, must1(embedder.Exec1(tokens)))
