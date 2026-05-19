@@ -5,11 +5,11 @@ import (
 
 	"github.com/gomlx/compute/dtypes"
 	"github.com/gomlx/gomlx/core/graph"
+	"github.com/gomlx/gomlx/ml/layers"
+	"github.com/gomlx/gomlx/ml/layers/activations"
+	"github.com/gomlx/gomlx/ml/layers/attention/pos"
 	"github.com/gomlx/gomlx/ml/model"
-	"github.com/gomlx/gomlx/pkg/ml/layers"
-	"github.com/gomlx/gomlx/pkg/ml/layers/activations"
-	"github.com/gomlx/gomlx/pkg/ml/layers/attention/pos"
-	mltransformer "github.com/gomlx/gomlx/pkg/ml/model/transformer"
+	mltransformer "github.com/gomlx/gomlx/ml/zoo/transformer"
 	"github.com/gomlx/gomlx/support/exceptions"
 )
 
