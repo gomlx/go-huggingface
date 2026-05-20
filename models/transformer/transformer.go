@@ -6,7 +6,7 @@ import (
 	"github.com/gomlx/compute/dtypes"
 	"github.com/gomlx/gomlx/core/graph"
 	"github.com/gomlx/gomlx/ml/layers"
-	"github.com/gomlx/gomlx/ml/layers/activations"
+	"github.com/gomlx/gomlx/ml/layers/activation"
 	"github.com/gomlx/gomlx/ml/layers/attention/pos"
 	"github.com/gomlx/gomlx/ml/model"
 	mltransformer "github.com/gomlx/gomlx/ml/zoo/transformer"
@@ -86,11 +86,11 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 			tm.WithNormEpsilon(m.Config.RMSNormEps)
 		}
 
-		activation := m.Config.HiddenActivation
-		if activation == "" {
-			activation = m.Config.HiddenAct
+		activationName := m.Config.HiddenActivation
+		if activationName == "" {
+			activationName = m.Config.HiddenAct
 		}
-		tm.WithActivation(activations.FromName(activation))
+		tm.WithActivation(activation.FromName(activationName))
 
 		tm.WithPositionalEncoder(pos.NewLearned(scope, m.Config.MaxPositionEmbeddings, m.Config.HiddenSize))
 		tm.WithEmbedNormalization(layers.NormalizationLayerNorm)
@@ -103,7 +103,7 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 		tm.WithArchitecture(mltransformer.ArchitectureGemma3). // FIXME: Should use m.Config.Architectures to map Architecture
 									WithNormalization(layers.NormalizationRMSNorm).
 									WithNormEpsilon(m.Config.RMSNormEps).
-									WithActivation(activations.FromName(m.Config.HiddenActivation)).
+									WithActivation(activation.FromName(m.Config.HiddenActivation)).
 									WithNumKVHeads(m.Config.NumKeyValueHeads).
 									WithBias(false).
 									WithFinalNormalization(layers.NormalizationRMSNorm)
