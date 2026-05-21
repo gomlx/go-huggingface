@@ -86,14 +86,14 @@ func LoadModel(repo *hub.Repo) (*Model, error) {
 	return m, nil
 }
 
-// LoadContext uses models/safetensors to load the variables of the model into a context.
+// LoadStore uses models/safetensors to load the variables of the model into a GoMLX's [model.Store].
 //
 // If a backend is provided (not nil), the variables are immediately loaded into the backend
 // device #0, saving host memory space or accelerating the loading in some cases.
 //
 // For distributed execution, better to leave backend and nil, and let the executor decide
 // on which devices to place the variables.
-func (m *Model) LoadContext(backend compute.Backend, store *model.Store) error {
+func (m *Model) LoadStore(backend compute.Backend, store *model.Store) error {
 	var totalParams int64
 	var totalBytes int64
 
@@ -120,14 +120,15 @@ func (m *Model) LoadContext(backend compute.Backend, store *model.Store) error {
 		totalParams += int64(shape.Size())
 		totalBytes += int64(shape.ByteSize())
 
-		scopeCtx := store
-		for _, scope := range scopePath {
-			scopeCtx = scopeCtx.In(scope)
+		subScope := store.RootScope()
+		for _, subScopeName := range scopePath {
+			subScope = subScope.In("%s", subScopeName)
 		}
 
-		scopeCtx.VariableWithValue(varName, tensorToLoad)
+		subScope.VariableWithValue(varName, tensorToLoad)
 	}
 
+	fmt.Printf("\n--> LoadContext: Loaded %d parameters (%d bytes)\n", totalParams, totalBytes)
 	m.totalParameters = &totalParams
 	m.totalBytes = &totalBytes
 	return nil

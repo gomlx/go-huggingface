@@ -80,10 +80,10 @@ func (m *Model) SentenceEmbeddingGraph(scope *model.Scope, tokens, mask *graph.N
 	return x
 }
 
-// SingleSentenceEmbeddingExec returns a context.Exec that can be used to compute sentence embeddings.
+// SingleSentenceEmbeddingExec returns a model.Exec that can be used to compute sentence embeddings.
 // No padding, not bucketing, the exec takes as input a single sentence [seqLen] and returns the embedding [embedDim].
 func (m *Model) SingleSentenceEmbeddingExec(backend compute.Backend, scope *model.Scope) (*model.Exec, error) {
-	return model.NewExec(backend, scope, func(scope *model.Scope, tokens *graph.Node) *graph.Node {
+	return model.NewExec(backend, scope.Store(), func(scope *model.Scope, tokens *graph.Node) *graph.Node {
 		output := graph.ConvertDType(m.SentenceEmbeddingGraph(scope, tokens, nil), dtypes.Float32)
 		if output.Rank() == 2 && output.Shape().Dimensions[0] == 1 {
 			// Remove the batch dimension, since we are expecting a single sentence.

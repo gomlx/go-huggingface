@@ -84,21 +84,21 @@ func main() {
 		klog.Fatalf("Failed to load repo info for %q: %v", *flagModel, err)
 	}
 
-	model := mustRunWithElapsedTime("Loading model configurations", func() (*transformer.Model, error) {
+	hfModel := mustRunWithElapsedTime("Loading model configurations", func() (*transformer.Model, error) {
 		return transformer.LoadModel(repo)
 	})
 
 	tokenizer := mustRunWithElapsedTime("Loading tokenizer", func() (tokenizers.Tokenizer, error) {
-		return model.GetTokenizer()
+		return hfModel.GetTokenizer()
 	})
 
 	backend := mustRunWithElapsedTime("Initializing backend", func() (compute.Backend, error) {
 		return compute.New()
 	})
-	scope := model.New()
+	store := model.NewStore()
 
-	mustRunWithElapsedTime("Loading variables into context", func() (any, error) {
-		return nil, model.LoadContext(backend, scope)
+	mustRunWithElapsedTime("Loading variables into store", func() (any, error) {
+		return nil, hfModel.LoadStore(backend, store)
 	})
 
 	padID := 0
@@ -106,10 +106,10 @@ func main() {
 		padID = id
 	}
 
-	embedExec, err := model.NewExec(backend, scope.Checked(false), func(scope *model.Scope, tokens *graph.Node) *graph.Node {
+	embedExec, err := model.NewExec(backend, store, func(scope *model.Scope, tokens *graph.Node) *graph.Node {
 		constPadID := graph.Scalar(tokens.Graph(), tokens.DType(), padID)
 		mask := graph.NotEqual(tokens, constPadID)
-		x := model.SentenceEmbeddingGraph(scope, tokens, mask)
+		x := hfModel.SentenceEmbeddingGraph(scope, tokens, mask)
 		return graph.ConvertDType(x, dtypes.Float32)
 	})
 

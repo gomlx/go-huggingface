@@ -122,7 +122,7 @@ func TestMain(m *testing.M) {
 	if !*flagSkipLoadingWeights {
 		fmt.Printf(" - Loading model weights ...\r")
 		start := time.Now()
-		must(testModel.LoadContext(testBackend, testStore))
+		must(testModel.LoadStore(testBackend, testStore))
 		for range 3 {
 			runtime.GC()
 		}
@@ -325,7 +325,7 @@ func TestSentenceEmbedding(t *testing.T) {
 		t.Skipf("Skipping test because %s is not available: %v", pythonPath, err)
 	}
 
-	exec, err := model.NewExec(testBackend, testStore.Checked(false), func(scope *model.Scope, tokens *graph.Node) *graph.Node {
+	exec, err := model.NewExec(testBackend, testStore, func(scope *model.Scope, tokens *graph.Node) *graph.Node {
 		x := testModel.SentenceEmbeddingGraph(scope, tokens, nil)
 		return graph.ConvertDType(x, dtypes.Float32)
 	})
@@ -376,7 +376,7 @@ func TestSentenceBatchEmbedding(t *testing.T) {
 		t.Skipf("Skipping test because %s is not available: %v", pythonPath, err)
 	}
 
-	exec, err := model.NewExec(testBackend, testStore.Checked(false), func(scope *model.Scope, tokens *graph.Node) *graph.Node {
+	exec, err := model.NewExec(testBackend, testStore, func(scope *model.Scope, tokens *graph.Node) *graph.Node {
 		mask := graph.NotEqual(tokens, graph.Const(tokens.Graph(), testPadID))
 		x := testModel.SentenceEmbeddingGraph(scope, tokens, mask)
 		return graph.ConvertDType(x, dtypes.Float32)
@@ -459,7 +459,7 @@ func TestSimilarity(t *testing.T) {
 	prompts = append(prompts, testQueries...)
 	prompts = append(prompts, testDocs...)
 	allEmbeddings := make([]*tensors.Tensor, 0, len(prompts))
-	embedder := must1(testModel.SingleSentenceEmbeddingExec(testBackend, testStore))
+	embedder := must1(testModel.SingleSentenceEmbeddingExec(testBackend, testStore.RootScope()))
 	for _, prompt := range prompts {
 		tokens := must1(testModel.GetTokenizer()).Encode(prompt)
 		allEmbeddings = append(allEmbeddings, must1(embedder.Exec1(tokens)))

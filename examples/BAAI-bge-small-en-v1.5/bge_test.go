@@ -111,7 +111,7 @@ func TestMain(m *testing.M) {
 	if !*flagSkipLoadingWeights {
 		fmt.Printf(" - Loading model weights ...\r")
 		start := time.Now()
-		must(testModel.LoadContext(testBackend, testStore))
+		must(testModel.LoadStore(testBackend, testStore))
 		for range 3 {
 			runtime.GC()
 		}
@@ -198,5 +198,43 @@ func TestSentenceEmbedding(t *testing.T) {
 			hftesting.ValidateEmbeddingTensor(t, flat, expectedData, fmt.Sprintf("Sentence Embedding %d", i),
 				1, len(tokens), len(tokens))
 		})
+	}
+}
+
+func TestPrintVariables(t *testing.T) {
+	for v := range testStore.IterVariables() {
+		t.Logf("Loaded Variable: %q, shape=%s, type=%s", v.Path(), v.Shape(), v.Shape().DType)
+	}
+}
+
+func TestCheckUnloadedVariables(t *testing.T) {
+	loadedPaths := make(map[string]bool)
+	for v := range testStore.IterVariables() {
+		loadedPaths[v.Path()] = true
+	}
+
+	exec, err := model.NewExec(testBackend, testStore, func(scope *model.Scope, tokens *graph.Node) *graph.Node {
+		x := testModel.SentenceEmbeddingGraph(scope, tokens, nil)
+		return graph.ConvertDType(x, dtypes.Float32)
+	})
+	if err != nil {
+		t.Fatalf("Failed to create exec: %v", err)
+	}
+	_ = exec
+
+	var missing []string
+	for v := range testStore.IterVariables() {
+		if !loadedPaths[v.Path()] {
+			missing = append(missing, v.Path())
+		}
+	}
+
+	if len(missing) > 0 {
+		t.Errorf("Found %d variables created during graph building that were NOT loaded by LoadContext:", len(missing))
+		for _, path := range missing {
+			t.Errorf("  - %s", path)
+		}
+	} else {
+		t.Logf("All variables used in graph building were loaded successfully!")
 	}
 }
