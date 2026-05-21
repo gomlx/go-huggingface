@@ -462,11 +462,11 @@ func TestSimilarity(t *testing.T) {
 	embedder := must1(testModel.SingleSentenceEmbeddingExec(testBackend, testStore.RootScope()))
 	for _, prompt := range prompts {
 		tokens := must1(testModel.GetTokenizer()).Encode(prompt)
-		allEmbeddings = append(allEmbeddings, must1(embedder.Exec1(tokens)))
+		allEmbeddings = append(allEmbeddings, must1(embedder.Call1(tokens)))
 	}
 
 	allEmbeddingsAny := xslices.Map(allEmbeddings, func(t *tensors.Tensor) any { return t })
-	similarities := must1(graph.ExecOnce(testBackend, func(allEmbeddings []*graph.Node) *graph.Node {
+	similarities := must1(graph.CallOnce(testBackend, func(allEmbeddings []*graph.Node) *graph.Node {
 		queryEmbeddings := graph.Stack(allEmbeddings[:len(testQueries)], 0)
 		docEmbeddings := graph.Stack(allEmbeddings[len(testQueries):], 0)
 		return testModel.Similarity(queryEmbeddings, docEmbeddings)

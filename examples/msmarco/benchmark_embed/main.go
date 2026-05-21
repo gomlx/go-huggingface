@@ -298,7 +298,7 @@ func runBenchmark(backend compute.Backend, tokenizer tokenizers.Tokenizer, embed
 
 				batchStartTime := time.Now()
 				var outTensor *tensors.Tensor
-				outTensor, err = embedExec.Exec1(inputTensor)
+				outTensor, err = embedExec.Call1(inputTensor)
 				if err != nil {
 					fmt.Println()
 					klog.Fatalf("Failed to execute embeddings for %s: %+v", inputTensor.Shape(), err)
