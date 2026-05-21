@@ -94,6 +94,13 @@ func LoadModel(repo *hub.Repo) (*Model, error) {
 // For distributed execution, better to leave backend and nil, and let the executor decide
 // on which devices to place the variables.
 func (m *Model) LoadStore(backend compute.Backend, store *model.Store) error {
+	return m.LoadStoreFiltered(backend, store, func(path string) bool { return true })
+}
+
+// LoadStoreFiltered is like LoadStore but takes a filter function.
+// Only variables where filterFn(fullPath) returns true will be loaded.
+// Other tensors will be finalized immediately to conserve memory.
+func (m *Model) LoadStoreFiltered(backend compute.Backend, store *model.Store, filterFn func(path string) bool) error {
 	var totalParams int64
 	var totalBytes int64
 
@@ -113,7 +120,18 @@ func (m *Model) LoadStore(backend compute.Backend, store *model.Store) error {
 			continue
 		}
 
+		// Build the path check
+		var pathParts []string
+		pathParts = append(pathParts, scopePath...)
+		pathParts = append(pathParts, varName)
+		fullPath := "/" + strings.Join(pathParts, "/")
+
 		tensorToLoad := tensorAndName.Tensor
+
+		if !filterFn(fullPath) {
+			tensorToLoad.FinalizeAll()
+			continue
+		}
 
 		// Track size
 		shape := tensorToLoad.Shape()
@@ -128,7 +146,7 @@ func (m *Model) LoadStore(backend compute.Backend, store *model.Store) error {
 		subScope.VariableWithValue(varName, tensorToLoad)
 	}
 
-	fmt.Printf("\n--> LoadContext: Loaded %d parameters (%d bytes)\n", totalParams, totalBytes)
+	fmt.Printf("\n--> LoadStoreFiltered: Loaded %d parameters (%d bytes)\n", totalParams, totalBytes)
 	m.totalParameters = &totalParams
 	m.totalBytes = &totalBytes
 	return nil

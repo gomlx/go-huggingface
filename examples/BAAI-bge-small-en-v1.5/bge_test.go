@@ -232,7 +232,7 @@ func TestCheckUnloadedVariables(t *testing.T) {
 	}
 
 	if len(missing) > 0 {
-		t.Errorf("Found %d variables created during graph building that were NOT loaded by LoadContext:", len(missing))
+		t.Errorf("Found %d variables created during graph building that were NOT loaded", len(missing))
 		for _, path := range missing {
 			t.Errorf("  - %s", path)
 		}
