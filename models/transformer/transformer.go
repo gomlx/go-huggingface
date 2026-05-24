@@ -4,13 +4,13 @@ import (
 	"slices"
 
 	"github.com/gomlx/compute/dtypes"
-	"github.com/gomlx/gomlx/pkg/core/graph"
-	"github.com/gomlx/gomlx/pkg/ml/context"
-	"github.com/gomlx/gomlx/pkg/ml/layers"
-	"github.com/gomlx/gomlx/pkg/ml/layers/activations"
-	"github.com/gomlx/gomlx/pkg/ml/layers/attention/pos"
-	mltransformer "github.com/gomlx/gomlx/pkg/ml/model/transformer"
-	"github.com/gomlx/gomlx/pkg/support/exceptions"
+	"github.com/gomlx/gomlx/core/graph"
+	"github.com/gomlx/gomlx/ml/layers"
+	"github.com/gomlx/gomlx/ml/layers/activation"
+	"github.com/gomlx/gomlx/ml/layers/attention/pos"
+	"github.com/gomlx/gomlx/ml/model"
+	mltransformer "github.com/gomlx/gomlx/ml/zoo/transformer"
+	"github.com/gomlx/gomlx/support/exceptions"
 )
 
 // WithCausalMask sets whether to use a causal mask in the attention layers.
@@ -34,13 +34,13 @@ func (m *Model) WithCausalMask(useCausalMask bool) *Model {
 // If the model was trained as an embedding model (e.g. sentence-transformers), it will return the sentence embeddings,
 // usually as [batchSize, embedSize].
 // Otherwise, it will return the final hidden states of all layers, usually as [batchSize, seqLen, hiddenSize].
-func (m *Model) ForwardGraph(ctx *context.Context, tokens, mask *graph.Node) *graph.Node {
+func (m *Model) ForwardGraph(scope *model.Scope, tokens, mask *graph.Node) *graph.Node {
 	if len(m.Modules) > 0 || m.PoolingConfig != nil {
-		return m.SentenceEmbeddingGraph(ctx, tokens, mask)
+		return m.SentenceEmbeddingGraph(scope, tokens, mask)
 	}
 
 	// Default to just getting the final hidden state of all layers
-	lastLayer, _ := m.AllLayers(ctx, tokens, mask)
+	lastLayer, _ := m.AllLayers(scope, tokens, mask)
 	return lastLayer
 }
 
@@ -50,7 +50,7 @@ func (m *Model) ForwardGraph(ctx *context.Context, tokens, mask *graph.Node) *gr
 // But you can use it for something custom.
 //
 // It takes the context ctx with the loaded variables.
-func (m *Model) CreateGoMLXModel(ctx *context.Context) *mltransformer.Model {
+func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 	headDim := m.Config.HeadDim
 	if headDim == 0 && m.Config.NumAttentionHeads > 0 {
 		headDim = m.Config.HiddenSize / m.Config.NumAttentionHeads
@@ -86,13 +86,13 @@ func (m *Model) CreateGoMLXModel(ctx *context.Context) *mltransformer.Model {
 			tm.WithNormEpsilon(m.Config.RMSNormEps)
 		}
 
-		activation := m.Config.HiddenActivation
-		if activation == "" {
-			activation = m.Config.HiddenAct
+		activationName := m.Config.HiddenActivation
+		if activationName == "" {
+			activationName = m.Config.HiddenAct
 		}
-		tm.WithActivation(activations.FromName(activation))
+		tm.WithActivation(activation.FromName(activationName))
 
-		tm.WithPositionalEncoder(pos.NewLearned(ctx, m.Config.MaxPositionEmbeddings, m.Config.HiddenSize))
+		tm.WithPositionalEncoder(pos.NewLearned(scope, m.Config.MaxPositionEmbeddings, m.Config.HiddenSize))
 		tm.WithEmbedNormalization(layers.NormalizationLayerNorm)
 
 		if typeVocabSize, ok := m.Config.Extra["type_vocab_size"].(float64); ok && typeVocabSize > 0 {
@@ -103,7 +103,7 @@ func (m *Model) CreateGoMLXModel(ctx *context.Context) *mltransformer.Model {
 		tm.WithArchitecture(mltransformer.ArchitectureGemma3). // FIXME: Should use m.Config.Architectures to map Architecture
 									WithNormalization(layers.NormalizationRMSNorm).
 									WithNormEpsilon(m.Config.RMSNormEps).
-									WithActivation(activations.FromName(m.Config.HiddenActivation)).
+									WithActivation(activation.FromName(m.Config.HiddenActivation)).
 									WithNumKVHeads(m.Config.NumKeyValueHeads).
 									WithBias(false).
 									WithFinalNormalization(layers.NormalizationRMSNorm)
@@ -164,7 +164,7 @@ func (m *Model) CreateGoMLXModel(ctx *context.Context) *mltransformer.Model {
 //   - allLayers: the input to the first layer and the output of each layer.
 //     It follows the HuggingFace convention, where the allLayers[0] is the input to the first attention layer,
 //     and the following nodes in allLayers are the outputs of all NumHiddenLayers attention layers.
-func (m *Model) AllLayers(ctx *context.Context, tokens, mask *graph.Node) (lastLayer *graph.Node, allLayers []*graph.Node) {
+func (m *Model) AllLayers(scope *model.Scope, tokens, mask *graph.Node) (lastLayer *graph.Node, allLayers []*graph.Node) {
 	// Sanity checking.
 	if tokens.Rank() == 1 {
 		// Add batch dimension if not present.
@@ -185,6 +185,6 @@ func (m *Model) AllLayers(ctx *context.Context, tokens, mask *graph.Node) (lastL
 	}
 
 	// Create GoMLXModel and build the graph for all the layers.
-	tm := m.CreateGoMLXModel(ctx)
-	return tm.AllLayers(ctx, tokens, mask, false, 0)
+	tm := m.CreateGoMLXModel(scope)
+	return tm.AllLayers(scope, tokens, mask, false, 0)
 }

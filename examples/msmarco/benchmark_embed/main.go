@@ -29,9 +29,9 @@ import (
 	tapi "github.com/gomlx/go-huggingface/tokenizers/api"
 	"github.com/gomlx/go-huggingface/tokenizers/bucket"
 	_ "github.com/gomlx/gomlx/backends/default"
-	"github.com/gomlx/gomlx/pkg/core/graph"
-	"github.com/gomlx/gomlx/pkg/core/tensors"
-	"github.com/gomlx/gomlx/pkg/ml/context"
+	"github.com/gomlx/gomlx/core/graph"
+	"github.com/gomlx/gomlx/core/tensors"
+	"github.com/gomlx/gomlx/ml/model"
 	"k8s.io/klog/v2"
 )
 
@@ -84,21 +84,21 @@ func main() {
 		klog.Fatalf("Failed to load repo info for %q: %v", *flagModel, err)
 	}
 
-	model := mustRunWithElapsedTime("Loading model configurations", func() (*transformer.Model, error) {
+	hfModel := mustRunWithElapsedTime("Loading model configurations", func() (*transformer.Model, error) {
 		return transformer.LoadModel(repo)
 	})
 
 	tokenizer := mustRunWithElapsedTime("Loading tokenizer", func() (tokenizers.Tokenizer, error) {
-		return model.GetTokenizer()
+		return hfModel.GetTokenizer()
 	})
 
 	backend := mustRunWithElapsedTime("Initializing backend", func() (compute.Backend, error) {
 		return compute.New()
 	})
-	ctx := context.New()
+	store := model.NewStore()
 
-	mustRunWithElapsedTime("Loading variables into context", func() (any, error) {
-		return nil, model.LoadContext(backend, ctx)
+	mustRunWithElapsedTime("Loading variables into store", func() (any, error) {
+		return nil, hfModel.LoadStore(backend, store)
 	})
 
 	padID := 0
@@ -106,10 +106,10 @@ func main() {
 		padID = id
 	}
 
-	embedExec, err := context.NewExec(backend, ctx.Checked(false), func(ctx *context.Context, tokens *graph.Node) *graph.Node {
+	embedExec, err := model.NewExec(backend, store, func(scope *model.Scope, tokens *graph.Node) *graph.Node {
 		constPadID := graph.Scalar(tokens.Graph(), tokens.DType(), padID)
 		mask := graph.NotEqual(tokens, constPadID)
-		x := model.SentenceEmbeddingGraph(ctx, tokens, mask)
+		x := hfModel.SentenceEmbeddingGraph(scope, tokens, mask)
 		return graph.ConvertDType(x, dtypes.Float32)
 	})
 
@@ -143,7 +143,7 @@ type shapeKey struct {
 	batchSize, seqLen int
 }
 
-func runBenchmark(backend compute.Backend, tokenizer tokenizers.Tokenizer, embedExec *context.Exec, ds *datasets.Dataset, limit, totalQueries int, isWarmup bool) {
+func runBenchmark(backend compute.Backend, tokenizer tokenizers.Tokenizer, embedExec *model.Exec, ds *datasets.Dataset, limit, totalQueries int, isWarmup bool) {
 	// Structured concurrency (keep track of goroutines).
 	var wg sync.WaitGroup
 
@@ -298,7 +298,7 @@ func runBenchmark(backend compute.Backend, tokenizer tokenizers.Tokenizer, embed
 
 				batchStartTime := time.Now()
 				var outTensor *tensors.Tensor
-				outTensor, err = embedExec.Exec1(inputTensor)
+				outTensor, err = embedExec.Call1(inputTensor)
 				if err != nil {
 					fmt.Println()
 					klog.Fatalf("Failed to execute embeddings for %s: %+v", inputTensor.Shape(), err)

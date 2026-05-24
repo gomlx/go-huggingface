@@ -14,10 +14,12 @@ import (
 	hftesting "github.com/gomlx/go-huggingface/internal/testing"
 	"github.com/gomlx/go-huggingface/models/transformer"
 	"github.com/gomlx/go-huggingface/tokenizers/api"
-	"github.com/gomlx/gomlx/pkg/core/graph"
-	"github.com/gomlx/gomlx/pkg/core/tensors"
-	"github.com/gomlx/gomlx/pkg/ml/context"
+	"github.com/gomlx/gomlx/core/graph"
+	"github.com/gomlx/gomlx/core/tensors"
+	"github.com/gomlx/gomlx/ml/model"
 	"k8s.io/klog/v2"
+
+	_ "github.com/gomlx/gomlx/backends/default"
 )
 
 var (
@@ -30,7 +32,7 @@ var (
 var (
 	testBackend compute.Backend
 	testRepo    *hub.Repo
-	testCtx     *context.Context
+	testStore   *model.Store
 	testModel   *transformer.Model
 	testQueries = []string{
 		QueryInstruction + "What is the capital of China?",
@@ -70,7 +72,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	testCtx = context.New().Checked(false)
+	testStore = model.NewStore()
 	testRepo = hub.New(Repository)
 	if err := testRepo.DownloadInfo(false); err != nil {
 		fmt.Printf("Failed to LoadRepo: %v\n", err)
@@ -111,7 +113,7 @@ func TestMain(m *testing.M) {
 	if !*flagSkipLoadingWeights {
 		fmt.Printf(" - Loading model weights ...\r")
 		start := time.Now()
-		must(testModel.LoadContext(testBackend, testCtx))
+		must(testModel.LoadStore(testBackend, testStore))
 		for range 3 {
 			runtime.GC()
 		}
@@ -161,8 +163,8 @@ func TestSentenceEmbedding(t *testing.T) {
 			pythonPath, len(expectedFlatData), len(prompts), EmbeddingDim, len(prompts)*EmbeddingDim)
 	}
 
-	exec, err := context.NewExec(testBackend, testCtx.Checked(false), func(ctx *context.Context, tokens *graph.Node) *graph.Node {
-		x := testModel.SentenceEmbeddingGraph(ctx, tokens, nil)
+	exec, err := model.NewExec(testBackend, testStore, func(scope *model.Scope, tokens *graph.Node) *graph.Node {
+		x := testModel.SentenceEmbeddingGraph(scope, tokens, nil)
 		return graph.ConvertDType(x, dtypes.Float32)
 	})
 	if err != nil {
@@ -198,5 +200,43 @@ func TestSentenceEmbedding(t *testing.T) {
 			hftesting.ValidateEmbeddingTensor(t, flat, expectedData, fmt.Sprintf("Sentence Embedding %d", i),
 				1, len(tokens), len(tokens))
 		})
+	}
+}
+
+func TestPrintVariables(t *testing.T) {
+	for v := range testStore.IterVariables() {
+		t.Logf("Loaded Variable: %q, shape=%s, type=%s", v.Path(), v.Shape(), v.Shape().DType)
+	}
+}
+
+func TestCheckUnloadedVariables(t *testing.T) {
+	loadedPaths := make(map[string]bool)
+	for v := range testStore.IterVariables() {
+		loadedPaths[v.Path()] = true
+	}
+
+	exec, err := model.NewExec(testBackend, testStore, func(scope *model.Scope, tokens *graph.Node) *graph.Node {
+		x := testModel.SentenceEmbeddingGraph(scope, tokens, nil)
+		return graph.ConvertDType(x, dtypes.Float32)
+	})
+	if err != nil {
+		t.Fatalf("Failed to create exec: %v", err)
+	}
+	_ = exec
+
+	var missing []string
+	for v := range testStore.IterVariables() {
+		if !loadedPaths[v.Path()] {
+			missing = append(missing, v.Path())
+		}
+	}
+
+	if len(missing) > 0 {
+		t.Errorf("Found %d variables created during graph building that were NOT loaded", len(missing))
+		for _, path := range missing {
+			t.Errorf("  - %s", path)
+		}
+	} else {
+		t.Logf("All variables used in graph building were loaded successfully!")
 	}
 }

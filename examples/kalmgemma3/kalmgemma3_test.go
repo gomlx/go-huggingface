@@ -23,9 +23,9 @@ import (
 	"github.com/gomlx/go-huggingface/models/transformer"
 	"github.com/gomlx/go-huggingface/tokenizers/api"
 	_ "github.com/gomlx/gomlx/backends/default"
-	"github.com/gomlx/gomlx/pkg/core/graph"
-	"github.com/gomlx/gomlx/pkg/core/tensors"
-	"github.com/gomlx/gomlx/pkg/ml/context"
+	"github.com/gomlx/gomlx/core/graph"
+	"github.com/gomlx/gomlx/core/tensors"
+	"github.com/gomlx/gomlx/ml/model"
 	"github.com/stretchr/testify/require"
 	"k8s.io/klog/v2"
 )
@@ -40,7 +40,7 @@ var (
 var (
 	testBackend compute.Backend
 	testRepo    *hub.Repo
-	testCtx     *context.Context
+	testStore   *model.Store
 	testModel   *transformer.Model
 	taskPrompts TaskPrompts
 	testQueries []string
@@ -75,7 +75,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	testCtx = context.New().Checked(false)
+	testStore = model.NewStore()
 	testRepo, err = LoadRepo()
 	if err != nil {
 		fmt.Printf("Failed to LoadRepo: %v\n", err)
@@ -122,7 +122,7 @@ func TestMain(m *testing.M) {
 	if !*flagSkipLoadingWeights {
 		fmt.Printf(" - Loading model weights ...\r")
 		start := time.Now()
-		must(testModel.LoadContext(testBackend, testCtx))
+		must(testModel.LoadStore(testBackend, testStore))
 		for range 3 {
 			runtime.GC()
 		}
@@ -192,9 +192,9 @@ func readPythonEmbeddings(path string, layersToRead []int) (map[int][]float32, e
 
 func TestTransformerLayers(t *testing.T) {
 	// Ensure the weights were loaded.
-	varName := "embeddings"
-	if testCtx.In("token_embed").InspectVariableInScope(varName) == nil {
-		t.Fatalf("Variable token_embed/%s not loaded in context", varName)
+	varPath := "/token_embed/embeddings"
+	if testStore.GetVariable(varPath) == nil {
+		t.Fatalf("Variable %q not loaded in store", varPath)
 	}
 
 	layersToCheck := []int{0, 1, 2, 10, 20, 30, 40, testModel.Config.NumHiddenLayers}
@@ -208,8 +208,8 @@ func TestTransformerLayers(t *testing.T) {
 		}
 	}
 
-	exec, err := context.NewExec(testBackend, testCtx.Reuse(), func(ctx *context.Context, tokens *graph.Node) []*graph.Node {
-		_, allLayers := testModel.AllLayers(ctx, tokens, nil)
+	exec, err := model.NewExec(testBackend, testStore, func(scope *model.Scope, tokens *graph.Node) []*graph.Node {
+		_, allLayers := testModel.AllLayers(scope, tokens, nil)
 		var converted []*graph.Node
 		for _, o := range allLayers {
 			converted = append(converted, graph.ConvertDType(o, dtypes.Float32))
@@ -325,8 +325,8 @@ func TestSentenceEmbedding(t *testing.T) {
 		t.Skipf("Skipping test because %s is not available: %v", pythonPath, err)
 	}
 
-	exec, err := context.NewExec(testBackend, testCtx.Checked(false), func(ctx *context.Context, tokens *graph.Node) *graph.Node {
-		x := testModel.SentenceEmbeddingGraph(ctx, tokens, nil)
+	exec, err := model.NewExec(testBackend, testStore, func(scope *model.Scope, tokens *graph.Node) *graph.Node {
+		x := testModel.SentenceEmbeddingGraph(scope, tokens, nil)
 		return graph.ConvertDType(x, dtypes.Float32)
 	})
 	if err != nil {
@@ -376,9 +376,9 @@ func TestSentenceBatchEmbedding(t *testing.T) {
 		t.Skipf("Skipping test because %s is not available: %v", pythonPath, err)
 	}
 
-	exec, err := context.NewExec(testBackend, testCtx.Checked(false), func(ctx *context.Context, tokens *graph.Node) *graph.Node {
+	exec, err := model.NewExec(testBackend, testStore, func(scope *model.Scope, tokens *graph.Node) *graph.Node {
 		mask := graph.NotEqual(tokens, graph.Const(tokens.Graph(), testPadID))
-		x := testModel.SentenceEmbeddingGraph(ctx, tokens, mask)
+		x := testModel.SentenceEmbeddingGraph(scope, tokens, mask)
 		return graph.ConvertDType(x, dtypes.Float32)
 	})
 	if err != nil {
@@ -459,14 +459,14 @@ func TestSimilarity(t *testing.T) {
 	prompts = append(prompts, testQueries...)
 	prompts = append(prompts, testDocs...)
 	allEmbeddings := make([]*tensors.Tensor, 0, len(prompts))
-	embedder := must1(testModel.SingleSentenceEmbeddingExec(testBackend, testCtx))
+	embedder := must1(testModel.SingleSentenceEmbeddingExec(testBackend, testStore.RootScope()))
 	for _, prompt := range prompts {
 		tokens := must1(testModel.GetTokenizer()).Encode(prompt)
-		allEmbeddings = append(allEmbeddings, must1(embedder.Exec1(tokens)))
+		allEmbeddings = append(allEmbeddings, must1(embedder.Call1(tokens)))
 	}
 
 	allEmbeddingsAny := xslices.Map(allEmbeddings, func(t *tensors.Tensor) any { return t })
-	similarities := must1(graph.ExecOnce(testBackend, func(allEmbeddings []*graph.Node) *graph.Node {
+	similarities := must1(graph.CallOnce(testBackend, func(allEmbeddings []*graph.Node) *graph.Node {
 		queryEmbeddings := graph.Stack(allEmbeddings[:len(testQueries)], 0)
 		docEmbeddings := graph.Stack(allEmbeddings[len(testQueries):], 0)
 		return testModel.Similarity(queryEmbeddings, docEmbeddings)

@@ -3,7 +3,7 @@ package safetensors
 import (
 	"github.com/gomlx/compute/shapes"
 	"github.com/gomlx/go-huggingface/hub"
-	"github.com/gomlx/gomlx/pkg/core/tensors"
+	"github.com/gomlx/gomlx/core/tensors"
 	"github.com/pkg/errors"
 )
 
