@@ -8,7 +8,7 @@
 ## 📖 Overview
 
 Simple APIs for **downloading** (`hub`), **tokenizing** (`tokenizers`), (**experimental**) **model conversion** (`models/transformers`) of 
-[HuggingFace🤗](huggingface.co) transformer models using [GoMLX](https://github.com/gomlx/gomlx), and last but not least, **simplified datasets (parquet based) downloading and scanning**.
+[HuggingFace🤗](huggingface.co) transformer models using [GoMLX](https://github.com/gomlx/gomlx), and last but not least, **datasets (parquet based) downloading and scanning**.
 
 Each component is independent, and only depends on what it needs -- `hub` has no dependency on `GoMLX`, `tokenizers` has no dependence on `parquet-go` (to parse datasets), etc.
 
