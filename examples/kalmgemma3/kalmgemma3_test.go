@@ -16,6 +16,7 @@ import (
 	"github.com/gomlx/compute"
 	"github.com/gomlx/compute/dtypes"
 	"github.com/gomlx/compute/shapes"
+	"github.com/gomlx/compute/support/humanize"
 	"github.com/gomlx/compute/support/xslices"
 	"github.com/gomlx/go-huggingface/hub"
 	hftesting "github.com/gomlx/go-huggingface/internal/testing"
@@ -126,7 +127,7 @@ func TestMain(m *testing.M) {
 		for range 3 {
 			runtime.GC()
 		}
-		fmt.Printf("\r✅ Loading model weights: done (%v)\n", time.Since(start))
+		fmt.Printf("\r✅ Loading model weights: done (%v)\n", humanize.Duration(time.Since(start)))
 	}
 
 	// Run the tests
@@ -414,22 +415,22 @@ func TestSentenceBatchEmbedding(t *testing.T) {
 	batch := tensors.FromFlatDataAndDimensions(batchFlat, len(prompts), paddedLen)
 	batch.ToDevice(testBackend, 0)
 
-	fmt.Printf("- Pre-compiling model for batch ...")
+	fmt.Printf(" - Pre-compiling model ...")
 	start := time.Now()
 	err = exec.PreCompile(batch)
 	if err != nil {
 		t.Fatalf("Failed to compile graph: %+v", err)
 	}
-	fmt.Printf("done (%v)\n", time.Since(start))
+	fmt.Printf("\r✅ Pre-compiling model: done (%s)\n", humanize.Duration(time.Since(start)))
 
-	fmt.Printf("- Executing model ...")
+	fmt.Printf(" - Executing model ... ")
 	hiddenSize := testModel.Config.HiddenSize
 	if len(expectedFlatData) != len(prompts)*hiddenSize {
 		t.Fatalf("Expected %d flat floats from python embeddings, got %d", len(prompts)*hiddenSize, len(expectedFlatData))
 	}
 	start = time.Now()
 	results, err := exec.Exec(batch)
-	fmt.Printf("done (%v)\n", time.Since(start))
+	fmt.Printf("\r✅ Executing model: done (%s)\n", humanize.Duration(time.Since(start)))
 	if err != nil {
 		t.Fatalf("Failed to execute graph for batched prompts: %v", err)
 	}

@@ -7,12 +7,14 @@ import (
 	"strings"
 
 	"github.com/gomlx/compute"
+	"github.com/gomlx/compute/support/humanize"
 	"github.com/gomlx/compute/support/xslices"
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/models/safetensors"
 	"github.com/gomlx/go-huggingface/tokenizers"
 	"github.com/gomlx/gomlx/ml/model"
 	"github.com/pkg/errors"
+	"k8s.io/klog/v2"
 )
 
 // Model holds all the configuration loaded about the model.
@@ -146,7 +148,8 @@ func (m *Model) LoadStoreFiltered(backend compute.Backend, store *model.Store, f
 		subScope.VariableWithValue(varName, tensorToLoad)
 	}
 
-	fmt.Printf("\n--> LoadStoreFiltered: Loaded %d parameters (%d bytes)\n", totalParams, totalBytes)
+	klog.V(1).Infof("LoadStoreFiltered: Loaded %s parameters (%s bytes)",
+		humanize.Count(totalParams), humanize.Bytes(totalBytes))
 	m.totalParameters = &totalParams
 	m.totalBytes = &totalBytes
 	return nil

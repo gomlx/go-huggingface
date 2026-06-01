@@ -10,6 +10,7 @@ import (
 
 	"github.com/gomlx/compute"
 	"github.com/gomlx/compute/dtypes"
+	"github.com/gomlx/compute/support/humanize"
 	"github.com/gomlx/go-huggingface/hub"
 	hftesting "github.com/gomlx/go-huggingface/internal/testing"
 	"github.com/gomlx/go-huggingface/models/transformer"
@@ -117,7 +118,7 @@ func TestMain(m *testing.M) {
 		for range 3 {
 			runtime.GC()
 		}
-		fmt.Printf("\r✅ Loading model weights: done (%v)\n", time.Since(start))
+		fmt.Printf("\r✅ Loading model weights: done (%s)\n", humanize.Duration(time.Since(start)))
 	}
 
 	// Run the tests
