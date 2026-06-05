@@ -80,6 +80,10 @@ func main() {
 
 	metaTable.Row("SHA", info.CommitHash)
 
+	if info.UsedStorage > 0 {
+		metaTable.Row("Used Storage", humanize.Bytes(info.UsedStorage))
+	}
+
 	if *fullFlag {
 		metaTable.Row("Private", fmt.Sprintf("%t", info.Private))
 		if info.LibraryName != "" {
@@ -90,9 +94,6 @@ func main() {
 		}
 		if info.Gated != nil {
 			metaTable.Row("Gated", fmt.Sprintf("%v", info.Gated))
-		}
-		if info.UsedStorage > 0 {
-			metaTable.Row("Used Storage", humanize.Bytes(info.UsedStorage))
 		}
 		if !info.CreatedAt.IsZero() {
 			metaTable.Row("Created At", info.CreatedAt.Local().Format(time.RFC1123))
