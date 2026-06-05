@@ -5,11 +5,12 @@ package downloader
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
 	"path"
+	"strings"
 
 	"github.com/pkg/errors"
 
@@ -113,9 +114,22 @@ func (m *Manager) Download(ctx context.Context, url string, filePath string, cal
 	if err != nil {
 		return errors.Wrapf(err, "failed downloading %q", url)
 	}
-	// _ = resp.Header.Write(os.Stdout)
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("bad status code %d: %q", resp.StatusCode, resp.Header.Get("X-Error-Message"))
+		defer resp.Body.Close()
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		var jsonErr struct {
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal(bodyBytes, &jsonErr); err == nil && jsonErr.Error != "" {
+			return errors.Errorf("bad status code %d: %s", resp.StatusCode, jsonErr.Error)
+		}
+		if bodyStr := strings.TrimSpace(string(bodyBytes)); bodyStr != "" {
+			return errors.Errorf("bad status code %d: %s", resp.StatusCode, bodyStr)
+		}
+		if errMsg := resp.Header.Get("X-Error-Message"); errMsg != "" {
+			return errors.Errorf("bad status code %d: %q", resp.StatusCode, errMsg)
+		}
+		return errors.Errorf("bad status code %d: %s", resp.StatusCode, resp.Status)
 	}
 
 	contentLength := resp.ContentLength
