@@ -86,7 +86,7 @@ type StructDef struct {
 }
 
 func resolveParquetField(field parquet.Field, defs *[]StructDef) FieldDef {
-	goName := toCamelCase(field.Name())
+	goName := ToCamelCase(field.Name())
 	jsonName := field.Name()
 	var goType string
 	var isList bool
@@ -166,12 +166,13 @@ func (d *Dataset) GenerateGoStruct(config, split string) (string, error) {
 
 	parts := strings.Split(d.ID, "/")
 	namePart := parts[len(parts)-1]
-	rootStructName := toCamelCase(namePart) + "Record"
+	rootStructName := ToCamelCase(namePart) + "Record"
 
 	return GenerateGoStructFromParquet(downloadedPaths[0], rootStructName)
 }
 
-func toCamelCase(s string) string {
+// ToCamelCase converts a snake_case string to CamelCase, taking into account common abbreviations.
+func ToCamelCase(s string) string {
 	parts := strings.Split(s, "_")
 	for i := range parts {
 		if len(parts[i]) > 0 {
