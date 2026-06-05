@@ -33,6 +33,7 @@ See examples:
 
 ```go
 import (
+    "github.com/gomlx/compute/support/humanize"
     "github.com/gomlx/go-huggingface/hub"
     "github.com/gomlx/go-huggingface/tokenizers"
 )
@@ -61,9 +62,9 @@ var (
 for _, modelID := range hfModelIDs {
 	fmt.Printf("\n%s:\n", modelID)
 	repo := hub.New(modelID).WithAuth(hfAuthToken)
-	for fileName, err := range repo.IterFileNames() {
+	for fileInfo, err := range repo.IterFileInfos() {
 		if err != nil { panic(err) }
-		fmt.Printf("\t%s\n", fileName)
+		fmt.Printf("\t%s - %s\n", fileInfo.Name, humanize.Bytes(fileInfo.Size))
 	}
 }
 ```
