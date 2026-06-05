@@ -44,6 +44,26 @@ func (r *Repo) IterFileNames() iter.Seq2[string, error] {
 	}
 }
 
+// IterFileInfos iterate over the FileInfo of the files stored in the repo.
+// It doesn't trigger the downloading of the repo, only of the repo info.
+func (r *Repo) IterFileInfos() iter.Seq2[*FileInfo, error] {
+	// Download info and files.
+	err := r.DownloadInfo(false)
+	if err != nil {
+		// Error downloading: yield error only.
+		return func(yield func(*FileInfo, error) bool) {
+			yield(nil, err)
+		}
+	}
+	return func(yield func(*FileInfo, error) bool) {
+		for _, fi := range r.info.Siblings {
+			if !yield(fi, nil) {
+				return
+			}
+		}
+	}
+}
+
 // HasFile returns whether the repo has given fileName.
 // Notice fileName is relative to the repository, not in local disk.
 //
