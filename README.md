@@ -27,6 +27,10 @@ See examples:
   
 🚧 **EXPERIMENTAL and IN DEVELOPMENT**: By no means does it cover all models/tokenizers/dataset types in HuggingFace, but support is continuously expanding (we add support for the models we are using, or when someone asks for it). Models are easy to run, datasets are easy to scan, tokenizers come configured from HuggingFace, etc. But ... it is still under development -- and on that note: contributions and suggestions are most welcome.
 
+
+
+---
+
 ## Info/Download from HuggingFace Hub
 
 **Package**: `github.com/gomlx/go-huggingface/hub`
@@ -120,6 +124,9 @@ protectai/deberta-v3-base-zeroshot-v1-onnx:
 	tokenizer_class=DebertaV2Tokenizer
 …
 ```
+
+
+---
 
 ## HuggingFace Tokenizers
 
@@ -215,7 +222,9 @@ Sentence:	The book is on the table.
 Tokens:  	[101 1996 2338 2003 2006 1996 2795 1012 102 0 0 0…]
 ```
 
---
+
+
+---
 
 ## Importing HuggingFace Transformer Models in GoMLX
 
@@ -251,7 +260,9 @@ model.LoadContext(ctx)
 // embeddings := model.BuildGraph(ctx, inputTokens)
 ```
 
---
+
+
+---
 
 ## Parsing HuggingFace Datasets
 
@@ -384,6 +395,8 @@ Record #10:	Score=0.925 Text="News of the Week\nBarrie Spring Studio Tour\nApril
 10 records read!
 …
 ```
+
+
 
 ---
 
