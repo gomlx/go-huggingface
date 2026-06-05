@@ -230,34 +230,48 @@ Tokens:  	[101 1996 2338 2003 2006 1996 2795 1012 102 0 0 0…]
 
 **Package**: `github.com/gomlx/go-huggingface/models/transformer`
 
-> **EXPERIMENTAL**: fresh from the oven, and likely only works for a few models now, but it should be easy to extend the support for other models.
+> 🚧 **EXPERIMENTAL**: fresh from the oven, and likely only works for a few models now, but it should be easy to extend the support for other models -- feel free add an issue to any model you want to use.
 
 The `models/transformer` package allows downloading and inspecting HuggingFace transformer models, reading their configurations and weights, and building a `GoMLX` computation graph dynamically based on the model architectures (such as `sentence_transformers` pipelines).
 
 ### Example with `tencent/KaLM-Embedding-Gemma3-12B-2511`
 
+See full example in [`./examples/kalmgemma3/kalmgemma3_test.go`](https://github.com/gomlx/go-huggingface/blob/main/examples/kalmgemma3/kalmgemma3_test.go)
+
 ```go
 import (
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/models/transformer"
-	"github.com/gomlx/gomlx/pkg/ml/context"
+	"github.com/gomlx/gomlx/ml/model"
 )
 
 // 1. Download configuration and weights from HuggingFace
 repo := hub.New("tencent/KaLM-Embedding-Gemma3-12B-2511").WithAuth(hfAuthToken)
-model, err := transformer.LoadModel(repo)
+hfModel, err := transformer.LoadModel(repo)
 if err != nil { panic(err) }
+hfModel.WithCausalMask(true)
+tokenizer := must1(hfModel.GetTokenizer())
+padID, err := tokenizer.SpecialTokenID(api.TokPad)
 
 // Print a summary of the model features and sizes:
-fmt.Println(model.Description())
+fmt.Println(hfModel.Description())
 
 // 2. Load the loaded weights to a GoMLX context
-ctx := context.New()
-model.LoadContext(ctx)
+backend := compute.MustNew()
+store := model.NewStore()
+err := hfModel.LoadStore(backend, store)  // Load model weights into the store.
 
-// 3. Build a GoMLX graph for the model. 
-// Assuming `inputTokens` is a `*graph.Node` with shape [batch_size, sequence_length]
-// embeddings := model.BuildGraph(ctx, inputTokens)
+// 3. Build a GoMLX graph and executor for the model.
+kalmExec, err := model.NewExec1(testBackend, testStore, func(scope *model.Scope, tokens *graph.Node) *graph.Node {
+	x := hfModel.SentenceEmbeddingGraph(scope, tokens, nil)
+	return graph.ConvertDType(x, dtypes.Float32)
+})
+
+// 4. Embed sentences ...
+tokens := tokenzier.Encode(prompt)
+embeddings := kalmExec.MustCall(tokens)
+
+//...
 ```
 
 
