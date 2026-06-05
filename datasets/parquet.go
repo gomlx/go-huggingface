@@ -103,8 +103,8 @@ func CreateParquetReader[T any](ds *Dataset, config, split string) (*parquet.Gen
 	return reader, nil
 }
 
-// IterParquetFromDataset downloads all Parquet files associated with the dataset's config and split
-// and iterates over all their records sequentially.
+// IterParquetFromDataset downloads Parquet files associated with the dataset's config and split
+// on demand (one by one) and iterates over all their records sequentially.
 // It will yield an error and stop if there's an issue acquiring or reading the files.
 func IterParquetFromDataset[T any](ds *Dataset, config, split string) iter.Seq2[T, error] {
 	return func(yield func(T, error) bool) {
@@ -114,14 +114,20 @@ func IterParquetFromDataset[T any](ds *Dataset, config, split string) iter.Seq2[
 			yield(zero, errors.WithMessage(err, "failed to get parquet files info for dataset"))
 			return
 		}
-		downloadedPaths, err := ds.DownloadCtx(context.Background(), filesSelection...)
-		if err != nil {
-			var zero T
-			yield(zero, errors.WithMessage(err, "failed to download parquet files for dataset"))
-			return
-		}
 
-		for _, filePath := range downloadedPaths {
+		for _, pf := range filesSelection {
+			downloadedPaths, err := ds.DownloadCtx(context.Background(), pf)
+			if err != nil {
+				var zero T
+				yield(zero, errors.WithMessage(err, "failed to download parquet file for dataset"))
+				return
+			}
+			if len(downloadedPaths) == 0 {
+				var zero T
+				yield(zero, errors.New("no files downloaded"))
+				return
+			}
+			filePath := downloadedPaths[0]
 			for record, err := range IterParquetFromFile[T](filePath) {
 				if !yield(record, err) {
 					return
