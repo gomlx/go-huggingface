@@ -7,10 +7,10 @@
 
 ## 📖 Overview
 
-Simple APIs for **downloading** (`hub`), **tokenizing** (`tokenizers`), (**experimental**) **model conversion** (`models/transformers`) of 
-[HuggingFace🤗](huggingface.co) transformer models using [GoMLX](https://github.com/gomlx/gomlx), and last but not least, **datasets (parquet based) downloading and scanning**.
+Simple APIs for **downloading** (`hub`), **tokenizing** (`tokenizers`), (**experimental**) **model conversion** (`models/transformer`) of 
+[HuggingFace🤗](https://huggingface.co) transformer models using [GoMLX](https://github.com/gomlx/gomlx), and last but not least, **datasets (parquet-based) downloading and scanning**.
 
-Each component is independent, and only depends on what it needs -- `hub` has no dependency on `GoMLX`, `tokenizers` has no dependence on `parquet-go` (to parse datasets), etc.
+Each component is independent, and only depends on what it needs -- `hub` has no dependency on `GoMLX`, `tokenizers` has no dependency on `parquet-go` (to parse datasets), etc.
 
 It also provides a `bucket` library to bucketize sentences to be tokenized into buckets of increasing sizes (e.g.: powers-of-2, two-bits, etc.) with automatic padding, and
 maximum delay configuration (for online systems).
@@ -18,26 +18,29 @@ maximum delay configuration (for online systems).
 See examples:
  
 * [MS MARCO dataset](https://github.com/gomlx/go-huggingface/tree/main/examples/msmarco): 
-  a small library that makes it easy access to this specific dataset, and serves as an example to access others.
+  a small library that provides easy access to this specific dataset, and serves as an example of how to access others.
   It includes [benchmark_embed](https://github.com/gomlx/go-huggingface/tree/main/examples/msmarco/benchmark_embed/),
   a command-line benchmark of sentence embeddings, that also serves as an example of how to use the library.
 * [Tencent's KaLM-Embedding-Gemma3-12B-2511 Sentence Encoder](https://github.com/gomlx/go-huggingface/tree/main/examples/kalmgemma3): 
-  a small library that makes it trivial to use this model and serves as an example how to use others.
-* [BAAI (Beijing Academy of Artificial Intelligence) BGE Small Sentence Embedder (English) v1.5](https://github.com/gomlx/go-huggingface/tree/main/examples/BAAI-bge-small-en-v1.5): a small and very performatic sentence embedder (BERT based).
+  a small library that makes it trivial to use this model and serves as an example of how to use others.
+* [BAAI (Beijing Academy of Artificial Intelligence) BGE Small Sentence Embedder (English) v1.5](https://github.com/gomlx/go-huggingface/tree/main/examples/BAAI-bge-small-en-v1.5): a small and very performant sentence embedder (BERT-based).
   
-🚧 **EXPERIMENTAL and IN DEVELOPMENT**: By no means it covers all models/tokenizers/dataset types in HuggingFace, but support is continuously expanding (we add support for the models we are using, or when someone asks for). Models are easy to run, datasets are easy to scan, tokenizers come configured from HuggingFace, etc. But ... it is still under development -- and on that note: contributions and suggestions are most welcome.
+🚧 **EXPERIMENTAL and IN DEVELOPMENT**: By no means does it cover all models/tokenizers/dataset types in HuggingFace, but support is continuously expanding (we add support for the models we are using, or when someone asks for it). Models are easy to run, datasets are easy to scan, tokenizers come configured from HuggingFace, etc. But ... it is still under development -- and on that note: contributions and suggestions are most welcome.
 
 ## Info/Download from HuggingFace Hub
 
 **Package**: `github.com/gomlx/go-huggingface/hub`
 
-It provides information from any repo in the Hub (models, datasets, etc.), and allows provides a very simple
+It provides information from any repo in the Hub (models, datasets, etc.), and provides a very simple
 API to download files, sharing the cache format with the original HuggingFace library (so both share the same cache).
 
 ### Preamble: Imports And Variables
 
 ```go
 import (
+    "fmt"
+    "os"
+
     "github.com/gomlx/compute/support/humanize"
     "github.com/gomlx/go-huggingface/hub"
     "github.com/gomlx/go-huggingface/tokenizers"
@@ -122,11 +125,11 @@ protectai/deberta-v3-base-zeroshot-v1-onnx:
 
 **Package**: `github.com/gomlx/go-huggingface/tokenizers`
 
-The `tokenizers` package provides a generic  `Tokenizer` API and a set of tokenizer implementations.
+The `tokenizers` package provides a generic `Tokenizer` API and a set of tokenizer implementations.
 
-### Tokenize for using Go-only "SentencePiece" tokenizer (for all Gemma models)
+### Tokenize using the Go-only "SentencePiece" tokenizer (for all Gemma models)
 
-* The output "Downloaded" message happens only the tokenizer file is not yet cached, so only the first time:
+* The output "Downloaded" message happens only when the tokenizer file is not yet cached, so only the first time:
 
 ```go
 repo := hub.New("google/gemma-2-2b-it").WithAuth(hfAuthToken)
@@ -151,7 +154,7 @@ The library also provides the `github.com/gomlx/go-huggingface/tokenizers/bucket
 bucket sentences in similar length ones, which can then be used to create batches of tokens
 with minimal padding.
 
-If provides different bucketing strategies (e.g.: Power-of-2, Power-of-X, Two-Bits, etc.), 
+It provides different bucketing strategies (e.g.: Power-of-2, Power-of-X, Two-Bits, etc.), 
 and maximum latency waiting for buckets (for online usage), parallelization of tokenization,
 and is very simple to use:
 
@@ -178,10 +181,10 @@ wg.Go(func() {
 ...
 ```
 
-### Tokenize for a [Sentence Transformer](https://www.sbert.net/) derived model, using Rust's based [github.com/daulet/tokenizers](https://github.com/daulet/tokenizers) tokenizer
+### Tokenize for a [Sentence Transformer](https://www.sbert.net/) derived model, using the Rust-based [github.com/daulet/tokenizers](https://github.com/daulet/tokenizers) package
 
-For most tokenizers in HuggingFace though, there is no Go-only version yet, and for now we use the 
-[github.com/daulet/tokenizers](https://github.com/daulet/tokenizers), which is based on a fast tokenizer written in Rust.
+For most tokenizers on Hugging Face though, there is no Go-only version yet, and for now we use the 
+[github.com/daulet/tokenizers](https://github.com/daulet/tokenizers) package, which is based on a fast tokenizer written in Rust.
 
 It requires installation of the built Rust library though, 
 see [github.com/daulet/tokenizers](https://github.com/daulet/tokenizers) on how to install it, 
@@ -189,8 +192,8 @@ they provide prebuilt binaries.
 
 > **Note**: `daulet/tokenizers` also provides a simple downloader, so `go-huggingface` is not strictly necessary -- 
 > if you don't want the extra dependency and only need the tokenizer, you don't need to use it. `go-huggingface` 
-> helps by allowing also downloading other files (models, datasets), and a shared cache across different projects 
-> and `huggingface-hub` (the python downloader library).
+> helps by also allowing the download of other files (models, datasets), and sharing the cache across different projects 
+> with `huggingface-hub` (the Python downloader library).
 
 ```go
 import dtok "github.com/daulet/tokenizers"
@@ -216,9 +219,9 @@ Tokens:  	[101 1996 2338 2003 2006 1996 2795 1012 102 0 0 0…]
 
 ## Importing HuggingFace Transformer Models in GoMLX
 
-**Package**: `github.com/gomlx/go-huggingface/models/transformers`
+**Package**: `github.com/gomlx/go-huggingface/models/transformer`
 
-> **EXPERIMENTAL**: fresh from the oven, and likely only works for few models now, but it should be easy to extend the support for other models.
+> **EXPERIMENTAL**: fresh from the oven, and likely only works for a few models now, but it should be easy to extend the support for other models.
 
 The `models/transformer` package allows downloading and inspecting HuggingFace transformer models, reading their configurations and weights, and building a `GoMLX` computation graph dynamically based on the model architectures (such as `sentence_transformers` pipelines).
 
@@ -252,11 +255,11 @@ model.LoadContext(ctx)
 
 ## Parsing HuggingFace Datasets
 
-** Package: `github.com/gomlx/go-huggingface/datasets`
+**Package**: `github.com/gomlx/go-huggingface/datasets`
 
 The `datasets` package provides functionality to retrieve dataset information and download files, integrated with `hub`.
-We are going to use the [HuggingFaceFW/fineweb](https://huggingface.co/datasets/HuggingFaceFW/fineweb) as an example,
-exploring its structure and downloading one of its sample files (~2.5Gb of data) to parse the `.parquet` file.
+We are going to use [HuggingFaceFW/fineweb](https://huggingface.co/datasets/HuggingFaceFW/fineweb) as an example,
+exploring its structure and downloading one of its sample files (~2.0 GiB of data) to parse the `.parquet` file.
 
 First, you can use the `datasets` package to understand the dataset structure:
 
@@ -296,7 +299,7 @@ We use the `github.com/gomlx/go-huggingface/cmd/generate_dataset_structs` to gen
 structure for the Parquet files:
 
 ```bash
-go run github.com/gomlx/go-huggingface/cmd/generate_dataset_structs -dataset HuggingFaceFW/fineweb
+go run ./cmd/generate_dataset_structs -dataset HuggingFaceFW/fineweb
 ```
 
 Outputs:
@@ -317,6 +320,10 @@ type FinewebRecord struct {
 ```
 
 ### Iterating (Reading) Over Parquet Files
+
+With the `struct FinewebRecord` created, we can now iterate over the parquet files. The `IterParquetFromDataset` will 
+iterate over all parquet records if allowed, but it will only download one file at a time, so since we only list 10 
+rows, it will only download the first file (about 2.2Gb).
 
 ```go
 var (
@@ -402,17 +409,6 @@ to parse and convert the ONNX model to GoMLX, and then
 for a couple of sentences.
 
 ```go
-import (
-    "github.com/gomlx/compute"
-    onnxparser "github.com/gomlx/onnx-gomlx/onnx/parser"
-    "github.com/gomlx/gomlx/core/graph"
-    "github.com/gomlx/gomlx/ml/model"
-
-    // Default backends.
-    _ "github.com/gomlx/gomlx/backends/default"
-)
-
-%%
 import (
     "github.com/gomlx/compute"
     "github.com/gomlx/go-huggingface/tokenizers/bucket"
