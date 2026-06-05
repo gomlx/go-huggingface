@@ -237,7 +237,7 @@ func (d *Dataset) DownloadParquetFilesInfo(ctx context.Context, forceDownload bo
 		err := d.Repo.GetDownloadManager().LockedDownload(ctx, d.datasetServerParquetURL(), infoFilePath, forceDownload, nil)
 		if err != nil {
 			// Fallback to crawling repository directly
-			klog.Warningf("Failed to retrieve dataset parquet files info from server: %v. Crawling repository directly...", err)
+			klog.V(2).Infof("Failed to retrieve dataset parquet files info from server: %v. Crawling repository directly...", err)
 			return d.crawlRepositoryParquetFiles(ctx, infoFilePath)
 		}
 	}
@@ -273,16 +273,41 @@ func (d *Dataset) crawlRepositoryParquetFiles(ctx context.Context, infoFilePath 
 		config := "default"
 		split := "train"
 
+		// Heuristic detection based on file path
+		dir := path.Dir(fi.Name)
+		if dir != "." && dir != "" && dir != "data" && dir != "parquet" {
+			parts := strings.Split(dir, "/")
+			if (parts[0] == "data" || parts[0] == "parquet") && len(parts) > 1 {
+				parts = parts[1:]
+			}
+			config = strings.Join(parts, "-")
+		}
+
+		base := path.Base(fi.Name)
+		baseLower := strings.ToLower(base)
+		if strings.Contains(baseLower, "train") {
+			split = "train"
+		} else if strings.Contains(baseLower, "validation") || strings.Contains(baseLower, "val") {
+			split = "validation"
+		} else if strings.Contains(baseLower, "test") {
+			split = "test"
+		} else if strings.Contains(baseLower, "dev") {
+			split = "validation"
+		}
+
+		// Refine using official info if available
 		if d.info != nil {
 			for c := range d.info.DatasetInfo {
-				if strings.Contains(fi.Name, "/"+c+"/") || strings.Contains(fi.Name, "_"+c+"_") {
+				normC := strings.ReplaceAll(c, "-", "/")
+				if strings.Contains(fi.Name, "/"+c+"/") || strings.Contains(fi.Name, "/"+normC+"/") || strings.Contains(fi.Name, "_"+c+"_") {
 					config = c
 					break
 				}
 			}
 			configInfo := d.info.DatasetInfo[config]
 			for s := range configInfo.Splits {
-				if strings.Contains(fi.Name, "/"+s+"/") || strings.Contains(fi.Name, "_"+s+"_") || strings.Contains(path.Base(fi.Name), s) {
+				normS := strings.ReplaceAll(s, "-", "/")
+				if strings.Contains(fi.Name, "/"+s+"/") || strings.Contains(fi.Name, "/"+normS+"/") || strings.Contains(fi.Name, "_"+s+"_") || strings.Contains(base, s) {
 					split = s
 					break
 				}

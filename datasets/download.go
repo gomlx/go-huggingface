@@ -11,6 +11,7 @@ import (
 	"github.com/gomlx/compute/support/humanize"
 	"github.com/gomlx/go-huggingface/internal/files"
 	"github.com/pkg/errors"
+	"k8s.io/klog/v2"
 )
 
 // ListFiles returns the parquet files that match the given config and split.
@@ -37,7 +38,8 @@ func (d *Dataset) Download(files ...ParquetFile) ([]string, error) {
 	return d.DownloadCtx(context.Background(), files...)
 }
 
-// DownloadCtx is like Download but accepts a context for cancellation support.
+// DownloadCtx downloads the given parquet files using the context ctx to manage interruption.
+// It returns the list of absolute paths where the files were downloaded.
 func (d *Dataset) DownloadCtx(ctx context.Context, parquetFiles ...ParquetFile) (downloadedPaths []string, err error) {
 	if len(parquetFiles) == 0 {
 		return nil, nil
@@ -48,6 +50,27 @@ func (d *Dataset) DownloadCtx(ctx context.Context, parquetFiles ...ParquetFile) 
 	repoCacheDir, err := d.CacheDir()
 	if err != nil {
 		return nil, err
+	}
+
+	// Compute total bytes to download and list of files needing download
+	var totalBytesToDownload uint64
+	var downloadList []string
+	logFileList := d.Verbosity >= 2 || klog.V(1).Enabled()
+	for _, pf := range parquetFiles {
+		destPath := path.Join(repoCacheDir, "parquet", pf.Config, pf.Split, pf.Filename)
+		if !files.Exists(destPath) {
+			totalBytesToDownload += uint64(pf.Size)
+			if logFileList {
+				downloadList = append(downloadList, fmt.Sprintf("  - %s (%s)", pf.Filename, humanize.Bytes(uint64(pf.Size))))
+			}
+		}
+	}
+
+	if logFileList && len(downloadList) > 0 {
+		klog.Infof("Downloading %d files (total %s):", len(downloadList), humanize.Bytes(totalBytesToDownload))
+		for _, item := range downloadList {
+			fmt.Println(item)
+		}
 	}
 
 	ctx, cancelFn := context.WithCancel(ctx)
@@ -66,12 +89,16 @@ func (d *Dataset) DownloadCtx(ctx context.Context, parquetFiles ...ParquetFile) 
 	lastPrintTime := time.Now()
 
 	ratePrintFn := func() {
+		totalStr := ""
+		if totalBytesToDownload > 0 {
+			totalStr = " / " + humanize.Bytes(totalBytesToDownload) + " total"
+		}
 		if firstError == nil {
-			fmt.Printf("\rDownloaded %d/%d files %c %s downloaded    ",
-				numDownloadedFiles, requireDownload, busyLoop[busyLoopPos], humanize.Bytes(allFilesDownloaded))
+			fmt.Printf("\rDownloaded %d/%d files %c %s%s downloaded    ",
+				numDownloadedFiles, requireDownload, busyLoop[busyLoopPos], humanize.Bytes(allFilesDownloaded), totalStr)
 		} else {
-			fmt.Printf("\rDownloaded %d/%d files, %s downloaded: error - %v     ",
-				numDownloadedFiles, requireDownload, humanize.Bytes(allFilesDownloaded),
+			fmt.Printf("\rDownloaded %d/%d files, %s%s downloaded: error - %v     ",
+				numDownloadedFiles, requireDownload, humanize.Bytes(allFilesDownloaded), totalStr,
 				firstError)
 		}
 		busyLoopPos = (busyLoopPos + 1) % len(busyLoop)
@@ -107,7 +134,9 @@ func (d *Dataset) DownloadCtx(ctx context.Context, parquetFiles ...ParquetFile) 
 		go func(idx int, pf ParquetFile, destPath string) {
 			defer wg.Done()
 
+			downloadingMu.Lock()
 			requireDownload++
+			downloadingMu.Unlock()
 			err := downloadManager.LockedDownload(ctx, pf.URL, destPath, false, func(downloadedBytes, totalBytes int64) {
 				downloadingMu.Lock()
 				defer downloadingMu.Unlock()
@@ -140,8 +169,12 @@ func (d *Dataset) DownloadCtx(ctx context.Context, parquetFiles ...ParquetFile) 
 			if firstError != nil {
 				fmt.Println()
 			} else {
-				fmt.Printf("\rDownloaded %d/%d files, %s downloaded         \n",
-					numDownloadedFiles, requireDownload, humanize.Bytes(allFilesDownloaded))
+				totalStr := ""
+				if totalBytesToDownload > 0 {
+					totalStr = " / " + humanize.Bytes(totalBytesToDownload) + " total"
+				}
+				fmt.Printf("\rDownloaded %d/%d files, %s%s downloaded         \n",
+					numDownloadedFiles, requireDownload, humanize.Bytes(allFilesDownloaded), totalStr)
 			}
 		}
 	}

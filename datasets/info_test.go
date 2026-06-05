@@ -68,3 +68,14 @@ func TestDatasetStringFineweb(t *testing.T) {
 	assert.Contains(t, desc, "Dataset ID: HuggingFaceFW/fineweb")
 	assert.Contains(t, desc, "sample-10BT")
 }
+
+func TestDatasetListFilesFineweb(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		t.Skip("Skipping network tests in CI")
+	}
+
+	ds := New("HuggingFaceFW/fineweb")
+	files, err := ds.ListFiles("sample-10BT", "train")
+	require.NoError(t, err)
+	assert.NotEmpty(t, files, "Should find parquet files for sample-10BT config")
+}
