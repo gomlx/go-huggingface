@@ -73,17 +73,17 @@ The result looks like this:
 
 ```
 google/gemma-2-2b-it:
-	.gitattributes
-	README.md
-	config.json
-	generation_config.json
-	model-00001-of-00002.safetensors
-	model-00002-of-00002.safetensors
-	model.safetensors.index.json
-	special_tokens_map.json
-	tokenizer.json
-	tokenizer.model
-	tokenizer_config.json
+	.gitattributes - 1.5 KiB
+	README.md - 28.4 KiB
+	config.json - 838 B
+	generation_config.json - 187 B
+	model-00001-of-00002.safetensors - 4.6 GiB
+	model-00002-of-00002.safetensors - 229.5 MiB
+	model.safetensors.index.json - 23.7 KiB
+	special_tokens_map.json - 636 B
+	tokenizer.json - 16.7 MiB
+	tokenizer.model - 4.0 MiB
+	tokenizer_config.json - 45.9 KiB
 …
 ```
 
