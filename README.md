@@ -27,7 +27,12 @@ See examples:
   
 🚧 **EXPERIMENTAL and IN DEVELOPMENT**: By no means it covers all models/tokenizers/dataset types in HuggingFace, but support is continuously expanding (we add support for the models we are using, or when someone asks for). Models are easy to run, datasets are easy to scan, tokenizers come configured from HuggingFace, etc. But ... it is still under development -- and on that note: contributions and suggestions are most welcome.
 
-## Packages `hub`: Downloding info and files from a repository
+## Info/Download from HuggingFace Hub
+
+**Package**: `github.com/gomlx/go-huggingface/hub`
+
+It provides information from any repo in the Hub (models, datasets, etc.), and allows provides a very simple
+API to download files, sharing the cache format with the original HuggingFace library (so both share the same cache).
 
 ### Preamble: Imports And Variables
 
@@ -113,7 +118,11 @@ protectai/deberta-v3-base-zeroshot-v1-onnx:
 …
 ```
 
-## Package `tokenizers`: an API and a set of tokenizer implementations
+## HuggingFace Tokenizers
+
+**Package**: `github.com/gomlx/go-huggingface/tokenizers`
+
+The `tokenizers` package provides a generic  `Tokenizer` API and a set of tokenizer implementations.
 
 ### Tokenize for using Go-only "SentencePiece" tokenizer (for all Gemma models)
 
@@ -203,75 +212,11 @@ Sentence:	The book is on the table.
 Tokens:  	[101 1996 2338 2003 2006 1996 2795 1012 102 0 0 0…]
 ```
 
-## Package [`onnx-gomlx`](https://github.com/gomlx/onnx-gomlx): convert ONNX models to GoMLX
+--
 
-### Download and execute ONNX model for [`sentence-transformers/all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)
+## Importing HuggingFace Transformer Models in GoMLX
 
-Only the first 3 lines are actually demoing `go-huggingface`.
-The remainder lines uses [`github.com/gomlx/onnx-gomlx`](https://github.com/gomlx/onnx-gomlx)
-to parse and convert the ONNX model to GoMLX, and then
-[`github.com/gomlx/gomlx`](github.com/gomlx/gomlx) to execute the converted model
-for a couple of sentences.
-
-```go
-// Get ONNX model.
-repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(hfAuthToken)
-onnxFilePath, err := repo.DownloadFile("onnx/model.onnx")
-if err != nil { panic(err) }
-onnxModel, err := onnxparser.FromFile(onnxFilePath)
-if err != nil { panic(err) }
-
-// Convert ONNX variables to a GoMLX store:
-store := model.NewStore()
-err = onnxModel.VariablesToScope(store.RootScope())
-if err != nil { panic(err) }
-
-sentences := []string{
-    "This is an example sentence", 
-    "Each sentence is converted"}
-inputIDs := [][]int64{
-    {101, 2023, 2003, 2019, 2742, 6251,  102},
-    { 101, 2169, 6251, 2003, 4991,  102,    0}}
-tokenTypeIDs := [][]int64{
-    {0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0}}
-attentionMask := [][]int64{
-    {1, 1, 1, 1, 1, 1, 1},
-    {1, 1, 1, 1, 1, 1, 0}}
-embeddings := model.MustExecOnce(
-    compute.MustNew(), store, 
-    func (scope *model.Scope, inputs []*graph.Node) *graph.Node {
-        modelOutputs := onnxModel.CallGraph(scope, inputs[0].Graph(), map[string]*graph.Node{
-            "input_ids": inputs[0],
-            "attention_mask": inputs[1],
-            "token_type_ids": inputs[2]})
-        return modelOutputs[0]
-    }, inputIDs, attentionMask, tokenTypeIDs)
-
-fmt.Printf("Sentences: \t%q\n", sentences)
-fmt.Printf("Embeddings:\t%s\n", embeddings)
-```
-
-```
-Sentences: 	["This is an example sentence" "Each sentence is converted"]
-Embeddings:	[2][7][384]float32{
- {{0.03646, -0.01618, 0.1683, ..., 0.05556, -0.1643, -0.2967},
-  {0.7239, 0.6391, 0.1889, ..., 0.5944, 0.6205, 0.4902},
-  {0.006631, 0.02021, 0.04452, ..., 0.3466, 1.317, -0.1668},
-  ...,
-  {0.1477, -0.06402, 0.1455, ..., 0.8843, -0.3321, 0.2975},
-  {0.5216, 0.6562, 0.5608, ..., -0.03991, 0.04138, -1.404},
-  {1.082, 0.7138, 0.3988, ..., -0.2293, 0.3244, -1.031}},
- {{0.2801, 0.1164, -0.04185, ..., 0.271, -0.1684, -0.2962},
-  {0.8734, 0.4543, -0.1089, ..., 0.1366, 0.458, -0.2042},
-  {0.4749, 0.5728, 0.63, ..., 0.6521, 0.5608, -1.327},
-  ...,
-  {0.6109, 0.792, -0.4686, ..., 0.0859, 1.059, -0.2984},
-  {0.4115, 1.095, 0.2389, ..., 0.8984, 0.3683, -0.7335},
-  {0.1361, 0.5582, 0.2695, ..., 0.5426, 0.4697, -0.5304}}}
-```
-
-## Package `models/transformers`: import HuggingFace transformer models as GoMLX ones
+**Package**: `github.com/gomlx/go-huggingface/models/transformers`
 
 > **EXPERIMENTAL**: fresh from the oven, and likely only works for few models now, but it should be easy to extend the support for other models.
 
@@ -303,9 +248,15 @@ model.LoadContext(ctx)
 // embeddings := model.BuildGraph(ctx, inputTokens)
 ```
 
-## Package `datasets`: download info, files or iterate directly over Parquet records of HuggingFace datasets
+--
 
-The `datasets` package provides functionality to retrieve dataset information and download files, integrated with `hub`. We are going to use the [HuggingFaceFW/fineweb](https://huggingface.co/datasets/HuggingFaceFW/fineweb) as an example, exploring its structure and downloading one of its sample files (~2.5Gb of data) to parse the `.parquet` file.
+## Parsing HuggingFace Datasets
+
+** Package: `github.com/gomlx/go-huggingface/datasets`
+
+The `datasets` package provides functionality to retrieve dataset information and download files, integrated with `hub`.
+We are going to use the [HuggingFaceFW/fineweb](https://huggingface.co/datasets/HuggingFaceFW/fineweb) as an example,
+exploring its structure and downloading one of its sample files (~2.5Gb of data) to parse the `.parquet` file.
 
 First, you can use the `datasets` package to understand the dataset structure:
 
@@ -317,65 +268,74 @@ ds := datasets.New("HuggingFaceFW/fineweb").WithAuth(hfAuthToken)
 fmt.Println(ds.String())
 ```
 
-### Structure of file
+Outputs:
 
-You can auto-generate the Go struct for the dataset using the `generate_dataset_structs` command line tool:
+```
+Dataset ID: HuggingFaceFW/fineweb
+... (a large list of historical versions) ...
+Config: default
+  Features: date, dump, file_path, id, language, language_score, text, token_count, url
+  Splits: train (25.9G records, 85.7 TiB, 675 files)
 
-```bash
-go run github.com/gomlx/go-huggingface/cmd/generate_dataset_structs -dataset HuggingFaceFW/fineweb -config sample-10BT
+Config: sample-100BT
+  Features: date, dump, file_path, id, language, language_score, text, token_count, url
+  Splits: train (147.6M records, 438.4 GiB)
+
+Config: sample-10BT
+  Features: date, dump, file_path, id, language, language_score, text, token_count, url
+  Splits: train (14.9M records, 46.7 GiB)
+
+Config: sample-350BT
+  Features: date, dump, file_path, id, language, language_score, text, token_count, url
+  Splits: train (518.5M records, 1.4 TiB)
 ```
 
-Result:
+### Parquet Structure 
+
+We use the `github.com/gomlx/go-huggingface/cmd/generate_dataset_structs` to generate the Go 
+structure for the Parquet files:
+
+```bash
+go run github.com/gomlx/go-huggingface/cmd/generate_dataset_structs -dataset HuggingFaceFW/fineweb
+```
+
+Outputs:
+
+```go
+//... (some info messages)...
+type FinewebRecord struct {
+	Text string `json:"text" parquet:"text"`
+	ID string `json:"id" parquet:"id"`
+	Dump string `json:"dump" parquet:"dump"`
+	URL string `json:"url" parquet:"url"`
+	Date string `json:"date" parquet:"date"`
+	FilePath string `json:"file_path" parquet:"file_path"`
+	Language string `json:"language" parquet:"language"`
+	LanguageScore float64 `json:"language_score" parquet:"language_score"`
+	TokenCount int64 `json:"token_count" parquet:"token_count"`
+}
+```
+
+### Iterating (Reading) Over Parquet Files
 
 ```go
 var (
     FineWebID = "HuggingFaceFW/fineweb"
-    FineWebSampleFile = "sample/10BT/000_00000.parquet"
+    FineWebConfig = "sample-10BT"
+    FineWebSplit = "train"
 )
 
-// FinewebRecord was auto-generated by cmd/generate_dataset_structs.
-// The parquet annotations are described in: https://pkg.go.dev/github.com/parquet-go/parquet-go#SchemaOf
+// FinewwebRecord generated with github.com/gomlx/go-huggingface/cmd/generate_dataset_structs
 type FinewebRecord struct {
-	Date          string  `json:"date" parquet:"date"`
-	Dump          string  `json:"dump" parquet:"dump"`
-	FilePath      string  `json:"file_path" parquet:"file_path"`
-	ID            string  `json:"id" parquet:"id"`
-	Language      string  `json:"language" parquet:"language"`
+	Text string `json:"text" parquet:"text"`
+	ID string `json:"id" parquet:"id"`
+	Dump string `json:"dump" parquet:"dump"`
+	URL string `json:"url" parquet:"url"`
+	Date string `json:"date" parquet:"date"`
+	FilePath string `json:"file_path" parquet:"file_path"`
+	Language string `json:"language" parquet:"language"`
 	LanguageScore float64 `json:"language_score" parquet:"language_score"`
-	Text          string  `json:"text" parquet:"text,snappy"`
-	TokenCount    int64   `json:"token_count" parquet:"token_count"`
-	URL           string  `json:"url" parquet:"url,snappy"`
-}
-```
-
-Now we can read the `parquet` files into the `FinewebRecord` records:
-
-```go
-import (
-    "fmt"
-    "github.com/gomlx/go-huggingface/datasets"
-)
-
-func main() {
-    // Initialize the dataset reference.
-    ds := datasets.New(FineWebID).WithAuth(hfAuthToken)
-    
-    // Iterate over all records in the dataset:
-    // Warning: for FineWeb this will download the entire 15TB dataset. 
-    // You can break early, but the initial download request might still be large.
-    // For manual samples, you can also use datasets.IterParquetFromFile(localFile).
-    ii := 0
-    for row, err := range datasets.IterParquetFromDataset[FinewebRecord](ds, "sample-10BT", "train") {
-        if err != nil {
-            panic(err)
-        }
-        fmt.Printf("Row %0d:\tScore=%.3f Text=[%q], URL=[%s]\n", ii, row.LanguageScore, TrimString(row.Text, 50), TrimString(row.URL, 40))
-        ii++
-        if ii >= 10 {
-            break
-        }
-    }
-    fmt.Printf("%d rows read\n", ii)
+	TokenCount int64 `json:"token_count" parquet:"token_count"`
 }
 
 // TrimString returns s trimmed to at most maxLength runes. If trimmed it appends "…" at the end.
@@ -386,15 +346,151 @@ func TrimString(s string, maxLength int) string {
     runes := []rune(s)
     return string(runes[:maxLength-1]) + "…"
 }
+
+%%
+ds := datasets.New(FineWebID)
+ds.Verbosity = 2
+count := 0
+const limit = 10
+for row, err := range datasets.IterParquetFromDataset[FinewebRecord](ds, FineWebConfig, FineWebSplit) {
+    if err != nil { panic(err) }
+	fmt.Printf("Record #%02d:\tScore=%.3f Text=%q, URL=[%s]\n", count+1, row.LanguageScore, TrimString(row.Text, 50), TrimString(row.URL, 40))
+    count++
+    if count >= limit { break }
+}
+fmt.Printf("%d records read!", count)
 ```
 
-Results:
+Outputs:
 
 ```
-10 rows read
-Row 0:	Score=0.823 Text=["|Viewing Single Post From: Spoilers for the Week …"], URL=[http://daytimeroyaltyonline.com/single/…]
-Row 1:	Score=0.974 Text=["*sigh* Fundamentalist community, let me pass on s…"], URL=[http://endogenousretrovirus.blogspot.co…]
-Row 2:	Score=0.873 Text=["A novel two-step immunotherapy approach has shown…"], URL=[http://news.cancerconnect.com/]
-Row 3:	Score=0.932 Text=["Free the Cans! Working Together to Reduce Waste\nI…"], URL=[http://sharingsolution.com/2009/05/23/f…]
+Record #01:	Score=0.823 Text="|Viewing Single Post From: Spoilers for the Week …", URL=[http://daytimeroyaltyonline.com/single/…]
+Record #02:	Score=0.974 Text="*sigh* Fundamentalist community, let me pass on s…", URL=[http://endogenousretrovirus.blogspot.co…]
+Record #03:	Score=0.873 Text="A novel two-step immunotherapy approach has shown…", URL=[http://news.cancerconnect.com/]
+Record #04:	Score=0.932 Text="Free the Cans! Working Together to Reduce Waste\nI…", URL=[http://sharingsolution.com/2009/05/23/f…]
+Record #05:	Score=0.955 Text="ORLANDO, Fla. — While the Rapid Recall Exchange, …", URL=[http://supermarketnews.com/food-safety/…]
+Record #06:	Score=0.954 Text="September 28, 2010\n2010 Season - Bowman pulls dow…", URL=[http://www.augustana.edu/x22236.xml]
+Record #07:	Score=0.967 Text="Kraft Foods has taken the Cadbury chocolate brand…", URL=[http://www.fdin.org.uk/2012/01/kraft-la…]
+Record #08:	Score=0.874 Text="You must be a registered member to view this page…", URL=[http://www.golivewire.com/forums/profil…]
+Record #09:	Score=0.912 Text="|Facility Type:||Full Service Restaurant|\n|Inspec…", URL=[http://www.healthspace.com/Clients/VDH/…]
+Record #10:	Score=0.925 Text="News of the Week\nBarrie Spring Studio Tour\nApril …", URL=[http://www.jillpricestudios.ca/artist/w…]
+10 records read!
 …
 ```
+
+---
+
+## HuggingFace ONNX models
+
+**Package**: `github.com/gomlx/onnx-gomlx/onnx/`
+
+The [ONNX-GoMLX project](https://github.com/gomlx/onnx-gomlx) can convert ONNX models to GoMLX.
+It can be used for simple inference, fine-tuning, combining models, etc.
+It can even export updated-weights back to a the ONNX model.
+
+The example below reads the `.onnx` model using a repo created with the package `hub`, creates a `tokenizer`,
+uses the `bucket` to package a list of sentences into a padded batch, converts the model to a GoMLX model
+and then executes it on the batch.
+
+
+**Model**:  ONNX model for [`sentence-transformers/all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)
+
+Only the first 3 lines are actually demoing `go-huggingface`.
+The remainder lines uses [`github.com/gomlx/onnx-gomlx`](https://github.com/gomlx/onnx-gomlx)
+to parse and convert the ONNX model to GoMLX, and then
+[`github.com/gomlx/gomlx`](github.com/gomlx/gomlx) to execute the converted model
+for a couple of sentences.
+
+```go
+import (
+    "github.com/gomlx/compute"
+    onnxparser "github.com/gomlx/onnx-gomlx/onnx/parser"
+    "github.com/gomlx/gomlx/core/graph"
+    "github.com/gomlx/gomlx/ml/model"
+
+    // Default backends.
+    _ "github.com/gomlx/gomlx/backends/default"
+)
+
+%%
+import (
+    "github.com/gomlx/compute"
+    "github.com/gomlx/go-huggingface/tokenizers/bucket"
+    onnxparser "github.com/gomlx/onnx-gomlx/onnx/parser"
+    "github.com/gomlx/gomlx/core/graph"
+    "github.com/gomlx/gomlx/ml/model"
+
+    // Default backends.
+    _ "github.com/gomlx/gomlx/backends/default"
+)
+
+%%
+// Get ONNX model.
+repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(hfAuthToken)
+onnxFilePath, err := repo.DownloadFile("onnx/model.onnx")
+if err != nil { panic(err) }
+onnxModel, err := onnxparser.FromFile(onnxFilePath)
+if err != nil { panic(err) }
+
+// Convert ONNX variables to a GoMLX store:
+store := model.NewStore()
+err = onnxModel.VariablesToScope(store.RootScope())
+if err != nil { panic(err) }
+
+// Tokenize sentences.
+tokenizer := must.M1(tokenizers.New(repo))
+sentences := []string{
+    "This is an example sentence", 
+    "Each sentence is converted"}
+batchSize := len(sentences)
+sentencesChan := make(chan bucket.SentenceRef, batchSize)
+bucketChan := make(chan bucket.Bucket, 1)
+bucketizer := bucket.New(tokenizer).ByTwoBitBucket(batchSize, 8)
+var wg sync.WaitGroup
+wg.Go(func() { bucketizer.Run(sentencesChan, bucketChan) })
+wg.Go(func() { 
+    for i, s := range sentences { sentencesChan <- bucket.SentenceRef{s, i} }
+    close(sentencesChan)
+})
+
+// Create GoMLX model, and its executor:
+miniLMExec := model.MustNewExec1(
+    compute.MustNew(), store, 
+    func (scope *model.Scope, tokenIDs *graph.Node) *graph.Node {
+        tokenIDs = graph.Reshape(tokenIDs, batchSize, -1)
+        mask := graph.LogicalNot(graph.IsZero(tokenIDs))
+        return onnxModel.CallGraph(scope, tokenIDs.Graph(), map[string]*graph.Node{
+            "input_ids": tokenIDs,
+            "attention_mask": graph.ConvertDType(mask, dtypes.Int64),
+            "token_type_ids": graph.ZerosLike(tokenIDs)})[0]
+    })
+
+// Loop over batches:
+for bucket := range bucketChan {
+    tokenIDs := bucket.Batch
+    embeddings := miniLMExec.MustCall(tokenIDs)
+    fmt.Printf("Tokens: \t%v\n", tokenIDs)
+    fmt.Printf("Embeddings:\t%s\n", embeddings)
+}
+```
+
+Output:
+
+```
+Tokens: 	[101 2023 2003 2019 2742 6251 102 0 101 2169 6251 2003 4991 102 0 0]
+Embeddings:	[2][8][384]float32{
+ {{0.03652, -0.01617, 0.1683, ..., 0.05541, -0.1644, -0.2968},
+  {0.7242, 0.6394, 0.189, ..., 0.5943, 0.6209, 0.4898},
+  {0.006568, 0.02115, 0.04448, ..., 0.3471, 1.318, -0.1673},
+  ...,
+  {0.5212, 0.6566, 0.561, ..., -0.03989, 0.04128, -1.404},
+  {1.083, 0.714, 0.3987, ..., -0.2289, 0.3248, -1.031},
+  {-0.1745, 0.1791, 0.5735, ..., 0.1578, 0.002306, -0.4539}},
+ {{0.2801, 0.1163, -0.04202, ..., 0.271, -0.1684, -0.2962},
+  {0.8735, 0.4541, -0.1089, ..., 0.1362, 0.4584, -0.2045},
+  {0.475, 0.5726, 0.6299, ..., 0.6521, 0.5611, -1.327},
+  ...,
+  {0.4114, 1.094, 0.2384, ..., 0.8982, 0.3684, -0.7336},
+  {0.1354, 0.5587, 0.2699, ..., 0.5424, 0.47, -0.5306},
+  {0.2323, 0.2985, 0.1732, ..., 0.4245, 0.07187, -0.3455}}}
+  ```
