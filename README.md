@@ -33,6 +33,7 @@ See examples:
 
 ```go
 import (
+    "github.com/gomlx/compute/support/humanize"
     "github.com/gomlx/go-huggingface/hub"
     "github.com/gomlx/go-huggingface/tokenizers"
 )
@@ -61,9 +62,9 @@ var (
 for _, modelID := range hfModelIDs {
 	fmt.Printf("\n%s:\n", modelID)
 	repo := hub.New(modelID).WithAuth(hfAuthToken)
-	for fileName, err := range repo.IterFileNames() {
+	for fileInfo, err := range repo.IterFileInfos() {
 		if err != nil { panic(err) }
-		fmt.Printf("\t%s\n", fileName)
+		fmt.Printf("\t%s - %s\n", fileInfo.Name, humanize.Bytes(fileInfo.Size))
 	}
 }
 ```
@@ -72,17 +73,17 @@ The result looks like this:
 
 ```
 google/gemma-2-2b-it:
-	.gitattributes
-	README.md
-	config.json
-	generation_config.json
-	model-00001-of-00002.safetensors
-	model-00002-of-00002.safetensors
-	model.safetensors.index.json
-	special_tokens_map.json
-	tokenizer.json
-	tokenizer.model
-	tokenizer_config.json
+	.gitattributes - 1.5 KiB
+	README.md - 28.4 KiB
+	config.json - 838 B
+	generation_config.json - 187 B
+	model-00001-of-00002.safetensors - 4.6 GiB
+	model-00002-of-00002.safetensors - 229.5 MiB
+	model.safetensors.index.json - 23.7 KiB
+	special_tokens_map.json - 636 B
+	tokenizer.json - 16.7 MiB
+	tokenizer.model - 4.0 MiB
+	tokenizer_config.json - 45.9 KiB
 …
 ```
 
@@ -217,39 +218,35 @@ for a couple of sentences.
 repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(hfAuthToken)
 onnxFilePath, err := repo.DownloadFile("onnx/model.onnx")
 if err != nil { panic(err) }
-onnxModel, err := onnx.ReadFile(onnxFilePath)
+onnxModel, err := onnxparser.FromFile(onnxFilePath)
 if err != nil { panic(err) }
 
-// Convert ONNX variables to GoMLX context (which stores variables):
-ctx := context.New()
-err = onnxModel.VariablesToContext(ctx)
+// Convert ONNX variables to a GoMLX store:
+store := model.NewStore()
+err = onnxModel.VariablesToScope(store.RootScope())
 if err != nil { panic(err) }
 
-// Test input.
 sentences := []string{
-	"This is an example sentence",
-	"Each sentence is converted"}
+    "This is an example sentence", 
+    "Each sentence is converted"}
 inputIDs := [][]int64{
-	{101, 2023, 2003, 2019, 2742, 6251,  102},
-	{ 101, 2169, 6251, 2003, 4991,  102,    0}}
+    {101, 2023, 2003, 2019, 2742, 6251,  102},
+    { 101, 2169, 6251, 2003, 4991,  102,    0}}
 tokenTypeIDs := [][]int64{
-	{0, 0, 0, 0, 0, 0, 0},
-	{0, 0, 0, 0, 0, 0, 0}}
+    {0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0}}
 attentionMask := [][]int64{
-	{1, 1, 1, 1, 1, 1, 1},
-	{1, 1, 1, 1, 1, 1, 0}}
-
-// Execute GoMLX graph with model.
-embeddings := context.ExecOnce(
-	backends.New(), ctx,
-	func (ctx *context.Context, inputs []*graph.Node) *graph.Node {
-		modelOutputs := onnxModel.CallGraph(ctx, inputs[0].Graph(), map[string]*graph.Node{
-			"input_ids": inputs[0],
-			"attention_mask": inputs[1],
-			"token_type_ids": inputs[2]})
-		return modelOutputs[0]
-	}, 
-	inputIDs, attentionMask, tokenTypeIDs)
+    {1, 1, 1, 1, 1, 1, 1},
+    {1, 1, 1, 1, 1, 1, 0}}
+embeddings := model.MustExecOnce(
+    compute.MustNew(), store, 
+    func (scope *model.Scope, inputs []*graph.Node) *graph.Node {
+        modelOutputs := onnxModel.CallGraph(scope, inputs[0].Graph(), map[string]*graph.Node{
+            "input_ids": inputs[0],
+            "attention_mask": inputs[1],
+            "token_type_ids": inputs[2]})
+        return modelOutputs[0]
+    }, inputIDs, attentionMask, tokenTypeIDs)
 
 fmt.Printf("Sentences: \t%q\n", sentences)
 fmt.Printf("Embeddings:\t%s\n", embeddings)
@@ -258,20 +255,20 @@ fmt.Printf("Embeddings:\t%s\n", embeddings)
 ```
 Sentences: 	["This is an example sentence" "Each sentence is converted"]
 Embeddings:	[2][7][384]float32{
- {{0.0366, -0.0162, 0.1682, ..., 0.0554, -0.1644, -0.2967},
-  {0.7239, 0.6399, 0.1888, ..., 0.5946, 0.6206, 0.4897},
-  {0.0064, 0.0203, 0.0448, ..., 0.3464, 1.3170, -0.1670},
+ {{0.03646, -0.01618, 0.1683, ..., 0.05556, -0.1643, -0.2967},
+  {0.7239, 0.6391, 0.1889, ..., 0.5944, 0.6205, 0.4902},
+  {0.006631, 0.02021, 0.04452, ..., 0.3466, 1.317, -0.1668},
   ...,
-  {0.1479, -0.0643, 0.1457, ..., 0.8837, -0.3316, 0.2975},
-  {0.5212, 0.6563, 0.5607, ..., -0.0399, 0.0412, -1.4036},
-  {1.0824, 0.7140, 0.3986, ..., -0.2301, 0.3243, -1.0313}},
- {{0.2802, 0.1165, -0.0418, ..., 0.2711, -0.1685, -0.2961},
-  {0.8729, 0.4545, -0.1091, ..., 0.1365, 0.4580, -0.2042},
-  {0.4752, 0.5731, 0.6304, ..., 0.6526, 0.5612, -1.3268},
+  {0.1477, -0.06402, 0.1455, ..., 0.8843, -0.3321, 0.2975},
+  {0.5216, 0.6562, 0.5608, ..., -0.03991, 0.04138, -1.404},
+  {1.082, 0.7138, 0.3988, ..., -0.2293, 0.3244, -1.031}},
+ {{0.2801, 0.1164, -0.04185, ..., 0.271, -0.1684, -0.2962},
+  {0.8734, 0.4543, -0.1089, ..., 0.1366, 0.458, -0.2042},
+  {0.4749, 0.5728, 0.63, ..., 0.6521, 0.5608, -1.327},
   ...,
-  {0.6113, 0.7920, -0.4685, ..., 0.0854, 1.0592, -0.2983},
-  {0.4115, 1.0946, 0.2385, ..., 0.8984, 0.3684, -0.7333},
-  {0.1374, 0.5555, 0.2678, ..., 0.5426, 0.4665, -0.5284}}}
+  {0.6109, 0.792, -0.4686, ..., 0.0859, 1.059, -0.2984},
+  {0.4115, 1.095, 0.2389, ..., 0.8984, 0.3683, -0.7335},
+  {0.1361, 0.5582, 0.2695, ..., 0.5426, 0.4697, -0.5304}}}
 ```
 
 ## Package `models/transformers`: import HuggingFace transformer models as GoMLX ones
