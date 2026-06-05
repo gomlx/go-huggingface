@@ -56,3 +56,15 @@ func TestListFiles(t *testing.T) {
 		assert.NotEmpty(t, f.URL)
 	}
 }
+
+func TestDatasetStringFineweb(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		t.Skip("Skipping network tests in CI")
+	}
+
+	ds := New("HuggingFaceFW/fineweb")
+	desc := ds.String()
+	require.NotEmpty(t, desc)
+	assert.Contains(t, desc, "Dataset ID: HuggingFaceFW/fineweb")
+	assert.Contains(t, desc, "sample-10BT")
+}
