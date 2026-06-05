@@ -48,6 +48,10 @@ type Repo struct {
 	// It is only available after DownloadInfo is called.
 	info *RepoInfo
 
+	// extraBlobsInfo triggers adding the parameter "?blobs=true" to the request for info, which
+	// exposes the underlying Git and LFS metadata for the repository's files use by HuggingFace Hub.
+	extraBlobsInfo bool
+
 	downloadManager *downloader.Manager
 
 	useProgressBar bool
@@ -80,6 +84,7 @@ func New(id string) *Repo {
 		cacheDir:            DefaultCacheDir(),
 		Verbosity:           1,
 		MaxParallelDownload: 20, // At most 20 parallel downloads.
+		extraBlobsInfo:      true,
 	}
 }
 
@@ -101,6 +106,15 @@ func (r *Repo) WithType(repoType RepoType) *Repo {
 // Default is "https://huggingface.co" or, if set, the environment variable HF_ENDPOINT.
 func (r *Repo) WithEndpoint(endpoint string) *Repo {
 	r.hfEndpoint = endpoint
+	return r
+}
+
+// WithExtraBlobsInfo sets whether to retrieve the underlying Git and LFS metadata for the repository's files.
+// This includes file sizes.
+//
+// Default true. Set this to false to save some bandwidth if only donwloading the info.
+func (r *Repo) WithExtraBlobsInfo(extraBlobsInfo bool) *Repo {
+	r.extraBlobsInfo = extraBlobsInfo
 	return r
 }
 
