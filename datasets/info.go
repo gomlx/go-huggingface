@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strings"
 
 	"github.com/gomlx/go-huggingface/internal/files"
 	"github.com/pkg/errors"
+	"k8s.io/klog/v2"
 )
 
 // Info holds information about a dataset returned by the datasets-server.
@@ -234,7 +236,9 @@ func (d *Dataset) DownloadParquetFilesInfo(ctx context.Context, forceDownload bo
 	if !files.Exists(infoFilePath) || forceDownload {
 		err := d.Repo.GetDownloadManager().LockedDownload(ctx, d.datasetServerParquetURL(), infoFilePath, forceDownload, nil)
 		if err != nil {
-			return errors.WithMessagef(err, "failed to download dataset parquet files info")
+			// Fallback to crawling repository directly
+			klog.V(2).Infof("Failed to retrieve dataset parquet files info from server: %v. Crawling repository directly...", err)
+			return d.crawlRepositoryParquetFiles(ctx, infoFilePath)
 		}
 	}
 
@@ -249,5 +253,87 @@ func (d *Dataset) DownloadParquetFilesInfo(ctx context.Context, forceDownload bo
 		return errors.Wrapf(err, "failed to parse parquet info for dataset in %q (downloaded from %q)", infoFilePath, d.datasetServerParquetURL())
 	}
 	d.Files = response.ParquetFiles
+	return nil
+}
+
+func (d *Dataset) crawlRepositoryParquetFiles(ctx context.Context, infoFilePath string) error {
+	var parquetFiles []ParquetFile
+
+	// Ensure we have info loaded to match configs/splits if possible
+	_ = d.DownloadDatasetInfo(ctx, false)
+
+	for fi, err := range d.IterFileInfos() {
+		if err != nil {
+			return errors.Wrap(err, "failed to iterate repository files")
+		}
+		if !strings.HasSuffix(fi.Name, ".parquet") {
+			continue
+		}
+
+		config := "default"
+		split := "train"
+
+		// Heuristic detection based on file path
+		dir := path.Dir(fi.Name)
+		if dir != "." && dir != "" && dir != "data" && dir != "parquet" {
+			parts := strings.Split(dir, "/")
+			if (parts[0] == "data" || parts[0] == "parquet") && len(parts) > 1 {
+				parts = parts[1:]
+			}
+			config = strings.Join(parts, "-")
+		}
+
+		base := path.Base(fi.Name)
+		baseLower := strings.ToLower(base)
+		if strings.Contains(baseLower, "train") {
+			split = "train"
+		} else if strings.Contains(baseLower, "validation") || strings.Contains(baseLower, "val") {
+			split = "validation"
+		} else if strings.Contains(baseLower, "test") {
+			split = "test"
+		} else if strings.Contains(baseLower, "dev") {
+			split = "validation"
+		}
+
+		// Refine using official info if available
+		if d.info != nil {
+			for c := range d.info.DatasetInfo {
+				normC := strings.ReplaceAll(c, "-", "/")
+				if strings.Contains(fi.Name, "/"+c+"/") || strings.Contains(fi.Name, "/"+normC+"/") || strings.Contains(fi.Name, "_"+c+"_") {
+					config = c
+					break
+				}
+			}
+			configInfo := d.info.DatasetInfo[config]
+			for s := range configInfo.Splits {
+				normS := strings.ReplaceAll(s, "-", "/")
+				if strings.Contains(fi.Name, "/"+s+"/") || strings.Contains(fi.Name, "/"+normS+"/") || strings.Contains(fi.Name, "_"+s+"_") || strings.Contains(base, s) {
+					split = s
+					break
+				}
+			}
+		}
+
+		url, _ := d.FileURL(fi.Name)
+
+		parquetFiles = append(parquetFiles, ParquetFile{
+			Dataset:  d.ID,
+			Config:   config,
+			Split:    split,
+			URL:      url,
+			Filename: path.Base(fi.Name),
+			Size:     fi.Size,
+		})
+	}
+
+	d.Files = parquetFiles
+
+	// Save to cache on disk
+	response := ParquetFileResponse{ParquetFiles: parquetFiles}
+	b, err := json.MarshalIndent(response, "", "  ")
+	if err == nil {
+		_ = os.WriteFile(infoFilePath, b, 0644)
+	}
+
 	return nil
 }

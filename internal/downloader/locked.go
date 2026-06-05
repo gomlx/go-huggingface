@@ -47,6 +47,14 @@ func (m *Manager) LockedDownload(ctx context.Context, url, filePath string, forc
 			return
 		}
 
+		// Ensure the lock file is always cleaned up on exit (success or failure)
+		defer func() {
+			err := os.Remove(lockPath)
+			if err != nil && !os.IsNotExist(err) {
+				log.Printf("Warning: error removing lock file %q: %+v", lockPath, err)
+			}
+		}()
+
 		// Create tmpFile where to download.
 		var tmpFileClosed bool
 		tmpPath := filePath + ".downloading"
@@ -84,12 +92,6 @@ func (m *Manager) LockedDownload(ctx context.Context, url, filePath string, forc
 		if err := os.Rename(tmpPath, filePath); err != nil {
 			mainErr = errors.Wrapf(err, "failed to move downloaded file %q to %q", tmpPath, filePath)
 			return
-		}
-
-		// File already exists, so we no longer need the lock file.
-		err = os.Remove(lockPath)
-		if err != nil {
-			log.Printf("Warning: error removing lock file %q: %+v", lockPath, err)
 		}
 	})
 	if mainErr != nil {
