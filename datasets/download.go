@@ -184,3 +184,39 @@ func (d *Dataset) DownloadCtx(ctx context.Context, parquetFiles ...ParquetFile) 
 	}
 	return downloadedPaths, nil
 }
+
+// DownloadAll for the given config/split. It will download all the files into the cache,
+// which can then be iterated over (without any downloads).
+//
+// If config or split are empty, they are not used for filtering.
+//
+// It returns the list of the paths to the downloaded files in the cache.
+func (ds *Dataset) DownloadAll(ctx context.Context, config, split string) (downloadedPaths []string, err error) {
+	remoteFiles, err := ds.ListFiles(config, split)
+	if err != nil {
+		return nil, err
+	}
+	return ds.DownloadCtx(ctx, remoteFiles...)
+}
+
+// ListDownloadedFiles returns the list of absolute paths to the parquet files that match the given config and split
+// and exist in the local cache.
+// If config or split are empty, they are not used for filtering.
+func (d *Dataset) ListDownloadedFiles(config, split string) ([]string, error) {
+	repoCacheDir, err := d.CacheDir()
+	if err != nil {
+		return nil, err
+	}
+	allFiles, err := d.ListFiles(config, split)
+	if err != nil {
+		return nil, err
+	}
+	var res []string
+	for _, f := range allFiles {
+		destPath := path.Join(repoCacheDir, "parquet", f.Config, f.Split, f.Filename)
+		if files.Exists(destPath) {
+			res = append(res, destPath)
+		}
+	}
+	return res, nil
+}
