@@ -105,6 +105,9 @@ func CreateParquetReader[T any](ds *Dataset, config, split string) (*parquet.Gen
 
 // IterParquetFromDataset downloads Parquet files associated with the dataset's config and split
 // on demand (one by one) and iterates over all their records sequentially.
+//
+// If you want to pre-download all the parquet files for a dataset/config/split, use DownloadAll.
+//
 // It will yield an error and stop if there's an issue acquiring or reading the files.
 func IterParquetFromDataset[T any](ds *Dataset, config, split string) iter.Seq2[T, error] {
 	return func(yield func(T, error) bool) {
