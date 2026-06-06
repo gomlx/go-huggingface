@@ -321,10 +321,27 @@ Config: sample-350BT
   Splits: train (518.5M records, 1.4 TiB)
 ```
 
+### Dataset Downloading Tool
+
+The `./cmd/dataset_download` tool can be used to manage dataset downloads: it downloads, lists (`-list`) and deletes
+(`-delete`) downloaded files.
+
+```
+$ go run ./cmd/dataset_download microsoft/ms_marco
+Retrieving information for dataset "microsoft/ms_marco"...
+
+Available configurations/splits for "microsoft/ms_marco":
+  -config v1.1                      -split test            (1 files, total size: 19.5 MiB)
+  -config v1.1                      -split train           (1 files, total size: 167.3 MiB)
+  -config v1.1                      -split validation      (1 files, total size: 20.4 MiB)
+  -config v2.1                      -split test            (1 files, total size: 194.9 MiB)
+  -config v2.1                      -split train           (7 files, total size: 1.6 GiB)
+  -config v2.1                      -split validation      (1 files, total size: 199.9 MiB)
+```
+
 ### Parquet Structure 
 
-We use the `github.com/gomlx/go-huggingface/cmd/generate_dataset_structs` to generate the Go 
-structure for the Parquet files:
+The `./cmd/generate_dataset_structs` tool generates Go `struct`s to read the Parquet files for a dataset:
 
 ```bash
 go run ./cmd/generate_dataset_structs -dataset HuggingFaceFW/fineweb

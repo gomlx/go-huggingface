@@ -79,3 +79,20 @@ func TestDatasetListFilesFineweb(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, files, "Should find parquet files for sample-10BT config")
 }
+
+func TestListDownloadedFiles(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		t.Skip("Skipping network tests in CI")
+	}
+
+	ds := New("microsoft/ms_marco")
+
+	// Ensure the files are downloaded first.
+	_, err := ds.DownloadAll(context.Background(), "v1.1", "test")
+	require.NoError(t, err)
+
+	downloaded, err := ds.ListDownloadedFiles("v1.1", "test")
+	require.NoError(t, err)
+	assert.NotEmpty(t, downloaded, "Should find downloaded files for config v1.1 and split test")
+}
+
