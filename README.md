@@ -99,32 +99,6 @@ google/gemma-2-2b-it:
 …
 ```
 
-### List tokenizer classes for each model
-
-```go
-for _, modelID := range hfModelIDs {
-	fmt.Printf("\n%s:\n", modelID)
-	repo := hub.New(modelID).WithAuth(hfAuthToken)
-	config, err := tokenizers.GetConfig(repo)
-	if err != nil { panic(err) }
-	fmt.Printf("\ttokenizer_class=%s\n", config.TokenizerClass)
-}
-```
-
-Results:
-
-```
-google/gemma-2-2b-it:
-	tokenizer_class=GemmaTokenizer
-
-sentence-transformers/all-MiniLM-L6-v2:
-	tokenizer_class=BertTokenizer
-
-protectai/deberta-v3-base-zeroshot-v1-onnx:
-	tokenizer_class=DebertaV2Tokenizer
-…
-```
-
 
 ---
 
@@ -154,6 +128,33 @@ Downloaded 1/1 files, 4.2 MB downloaded
 Sentence:	The book is on the table.
 Tokens:  	[651 2870 603 611 573 3037 235265]
 ```
+
+### List tokenizer classes for each model
+
+```go
+for _, modelID := range hfModelIDs {
+	fmt.Printf("\n%s:\n", modelID)
+	repo := hub.New(modelID).WithAuth(hfAuthToken)
+	config, err := tokenizers.GetConfig(repo)
+	if err != nil { panic(err) }
+	fmt.Printf("\ttokenizer_class=%s\n", config.TokenizerClass)
+}
+```
+
+Results:
+
+```
+google/gemma-2-2b-it:
+	tokenizer_class=GemmaTokenizer
+
+sentence-transformers/all-MiniLM-L6-v2:
+	tokenizer_class=BertTokenizer
+
+protectai/deberta-v3-base-zeroshot-v1-onnx:
+	tokenizer_class=DebertaV2Tokenizer
+…
+```
+
 
 ### Tokenize and "Bucketize" sentences (using "two-bits" bucketing strategy)
 
@@ -190,7 +191,7 @@ wg.Go(func() {
 
 ### Tokenize for a [Sentence Transformer](https://www.sbert.net/) derived model, using the Rust-based [github.com/daulet/tokenizers](https://github.com/daulet/tokenizers) package
 
-For most tokenizers on Hugging Face though, there is no Go-only version yet, and for now we use the 
+If you don't find a Go tokenizer, or if you need the most performant tokenizer (usually tokenization is not a bottleneck), you can also use the 
 [github.com/daulet/tokenizers](https://github.com/daulet/tokenizers) package, which is based on a fast tokenizer written in Rust.
 
 It requires installation of the built Rust library though, 
@@ -278,11 +279,13 @@ embeddings := kalmExec.MustCall(tokens)
 
 ---
 
-## Parsing HuggingFace Datasets
+## HuggingFace Datasets
 
 **Package**: `github.com/gomlx/go-huggingface/datasets`
 
-The `datasets` package provides functionality to retrieve dataset information and download files, integrated with `hub`.
+The `datasets` package provides functionality to retrieve dataset information, download files and iterate over
+individual records in a performant way.
+
 We are going to use [HuggingFaceFW/fineweb](https://huggingface.co/datasets/HuggingFaceFW/fineweb) as an example,
 exploring its structure and downloading one of its sample files (~2.0 GiB of data) to parse the `.parquet` file.
 
@@ -420,7 +423,7 @@ Record #10:	Score=0.925 Text="News of the Week\nBarrie Spring Studio Tour\nApril
 
 The [ONNX-GoMLX project](https://github.com/gomlx/onnx-gomlx) can convert ONNX models to GoMLX.
 It can be used for simple inference, fine-tuning, combining models, etc.
-It can even export updated-weights back to a the ONNX model.
+It can even export updated-weights back to the ONNX model.
 
 The example below reads the `.onnx` model using a repo created with the package `hub`, creates a `tokenizer`,
 uses the `bucket` to package a list of sentences into a padded batch, converts the model to a GoMLX model
