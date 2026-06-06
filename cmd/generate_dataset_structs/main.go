@@ -202,7 +202,7 @@ func fallbackLocateAndDownloadParquet(dataset string) (localPath string, rootStr
 	}
 
 	fmt.Printf("[INFO] Found %d parquet files in repository.\n", len(parquetFiles))
-	
+
 	if len(parquetFiles) > 10 {
 		fmt.Printf("[INFO] There are %d parquet files in the repository. We automatically picked file %s\n",
 			len(parquetFiles),
@@ -260,71 +260,71 @@ func highlightGoCode(code string) string {
 	if !*colorFlag {
 		return code
 	}
-	
-	styleKeyword  := lipgloss.NewStyle().Foreground(lipgloss.Color("204")).Bold(true) // Magenta for keywords
-	styleStruct   := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)  // Blue for structs
-	styleField    := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))            // White for fields
-	styleType     := lipgloss.NewStyle().Foreground(lipgloss.Color("114"))            // Green for types
-	styleTagKey   := lipgloss.NewStyle().Foreground(lipgloss.Color("215"))            // Orange/Yellow for tag names
-	styleTagValue := lipgloss.NewStyle().Foreground(lipgloss.Color("117"))            // Cyan for tag values
-	stylePunct    := lipgloss.NewStyle().Foreground(lipgloss.Color("243"))            // Muted gray for symbols
-	styleComment  := lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true) // Gray italic for comments
-	
+
+	styleKeyword := lipgloss.NewStyle().Foreground(lipgloss.Color("204")).Bold(true)   // Magenta for keywords
+	styleStruct := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)     // Blue for structs
+	styleField := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))                // White for fields
+	styleType := lipgloss.NewStyle().Foreground(lipgloss.Color("114"))                 // Green for types
+	styleTagKey := lipgloss.NewStyle().Foreground(lipgloss.Color("215"))               // Orange/Yellow for tag names
+	styleTagValue := lipgloss.NewStyle().Foreground(lipgloss.Color("117"))             // Cyan for tag values
+	stylePunct := lipgloss.NewStyle().Foreground(lipgloss.Color("243"))                // Muted gray for symbols
+	styleComment := lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true) // Gray italic for comments
+
 	lines := strings.Split(code, "\n")
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
 		}
-		
+
 		if strings.HasPrefix(trimmed, "//") {
 			lines[i] = styleComment.Render(line)
 			continue
 		}
-		
+
 		if strings.HasPrefix(trimmed, "package ") {
 			packageName := strings.TrimPrefix(trimmed, "package ")
 			packageName = strings.TrimSpace(packageName)
 			lines[i] = styleKeyword.Render("package") + " " + packageName
 			continue
 		}
-		
+
 		if strings.HasPrefix(trimmed, "type ") && strings.HasSuffix(trimmed, " struct {") {
 			structName := strings.TrimPrefix(trimmed, "type ")
 			structName = strings.TrimSuffix(structName, " struct {")
 			structName = strings.TrimSpace(structName)
-			
+
 			indent := len(line) - len(strings.TrimLeft(line, " \t"))
 			indentStr := line[:indent]
-			
+
 			lines[i] = indentStr + styleKeyword.Render("type") + " " +
 				styleStruct.Render(structName) + " " +
 				styleKeyword.Render("struct") + " " +
 				stylePunct.Render("{")
 			continue
 		}
-		
+
 		if trimmed == "}" {
 			indent := len(line) - len(strings.TrimLeft(line, " \t"))
 			indentStr := line[:indent]
 			lines[i] = indentStr + stylePunct.Render("}")
 			continue
 		}
-		
+
 		if strings.Contains(line, "`") {
 			parts := strings.SplitN(line, "`", 2)
 			fieldAndType := parts[0]
 			tags := parts[1]
-			
+
 			indent := len(fieldAndType) - len(strings.TrimLeft(fieldAndType, " \t"))
 			indentStr := fieldAndType[:indent]
 			fieldAndTypeTrim := strings.TrimSpace(fieldAndType)
-			
+
 			ftParts := strings.SplitN(fieldAndTypeTrim, " ", 2)
 			if len(ftParts) == 2 {
 				fieldName := ftParts[0]
 				fieldType := ftParts[1]
-				
+
 				tags = strings.TrimSuffix(tags, "`")
 				tagPairs := strings.Split(tags, " ")
 				var styledTagPairs []string
@@ -334,12 +334,12 @@ func highlightGoCode(code string) string {
 						k := kv[0]
 						v := kv[1]
 						styledTagPairs = append(styledTagPairs,
-							styleTagKey.Render(k) + stylePunct.Render(":") + styleTagValue.Render(v))
+							styleTagKey.Render(k)+stylePunct.Render(":")+styleTagValue.Render(v))
 					} else {
 						styledTagPairs = append(styledTagPairs, pair)
 					}
 				}
-				
+
 				lines[i] = indentStr +
 					styleField.Render(fieldName) + " " +
 					styleType.Render(fieldType) + " " +
