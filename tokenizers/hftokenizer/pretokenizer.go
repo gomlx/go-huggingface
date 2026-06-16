@@ -1,6 +1,7 @@
 package hftokenizer
 
 import (
+	"regexp"
 	"strings"
 	"unicode"
 )
@@ -91,6 +92,8 @@ func (t *Tokenizer) applyPreTokenizerWithSpans(text string, normOffsets []int, p
 			split = *pt.Split
 		}
 		return metaspacePreTokenizeWithOffsets(text, normOffsets, pt.AddPrefixSpace, pt.Replacement, pt.PrependScheme, split)
+	case "Split":
+		return splitPreTokenizeWithOffsets(text, normOffsets, pt)
 	case "Sequence":
 		result := []wordWithOffset{{text: text, start: 0, end: len(text)}}
 		if len(normOffsets) > 0 {
@@ -397,4 +400,164 @@ func metaspacePreTokenizeWithOffsets(text string, normOffsets []int, addPrefixSp
 	}
 
 	return words
+}
+
+// splitPreTokenizeWithOffsets splits text based on pattern and behavior.
+func splitPreTokenizeWithOffsets(text string, normOffsets []int, pt *PreTokenizer) []wordWithOffset {
+	if len(text) == 0 {
+		return nil
+	}
+
+	var re *regexp.Regexp
+	var err error
+	if pt.Pattern != nil {
+		if pt.Pattern.Regex != "" {
+			re, err = regexp.Compile(pt.Pattern.Regex)
+		} else if pt.Pattern.String != "" {
+			re, err = regexp.Compile(regexp.QuoteMeta(pt.Pattern.String))
+		}
+	}
+
+	if re == nil || err != nil {
+		// Fallback: return whole text as a single word
+		return []wordWithOffset{makeWord(text, normOffsets, 0, len(text))}
+	}
+
+	matches := re.FindAllStringIndex(text, -1)
+
+	type segment struct {
+		start       int
+		end         int
+		isDelimiter bool
+	}
+
+	var segments []segment
+	cur := 0
+	for _, m := range matches {
+		sStart, sEnd := m[0], m[1]
+		if sStart > cur {
+			segments = append(segments, segment{
+				start:       cur,
+				end:         sStart,
+				isDelimiter: pt.Invert,
+			})
+		}
+		segments = append(segments, segment{
+			start:       sStart,
+			end:         sEnd,
+			isDelimiter: !pt.Invert,
+		})
+		cur = sEnd
+	}
+	if cur < len(text) {
+		segments = append(segments, segment{
+			start:       cur,
+			end:         len(text),
+			isDelimiter: pt.Invert,
+		})
+	}
+
+	behavior := strings.ToLower(pt.Behavior)
+	var words []wordWithOffset
+
+	switch behavior {
+	case "removed":
+		for _, seg := range segments {
+			if !seg.isDelimiter {
+				words = append(words, makeWord(text, normOffsets, seg.start, seg.end))
+			}
+		}
+
+	case "isolated":
+		for _, seg := range segments {
+			words = append(words, makeWord(text, normOffsets, seg.start, seg.end))
+		}
+
+	case "contiguous":
+		for i := 0; i < len(segments); {
+			seg := segments[i]
+			if !seg.isDelimiter {
+				words = append(words, makeWord(text, normOffsets, seg.start, seg.end))
+				i++
+			} else {
+				start := seg.start
+				end := seg.end
+				j := i + 1
+				for j < len(segments) && segments[j].isDelimiter {
+					end = segments[j].end
+					j++
+				}
+				words = append(words, makeWord(text, normOffsets, start, end))
+				i = j
+			}
+		}
+
+	case "merged_with_previous":
+		for i := 0; i < len(segments); {
+			seg := segments[i]
+			if !seg.isDelimiter {
+				start := seg.start
+				end := seg.end
+				i++
+				if i < len(segments) && segments[i].isDelimiter {
+					end = segments[i].end
+					i++
+				}
+				words = append(words, makeWord(text, normOffsets, start, end))
+			} else {
+				words = append(words, makeWord(text, normOffsets, seg.start, seg.end))
+				i++
+			}
+		}
+
+	case "merged_with_next":
+		for i := 0; i < len(segments); {
+			seg := segments[i]
+			if seg.isDelimiter {
+				start := seg.start
+				end := seg.end
+				i++
+				if i < len(segments) && !segments[i].isDelimiter {
+					end = segments[i].end
+					i++
+				}
+				words = append(words, makeWord(text, normOffsets, start, end))
+			} else {
+				words = append(words, makeWord(text, normOffsets, seg.start, seg.end))
+				i++
+			}
+		}
+
+	default:
+		// Default to removed behavior if unrecognized
+		for _, seg := range segments {
+			if !seg.isDelimiter {
+				words = append(words, makeWord(text, normOffsets, seg.start, seg.end))
+			}
+		}
+	}
+
+	return words
+}
+
+func makeWord(text string, normOffsets []int, start, end int) wordWithOffset {
+	origStart := start
+	origEnd := end
+	if len(normOffsets) > 0 {
+		if start < len(normOffsets) {
+			origStart = normOffsets[start]
+		} else {
+			origStart = normOffsets[len(normOffsets)-1] + 1
+		}
+		if end <= len(normOffsets) && end > 0 {
+			origEnd = normOffsets[end-1] + 1
+		} else {
+			origEnd = normOffsets[len(normOffsets)-1] + 1
+		}
+	}
+	return wordWithOffset{
+		text:  text[start:end],
+		start: origStart,
+		end:   origEnd,
+	}
 }
