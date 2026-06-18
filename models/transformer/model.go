@@ -7,12 +7,15 @@ import (
 	"strings"
 
 	"github.com/gomlx/compute"
+	"github.com/gomlx/compute/shapes"
 	"github.com/gomlx/compute/support/humanize"
 	"github.com/gomlx/compute/support/xslices"
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/models/safetensors"
 	"github.com/gomlx/go-huggingface/tokenizers"
+	"github.com/gomlx/gomlx/core/tensors"
 	"github.com/gomlx/gomlx/ml/model"
+	mltransformer "github.com/gomlx/gomlx/ml/zoo/transformer"
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
 )
@@ -35,6 +38,7 @@ type Model struct {
 	totalBytes      *int64
 
 	tokenizer tokenizers.Tokenizer
+	KVCache   *mltransformer.KVCache
 }
 
 // LoadModel loads the configurations into the Model struct.
@@ -42,7 +46,8 @@ type Model struct {
 // of sentence_transformer and pooling configurations.
 func LoadModel(repo *hub.Repo) (*Model, error) {
 	m := &Model{
-		Repo: repo,
+		Repo:    repo,
+		KVCache: mltransformer.NewKVCache(),
 	}
 
 	loadFile := func(filename string, v any) (bool, error) {
@@ -118,7 +123,7 @@ func (m *Model) LoadStoreFiltered(backend compute.Backend, store *model.Store, f
 			if isBert && (name == "embeddings.position_ids" || strings.HasPrefix(name, "pooler.")) {
 				continue
 			}
-			fmt.Printf("Skipping unmapped tensor: %s\n", tensorAndName.Name)
+			klog.V(1).Infof("Skipping unmapped tensor: %s\n", tensorAndName.Name)
 			continue
 		}
 
@@ -152,6 +157,56 @@ func (m *Model) LoadStoreFiltered(backend compute.Backend, store *model.Store, f
 		humanize.Count(totalParams), humanize.Bytes(totalBytes))
 	m.totalParameters = &totalParams
 	m.totalBytes = &totalBytes
+
+	// Tie word embeddings if configured (or if Gemma/LLaMA)
+	tieEmbeddings := false
+	if m.Config.ModelType == "gemma" || m.Config.ModelType == "gemma2" || m.Config.ModelType == "gemma3" || m.Config.ModelType == "gemma4" || m.Config.ModelType == "llama" {
+		tieEmbeddings = true
+	} else if tieVal, ok := m.Config.Extra["tie_word_embeddings"]; ok {
+		if b, ok := tieVal.(bool); ok {
+			tieEmbeddings = b
+		}
+	}
+
+	if tieEmbeddings {
+		embedVar := store.GetVariable("/token_embed/embeddings")
+		if embedVar != nil {
+			embedTensor, err := embedVar.Value()
+			if err != nil {
+				return err
+			}
+			shape := embedTensor.Shape()
+			vocabSize := shape.Dimensions[0]
+			hiddenSize := shape.Dimensions[1]
+
+			transposedShape := shapes.Make(shape.DType, hiddenSize, vocabSize)
+			transposedTensor := tensors.FromShape(transposedShape)
+
+			elemSize := int(shape.ByteSize() / int64(shape.Size()))
+			var copyErr error
+			err = embedTensor.ConstBytes(func(srcBytes []byte) {
+				copyErr = transposedTensor.MutableBytes(func(dstBytes []byte) {
+					for v := 0; v < vocabSize; v++ {
+						for h := 0; h < hiddenSize; h++ {
+							srcIdx := (v*hiddenSize + h) * elemSize
+							dstIdx := (h*vocabSize + v) * elemSize
+							copy(dstBytes[dstIdx:dstIdx+elemSize], srcBytes[srcIdx:srcIdx+elemSize])
+						}
+					}
+				})
+			})
+			if err != nil {
+				return err
+			}
+			if copyErr != nil {
+				return copyErr
+			}
+
+			outputScope := store.RootScope().In("output").In("dense")
+			outputScope.VariableWithValue("weights", transposedTensor)
+		}
+	}
+
 	return nil
 }
 
@@ -216,7 +271,14 @@ func (m *Model) estimateSizeFromIndex() {
 // HF format (e.g. LLaMA/Gemma): layers.{N}.{component}.weight
 // GoMLX format: layer_{N}/{component}/rms_norm/scale, layer_{N}/self_attn/..., etc.
 func mapTensorName(safetensorsName string) (scopePath []string, varName string, ok bool) {
-	safetensorsName = strings.TrimPrefix(safetensorsName, "model.")
+	for {
+		old := safetensorsName
+		safetensorsName = strings.TrimPrefix(safetensorsName, "model.")
+		safetensorsName = strings.TrimPrefix(safetensorsName, "language_model.")
+		if safetensorsName == old {
+			break
+		}
+	}
 
 	// BERT specific mappings
 	if strings.HasPrefix(safetensorsName, "embeddings.") {
@@ -285,6 +347,15 @@ func mapTensorName(safetensorsName string) (scopePath []string, varName string, 
 	if safetensorsName == "embed_tokens.weight" {
 		return []string{"token_embed"}, "embeddings", true
 	}
+	if safetensorsName == "embed_tokens_per_layer.weight" {
+		return []string{"token_embed_per_layer"}, "embeddings", true
+	}
+	if safetensorsName == "per_layer_model_projection.weight" {
+		return []string{"per_layer_model_projection", "dense"}, "weights", true
+	}
+	if safetensorsName == "per_layer_projection_norm.weight" {
+		return []string{"per_layer_projection_norm", "rms_norm"}, "scale", true
+	}
 	if safetensorsName == "norm.weight" {
 		return []string{"final_norm", "rms_norm"}, "scale", true
 	}
@@ -305,6 +376,14 @@ func mapTensorName(safetensorsName string) (scopePath []string, varName string, 
 			return []string{layerScope, "pre_feedforward_norm", "rms_norm"}, "scale", true
 		case "post_feedforward_layernorm.weight":
 			return []string{layerScope, "post_feedforward_norm", "rms_norm"}, "scale", true
+		case "per_layer_input_gate.weight":
+			return []string{layerScope, "per_layer_input_gate", "dense"}, "weights", true
+		case "per_layer_projection.weight":
+			return []string{layerScope, "per_layer_projection", "dense"}, "weights", true
+		case "post_per_layer_input_norm.weight":
+			return []string{layerScope, "post_per_layer_input_norm", "rms_norm"}, "scale", true
+		case "layer_scalar":
+			return []string{layerScope}, "layer_scalar", true
 		}
 	}
 
@@ -423,4 +502,13 @@ func (m *Model) GetTaskPrompt(taskCode string) string {
 		return promptStr
 	}
 	return ""
+}
+
+// KVCacheConfig returns the KVCache configuration struct for the model.
+// The user can modify this configuration as needed.
+func (m *Model) KVCacheConfig() *mltransformer.KVCache {
+	if m.KVCache == nil {
+		m.KVCache = mltransformer.NewKVCache()
+	}
+	return m.KVCache
 }

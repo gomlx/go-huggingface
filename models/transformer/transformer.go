@@ -1,6 +1,7 @@
 package transformer
 
 import (
+	"math"
 	"slices"
 
 	"github.com/gomlx/compute/dtypes"
@@ -100,7 +101,11 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 		}
 
 	} else {
-		tm.WithArchitecture(mltransformer.ArchitectureGemma3). // FIXME: Should use m.Config.Architectures to map Architecture
+		arch := mltransformer.ArchitectureGemma4
+		if m.Config.ModelType != "gemma4" && m.Config.ModelType != "gemma4_text" {
+			arch = mltransformer.ArchitectureGemma3
+		}
+		tm.WithArchitecture(arch).
 									WithNormalization(layers.NormalizationRMSNorm).
 									WithNormEpsilon(m.Config.RMSNormEps).
 									WithActivation(activation.FromName(m.Config.HiddenActivation)).
@@ -108,42 +113,109 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 									WithBias(false).
 									WithFinalNormalization(layers.NormalizationRMSNorm)
 
-		tm.WithSlidingWindow(m.Config.SlidingWindow)
+		attnLogitCap := m.Config.AttentionLogitCap
+		if attnLogitCap == 0 && (m.Config.ModelType == "gemma4" || m.Config.ModelType == "gemma4_text") {
+			attnLogitCap = 50.0
+			tm.WithRMSNormOffset(0.0)
+			tm.WithQueryKeyScale(1.0)
+		}
+
+		tm.WithSlidingWindow(m.Config.SlidingWindow).
+			WithNumKVSharedLayers(m.Config.NumKVSharedLayers).
+			WithScoreSoftCap(attnLogitCap).
+			WithFinalLogitSoftCap(m.Config.FinalLogitSoftcapping)
 		if len(m.Config.LayerTypes) > 0 {
 			layerTypes := make([]mltransformer.LayerType, m.Config.NumHiddenLayers)
 			for i, lt := range m.Config.LayerTypes {
 				if lt == "sliding_attention" {
-					layerTypes[i] = mltransformer.SlidingAttention
+					layerTypes[i] = mltransformer.LocalLayer
 				} else {
-					layerTypes[i] = mltransformer.FullAttention
+					layerTypes[i] = mltransformer.GlobalLayer
 				}
 			}
 			tm.WithLayerTypes(layerTypes)
 		}
 
-		defaultRope := pos.NewRoPE(ropeTheta)
-		if m.Config.RoPEScaling.Type == "linear" {
-			defaultRope.WithLinearScaling(m.Config.RoPEScaling.Factor)
-		}
-		tm.WithPositionalEncoder(defaultRope)
+		if len(m.Config.RoPEParameters) > 0 {
+			var fullRope, slidingRope *pos.RoPE
+			if fp, ok := m.Config.RoPEParameters["full_attention"]; ok && fp.RopeTheta > 0 {
+				fDim := m.Config.GlobalHeadDim
+				if fDim == 0 {
+					fDim = headDim
+				}
+				if fp.PartialRotaryFactor > 0 && fp.PartialRotaryFactor < 1.0 {
+					rotatedDims := int(fp.PartialRotaryFactor * float64(fDim))
+					fullRope = pos.NewRoPEWithDimRange(fp.RopeTheta, 0, rotatedDims).WithFrequencyDivisor(fDim)
+				} else {
+					fullRope = pos.NewRoPE(fp.RopeTheta)
+				}
+			}
+			if sp, ok := m.Config.RoPEParameters["sliding_attention"]; ok && sp.RopeTheta > 0 {
+				if sp.PartialRotaryFactor > 0 && sp.PartialRotaryFactor < 1.0 {
+					rotatedDims := int(sp.PartialRotaryFactor * float64(headDim))
+					slidingRope = pos.NewRoPEWithDimRange(sp.RopeTheta, 0, rotatedDims).WithFrequencyDivisor(headDim)
+				} else {
+					slidingRope = pos.NewRoPE(sp.RopeTheta)
+				}
+			}
 
-		if m.Config.RoPELocalBaseFreq > 0 {
-			slidingRope := pos.NewRoPE(m.Config.RoPELocalBaseFreq)
+			if fullRope == nil {
+				fullRope = pos.NewRoPE(ropeTheta)
+			}
+			tm.WithPositionalEncoder(fullRope)
+
 			for i, lt := range m.Config.LayerTypes {
-				if lt == "sliding_attention" {
+				if lt == "sliding_attention" && slidingRope != nil {
 					tm.WithLayerPositionalEncoder(i, slidingRope)
+				} else if lt == "full_attention" && fullRope != nil {
+					tm.WithLayerPositionalEncoder(i, fullRope)
+				}
+			}
+		} else {
+			defaultRope := pos.NewRoPE(ropeTheta)
+			if m.Config.RoPEScaling.Type == "linear" {
+				defaultRope.WithLinearScaling(m.Config.RoPEScaling.Factor)
+			}
+			tm.WithPositionalEncoder(defaultRope)
+
+			if m.Config.RoPELocalBaseFreq > 0 {
+				slidingRope := pos.NewRoPE(m.Config.RoPELocalBaseFreq)
+				for i, lt := range m.Config.LayerTypes {
+					if lt == "sliding_attention" {
+						tm.WithLayerPositionalEncoder(i, slidingRope)
+					}
 				}
 			}
 		}
+
+		if m.Config.HiddenSizePerLayerInput > 0 {
+			tm.WithVocabSizePerLayerInput(m.Config.VocabSizePerLayerInput).
+				WithHiddenSizePerLayerInput(m.Config.HiddenSizePerLayerInput).
+				WithPerLayerInputScale(1.0 / math.Sqrt(2.0)).
+				WithPerLayerModelProjectionScale(1.0 / math.Sqrt(float64(m.Config.HiddenSize)))
+		}
 	}
 
-	switch m.Config.TorchDtype {
+	torchDtype := m.Config.TorchDtype
+	if torchDtype == "" {
+		torchDtype = m.Config.DType
+	}
+	switch torchDtype {
 	case "bfloat16":
 		tm.WithDType(dtypes.BFloat16)
 	case "float16":
 		tm.WithDType(dtypes.Float16)
 	default:
 		tm.WithDType(dtypes.Float32)
+	}
+
+	if m.KVCache != nil {
+		tm.KVCache = m.KVCache
+	}
+
+	if m.Config.GlobalHeadDim > 0 {
+		tm.WithGlobalHeadDim(m.Config.GlobalHeadDim)
+		tm.KVCache.WithGlobalHeadDim(m.Config.GlobalHeadDim)
 	}
 
 	return tm
@@ -186,5 +258,22 @@ func (m *Model) AllLayers(scope *model.Scope, tokens, mask *graph.Node) (lastLay
 
 	// Create GoMLXModel and build the graph for all the layers.
 	tm := m.CreateGoMLXModel(scope)
-	return tm.AllLayers(scope, tokens, mask, false, 0)
+	lastLayer, allLayers, _ = tm.AllLayers(scope, tokens, nil, mask, nil)
+	return lastLayer, allLayers
 }
+
+// Forward performs the forward pass of the model.
+// It returns the logits of the vocabulary projection (typically shaped [batchSize, seqLen, vocabSize])
+// and the updated KV Cache.
+func (m *Model) Forward(
+	scope *model.Scope,
+	tokenIds *graph.Node,
+	positionIds *graph.Node,
+	attentionMask *graph.Node,
+	cache mltransformer.KVCacheNodes,
+) (logits *graph.Node, updatedCache mltransformer.KVCacheNodes) {
+	tm := m.CreateGoMLXModel(scope)
+	logits, updatedCache = tm.Forward(scope, tokenIds, positionIds, attentionMask, cache)
+	return logits, updatedCache
+}
+
