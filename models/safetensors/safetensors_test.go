@@ -1,6 +1,7 @@
 package safetensors
 
 import (
+	"os"
 	"testing"
 
 	"github.com/gomlx/go-huggingface/hub"
@@ -10,8 +11,12 @@ import (
 
 // TestLoadModel tests loading a model as a unified Model interface.
 func TestLoadModel(t *testing.T) {
+	token := os.Getenv("HF_TOKEN")
+	if token == "" {
+		t.Skip("skipping test; HF_TOKEN not set")
+	}
 	// Test with single-file model
-	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
+	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(token)
 	m := NewEmpty(repo)
 	err := m.Load()
 	require.NoError(t, err)
@@ -25,8 +30,12 @@ func TestLoadModel(t *testing.T) {
 
 // TestDetectShardedModel tests detecting sharded models.
 func TestDetectShardedModel(t *testing.T) {
+	token := os.Getenv("HF_TOKEN")
+	if token == "" {
+		t.Skip("skipping test; HF_TOKEN not set")
+	}
 	// Test non-sharded model
-	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
+	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(token)
 	model := NewEmpty(repo)
 	indexFile, isSharded, err := model.DetectShardedModel()
 	require.NoError(t, err)
@@ -36,7 +45,11 @@ func TestDetectShardedModel(t *testing.T) {
 
 // TestLoadSingleFileModel tests loading a single-file safetensors model.
 func TestLoadSingleFileModel(t *testing.T) {
-	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
+	token := os.Getenv("HF_TOKEN")
+	if token == "" {
+		t.Skip("skipping test; HF_TOKEN not set")
+	}
+	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(token)
 	m := NewEmpty(repo)
 	err := m.LoadSingleFileModel()
 	require.NoError(t, err)
@@ -51,12 +64,20 @@ func TestLoadSingleFileModel(t *testing.T) {
 
 // TestLoadShardedModel tests loading a sharded model with index file.
 func TestLoadShardedModel(t *testing.T) {
+	token := os.Getenv("HF_TOKEN")
+	if token == "" {
+		t.Skip("skipping test; HF_TOKEN not set")
+	}
 	t.Skip("Requires a sharded model")
 }
 
 // TestGetSafetensor tests getting safetensor file information.
 func TestGetSafetensor(t *testing.T) {
-	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
+	token := os.Getenv("HF_TOKEN")
+	if token == "" {
+		t.Skip("skipping test; HF_TOKEN not set")
+	}
+	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(token)
 	model := NewEmpty(repo)
 	meta, err := model.GetSafetensor("model.safetensors")
 	require.NoError(t, err)
@@ -70,7 +91,11 @@ func TestGetSafetensor(t *testing.T) {
 
 // TestIterSafetensors tests iterating over all safetensor files.
 func TestIterSafetensors(t *testing.T) {
-	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
+	token := os.Getenv("HF_TOKEN")
+	if token == "" {
+		t.Skip("skipping test; HF_TOKEN not set")
+	}
+	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(token)
 	m := NewEmpty(repo)
 
 	count := 0
@@ -87,7 +112,11 @@ func TestIterSafetensors(t *testing.T) {
 
 // TestGetTensorFromFile tests loading a specific tensor as GoMLX tensor.
 func TestGetTensorFromFile(t *testing.T) {
-	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
+	token := os.Getenv("HF_TOKEN")
+	if token == "" {
+		t.Skip("skipping test; HF_TOKEN not set")
+	}
+	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(token)
 	m, err := New(repo)
 	require.NoError(t, err)
 
@@ -101,7 +130,11 @@ func TestGetTensorFromFile(t *testing.T) {
 
 // TestGetTensor tests loading a specific tensor as GoMLX tensor.
 func TestGetTensor(t *testing.T) {
-	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
+	token := os.Getenv("HF_TOKEN")
+	if token == "" {
+		t.Skip("skipping test; HF_TOKEN not set")
+	}
+	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(token)
 	m, err := New(repo)
 	require.NoError(t, err)
 
@@ -222,7 +255,11 @@ var allMiniVariablesToShape = map[string]string{
 
 // TestIterTensors tests iterating over all tensors.
 func TestIterTensors(t *testing.T) {
-	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
+	token := os.Getenv("HF_TOKEN")
+	if token == "" {
+		t.Skip("skipping test; HF_TOKEN not set")
+	}
+	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(token)
 	m, err := New(repo)
 	require.NoError(t, err)
 	count := 0
@@ -237,7 +274,11 @@ func TestIterTensors(t *testing.T) {
 }
 
 func TestIterTensorsFromRepo(t *testing.T) {
-	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
+	token := os.Getenv("HF_TOKEN")
+	if token == "" {
+		t.Skip("skipping test; HF_TOKEN not set")
+	}
+	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(token)
 	count := 0
 	for tensorAndName, err := range IterTensorsFromRepo(nil, repo) {
 		require.NoError(t, err)

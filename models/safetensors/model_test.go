@@ -1,6 +1,7 @@
 package safetensors
 
 import (
+	"os"
 	"testing"
 
 	"github.com/gomlx/go-huggingface/hub"
@@ -18,7 +19,11 @@ func TestNew(t *testing.T) {
 
 // TestListTensors tests listing all tensor names in a model.
 func TestListTensors(t *testing.T) {
-	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
+	token := os.Getenv("HF_TOKEN")
+	if token == "" {
+		t.Skip("skipping test; HF_TOKEN not set")
+	}
+	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(token)
 	m, err := New(repo)
 	require.NoError(t, err)
 	tensorNames := m.ListTensorNames()
@@ -32,7 +37,11 @@ func TestListTensors(t *testing.T) {
 
 // TestGetTensorFilename tests getting the filename containing a specific tensor.
 func TestGetTensorFilename(t *testing.T) {
-	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
+	token := os.Getenv("HF_TOKEN")
+	if token == "" {
+		t.Skip("skipping test; HF_TOKEN not set")
+	}
+	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(token)
 	m, err := New(repo)
 	require.NoError(t, err)
 	tensorNames := m.ListTensorNames()
@@ -50,7 +59,11 @@ func TestGetTensorFilename(t *testing.T) {
 
 // TestGetTensorMetadata tests getting metadata for a specific tensor.
 func TestGetTensorMetadata(t *testing.T) {
-	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
+	token := os.Getenv("HF_TOKEN")
+	if token == "" {
+		t.Skip("skipping test; HF_TOKEN not set")
+	}
+	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(token)
 	m, err := New(repo)
 	require.NoError(t, err)
 	tensorNames := m.ListTensorNames()

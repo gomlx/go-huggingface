@@ -1,6 +1,7 @@
 package safetensors
 
 import (
+	"os"
 	"testing"
 
 	"github.com/gomlx/go-huggingface/hub"
@@ -10,7 +11,11 @@ import (
 
 // TestParseSafetensorHeader tests parsing safetensor headers.
 func TestParseSafetensorHeader(t *testing.T) {
-	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
+	token := os.Getenv("HF_TOKEN")
+	if token == "" {
+		t.Skip("skipping test; HF_TOKEN not set")
+	}
+	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(token)
 	model := NewEmpty(repo)
 	localPath, err := repo.DownloadFile("model.safetensors")
 	require.NoError(t, err)

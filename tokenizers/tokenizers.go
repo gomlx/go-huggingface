@@ -8,7 +8,6 @@ import (
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/tokenizers/api"
 	"github.com/gomlx/go-huggingface/tokenizers/hftokenizer"
-	"github.com/gomlx/go-huggingface/tokenizers/sentencepiece"
 	"github.com/pkg/errors"
 
 	// Blank import.
@@ -59,9 +58,16 @@ func New(repo *hub.Repo) (Tokenizer, error) {
 
 	constructor, found := registerOfClasses[config.TokenizerClass]
 	if !found {
+		if repo.HasFile("tokenizer.json") {
+			return hftokenizer.New(config, repo)
+		}
 		return nil, errors.Errorf("unknown tokenizer class %q", config.TokenizerClass)
 	}
-	return constructor(config, repo)
+	tok, err := constructor(config, repo)
+	if err != nil && repo.HasFile("tokenizer.json") {
+		return hftokenizer.New(config, repo)
+	}
+	return tok, err
 }
 
 // GetConfig returns the parsed "tokenizer_config.json" Config object for the repo.
@@ -103,7 +109,7 @@ var (
 
 func init() {
 	// Initialize sentencepiece tokenizer classes.
-	RegisterTokenizerClass("GemmaTokenizer", sentencepiece.New)
+	RegisterTokenizerClass("GemmaTokenizer", hftokenizer.New)
 
 	// Initialize HuggingFace tokenizer classes (WordPiece/BPE based).
 	// These use the tokenizer.json format from HuggingFace Tokenizers library.

@@ -40,6 +40,7 @@ type Normalizer struct {
 	Normalizer         *Normalizer  `json:"normalizer"`
 	Pattern            *Pattern     `json:"pattern"`
 	Normalizers        []Normalizer `json:"normalizers"`
+	Content            string       `json:"content"`
 }
 
 // Pattern for regex-based operations.

@@ -11,14 +11,22 @@ type Config struct {
 	NumHiddenLayers   int      `json:"num_hidden_layers"`
 	NumAttentionHeads int      `json:"num_attention_heads"`
 	HeadDim           int      `json:"head_dim"`
+	GlobalHeadDim     int      `json:"global_head_dim"`
 	IntermediateSize  int      `json:"intermediate_size"`
 	NumKeyValueHeads  int      `json:"num_key_value_heads"`
-	RMSNormEps        float64  `json:"rms_norm_eps"`
-	LayerNormEps      float64  `json:"layer_norm_eps"`
+	NumKVSharedLayers int      `json:"num_kv_shared_layers"`
+	RMSNormEps            float64  `json:"rms_norm_eps"`
+	LayerNormEps          float64  `json:"layer_norm_eps"`
+	AttentionLogitCap     float64  `json:"attention_logit_cap"`
+	FinalLogitSoftcapping float64  `json:"final_logit_softcapping"`
+
+	HiddenSizePerLayerInput int      `json:"hidden_size_per_layer_input"`
+	VocabSizePerLayerInput  int      `json:"vocab_size_per_layer_input"`
 
 	// RoPE Positional Embedder
-	RoPETheta   float64     `json:"rope_theta"`
-	RoPEScaling RoPEScaling `json:"rope_scaling"`
+	RoPETheta      float64               `json:"rope_theta"`
+	RoPEScaling    RoPEScaling           `json:"rope_scaling"`
+	RoPEParameters map[string]RoPEParams `json:"rope_parameters"`
 
 	// RoPELocalBaseFreq is the Theta used by sliding attention layers (or so the AI says).
 	RoPELocalBaseFreq float64 `json:"rope_local_base_freq"`
@@ -28,6 +36,7 @@ type Config struct {
 	MaxPositionEmbeddings int    `json:"max_position_embeddings"`
 	ModelType             string `json:"model_type"`
 	TorchDtype            string `json:"torch_dtype"`
+	DType                 string `json:"dtype"`
 	VocabSize             int    `json:"vocab_size"`
 	PadTokenID            int    `json:"pad_token_id"`
 
@@ -46,12 +55,27 @@ type RoPEScaling struct {
 	Type string `json:"rope_type"`
 }
 
+type RoPEParams struct {
+	RopeTheta           float64 `json:"rope_theta"`
+	RopeType            string  `json:"rope_type"`
+	PartialRotaryFactor float64 `json:"partial_rotary_factor"`
+}
+
 func (c *Config) UnmarshalJSON(data []byte) error {
 	type wrapper Config
 	if err := json.Unmarshal(data, (*wrapper)(c)); err != nil {
 		return err
 	}
-	return json.Unmarshal(data, &c.Extra)
+	if err := json.Unmarshal(data, &c.Extra); err != nil {
+		return err
+	}
+	if textConfigRaw, ok := c.Extra["text_config"]; ok {
+		textConfigBytes, err := json.Marshal(textConfigRaw)
+		if err == nil {
+			_ = json.Unmarshal(textConfigBytes, (*wrapper)(c))
+		}
+	}
+	return nil
 }
 
 const DefaultQueryPrompt = "Instruct: Given a query, retrieve documents that answer the query \nQuery: "

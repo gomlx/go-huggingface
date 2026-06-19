@@ -6,6 +6,7 @@ package hftokenizer
 import (
 	"encoding/json"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode"
@@ -661,7 +662,18 @@ func (t *Tokenizer) applyNormalizer(text string, n *Normalizer) string {
 		}
 		return result
 	case "Replace":
-		// Handle replace patterns if needed
+		if n.Pattern == nil {
+			return text
+		}
+		if n.Pattern.String != "" {
+			return strings.ReplaceAll(text, n.Pattern.String, n.Content)
+		}
+		if n.Pattern.Regex != "" {
+			re, err := regexp.Compile(n.Pattern.Regex)
+			if err == nil {
+				return re.ReplaceAllString(text, n.Content)
+			}
+		}
 		return text
 	case "Prepend":
 		// Prepend a string (used by some tokenizers)
