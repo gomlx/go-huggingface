@@ -10,6 +10,9 @@ import (
 
 // TestParseSafetensorHeader tests parsing safetensor headers.
 func TestParseSafetensorHeader(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testing in short mode")
+	}
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	model := NewEmpty(repo)
 	localPath, err := repo.DownloadFile("model.safetensors")

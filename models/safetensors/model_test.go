@@ -18,6 +18,9 @@ func TestNew(t *testing.T) {
 
 // TestListTensors tests listing all tensor names in a model.
 func TestListTensors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testing in short mode")
+	}
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m, err := New(repo)
 	require.NoError(t, err)
@@ -32,6 +35,9 @@ func TestListTensors(t *testing.T) {
 
 // TestGetTensorFilename tests getting the filename containing a specific tensor.
 func TestGetTensorFilename(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testing in short mode")
+	}
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m, err := New(repo)
 	require.NoError(t, err)
@@ -50,6 +56,9 @@ func TestGetTensorFilename(t *testing.T) {
 
 // TestGetTensorMetadata tests getting metadata for a specific tensor.
 func TestGetTensorMetadata(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testing in short mode")
+	}
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m, err := New(repo)
 	require.NoError(t, err)

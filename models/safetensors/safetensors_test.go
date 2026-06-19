@@ -10,6 +10,9 @@ import (
 
 // TestLoadModel tests loading a model as a unified Model interface.
 func TestLoadModel(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testing in short mode")
+	}
 	// Test with single-file model
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m := NewEmpty(repo)
@@ -25,6 +28,9 @@ func TestLoadModel(t *testing.T) {
 
 // TestDetectShardedModel tests detecting sharded models.
 func TestDetectShardedModel(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testing in short mode")
+	}
 	// Test non-sharded model
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	model := NewEmpty(repo)
@@ -36,6 +42,9 @@ func TestDetectShardedModel(t *testing.T) {
 
 // TestLoadSingleFileModel tests loading a single-file safetensors model.
 func TestLoadSingleFileModel(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testing in short mode")
+	}
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m := NewEmpty(repo)
 	err := m.LoadSingleFileModel()
@@ -51,11 +60,17 @@ func TestLoadSingleFileModel(t *testing.T) {
 
 // TestLoadShardedModel tests loading a sharded model with index file.
 func TestLoadShardedModel(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testing in short mode")
+	}
 	t.Skip("Requires a sharded model")
 }
 
 // TestGetSafetensor tests getting safetensor file information.
 func TestGetSafetensor(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testing in short mode")
+	}
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	model := NewEmpty(repo)
 	meta, err := model.GetSafetensor("model.safetensors")
@@ -70,6 +85,9 @@ func TestGetSafetensor(t *testing.T) {
 
 // TestIterSafetensors tests iterating over all safetensor files.
 func TestIterSafetensors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testing in short mode")
+	}
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m := NewEmpty(repo)
 
@@ -87,6 +105,9 @@ func TestIterSafetensors(t *testing.T) {
 
 // TestGetTensorFromFile tests loading a specific tensor as GoMLX tensor.
 func TestGetTensorFromFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testing in short mode")
+	}
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m, err := New(repo)
 	require.NoError(t, err)
@@ -101,6 +122,9 @@ func TestGetTensorFromFile(t *testing.T) {
 
 // TestGetTensor tests loading a specific tensor as GoMLX tensor.
 func TestGetTensor(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testing in short mode")
+	}
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m, err := New(repo)
 	require.NoError(t, err)
@@ -222,6 +246,9 @@ var allMiniVariablesToShape = map[string]string{
 
 // TestIterTensors tests iterating over all tensors.
 func TestIterTensors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testing in short mode")
+	}
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m, err := New(repo)
 	require.NoError(t, err)
@@ -237,6 +264,9 @@ func TestIterTensors(t *testing.T) {
 }
 
 func TestIterTensorsFromRepo(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testing in short mode")
+	}
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	count := 0
 	for tensorAndName, err := range IterTensorsFromRepo(nil, repo) {

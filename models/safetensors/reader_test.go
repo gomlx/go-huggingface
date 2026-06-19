@@ -13,6 +13,9 @@ import (
 
 // TestTensorReaderReadTensor tests reading a tensor using TensorReader.
 func TestTensorReaderReadTensor(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testing in short mode")
+	}
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m := NewEmpty(repo)
 
@@ -30,6 +33,9 @@ func TestTensorReaderReadTensor(t *testing.T) {
 
 // TestTensorReaderReadTensorNotFound tests reading a non-existent tensor.
 func TestTensorReaderReadTensorNotFound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testing in short mode")
+	}
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m, err := New(repo)
 	require.NoError(t, err)
@@ -46,6 +52,9 @@ func TestTensorReaderReadTensorNotFound(t *testing.T) {
 
 // TestTensorReaderMetadata tests the Metadata method.
 func TestTensorReaderMetadata(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testing in short mode")
+	}
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m, err := New(repo)
 	require.NoError(t, err)
@@ -60,6 +69,9 @@ func TestTensorReaderMetadata(t *testing.T) {
 }
 
 func TestTensorReaderTensor(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testing in short mode")
+	}
 	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
 	m, err := New(repo)
 	require.NoError(t, err)
