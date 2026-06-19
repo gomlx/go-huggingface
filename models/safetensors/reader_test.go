@@ -2,6 +2,7 @@ package safetensors
 
 import (
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/gomlx/compute/dtypes"
@@ -13,10 +14,11 @@ import (
 
 // TestTensorReaderReadTensor tests reading a tensor using TensorReader.
 func TestTensorReaderReadTensor(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping testing in short mode")
+	token := os.Getenv("HF_TOKEN")
+	if token == "" {
+		t.Skip("skipping test; HF_TOKEN not set")
 	}
-	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
+	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(token)
 	m := NewEmpty(repo)
 
 	tensorReader, err := m.NewTensorReader("model.safetensors")
@@ -33,10 +35,11 @@ func TestTensorReaderReadTensor(t *testing.T) {
 
 // TestTensorReaderReadTensorNotFound tests reading a non-existent tensor.
 func TestTensorReaderReadTensorNotFound(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping testing in short mode")
+	token := os.Getenv("HF_TOKEN")
+	if token == "" {
+		t.Skip("skipping test; HF_TOKEN not set")
 	}
-	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
+	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(token)
 	m, err := New(repo)
 	require.NoError(t, err)
 
@@ -52,10 +55,11 @@ func TestTensorReaderReadTensorNotFound(t *testing.T) {
 
 // TestTensorReaderMetadata tests the Metadata method.
 func TestTensorReaderMetadata(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping testing in short mode")
+	token := os.Getenv("HF_TOKEN")
+	if token == "" {
+		t.Skip("skipping test; HF_TOKEN not set")
 	}
-	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
+	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(token)
 	m, err := New(repo)
 	require.NoError(t, err)
 	reader, err := m.NewTensorReader("model.safetensors")
@@ -69,10 +73,11 @@ func TestTensorReaderMetadata(t *testing.T) {
 }
 
 func TestTensorReaderTensor(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping testing in short mode")
+	token := os.Getenv("HF_TOKEN")
+	if token == "" {
+		t.Skip("skipping test; HF_TOKEN not set")
 	}
-	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
+	repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(token)
 	m, err := New(repo)
 	require.NoError(t, err)
 	reader, err := m.NewTensorReader("model.safetensors")
