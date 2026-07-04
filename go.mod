@@ -8,7 +8,7 @@ require (
 	github.com/eliben/go-sentencepiece v0.7.0
 	github.com/gofrs/flock v0.13.0
 	github.com/gomlx/compute v0.0.0-20260703132750-8164cab5c3c7
-	github.com/gomlx/gomlx v0.27.4-0.20260704051922-9d1361ab359b
+	github.com/gomlx/gomlx v0.27.4-0.20260704064253-5e0c875454c6
 	github.com/google/uuid v1.6.0
 	github.com/parquet-go/parquet-go v0.29.0
 	github.com/pkg/errors v0.9.1
@@ -29,7 +29,7 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
-	github.com/gomlx/go-xla v0.2.3-0.20260704051754-1a2878185822 // indirect
+	github.com/gomlx/go-xla v0.2.3-0.20260704064117-b83b06427f1c // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/klauspost/compress v1.18.5 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
