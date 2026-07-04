@@ -29,6 +29,7 @@ var (
 	flagTopP        = flag.Float64("top_p", 0.0, "Top P selection.")
 	flagRepeat      = flag.Int("repeat", 1, "Number of times to repeat the generation (for benchmarking).")
 	flagQuiet       = flag.Bool("quiet", false, "If set, disables all informational printing and only outputs the final generated text.")
+	flagNaive       = flag.Bool("naive", false, "If set, uses the naive generator (without KV cache).")
 )
 
 func main() {
@@ -120,14 +121,22 @@ func main() {
 	tm := hfModel.CreateGoMLXModel(runScope)
 	tm.PopulateKVCacheConfigs()
 
-	// Create decoder with IncrementalModelFn
-	var incrementalModelFn generate.KVCacheModelFn = func(scope *model.Scope, newTokens *Node, position *Node, cache kvcache.KVCacheNodes) (*Node, kvcache.KVCacheNodes) {
-		return hfModel.Forward(scope, newTokens, position, nil, nil, cache)
+	// Create decoder with IncrementalModelFn or NaiveModelFn
+	var decoder *generate.Generator
+	if *flagNaive {
+		var naiveModelFn generate.NaiveModelFn = func(scope *model.Scope, tokens *Node, seqLen *Node) *Node {
+			logits, _ := hfModel.Forward(scope, tokens, nil, seqLen, nil, nil)
+			return logits
+		}
+		decoder = generate.New(naiveModelFn).WithMaxLength(*flagMaxLength)
+	} else {
+		var incrementalModelFn generate.KVCacheModelFn = func(scope *model.Scope, newTokens *Node, position *Node, cache kvcache.KVCacheNodes) (*Node, kvcache.KVCacheNodes) {
+			return hfModel.Forward(scope, newTokens, position, nil, nil, cache)
+		}
+		decoder = generate.New(incrementalModelFn).
+			WithKVCache(kvCacheConfig, tm.NumKVHeads, tm.HeadDim, tm.DType).
+			WithMaxLength(*flagMaxLength)
 	}
-
-	decoder := generate.New(incrementalModelFn).
-		WithKVCache(kvCacheConfig, tm.NumKVHeads, tm.HeadDim, tm.DType).
-		WithMaxLength(*flagMaxLength)
 
 	if *flagTemperature != 0 {
 		decoder.WithTemperature(float32(*flagTemperature))
