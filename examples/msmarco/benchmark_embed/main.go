@@ -108,8 +108,8 @@ func main() {
 
 	embedExec, err := model.NewExec(backend, store, func(scope *model.Scope, tokens *graph.Node) *graph.Node {
 		constPadID := graph.Scalar(tokens.Graph(), tokens.DType(), padID)
-		mask := graph.NotEqual(tokens, constPadID)
-		x := hfModel.SentenceEmbeddingGraph(scope, tokens, mask)
+		seqLen := graph.ReduceSum(graph.ConvertDType(graph.NotEqual(tokens, constPadID), dtypes.Int32), 1)
+		x := hfModel.SentenceEmbeddingGraph(scope, tokens, seqLen)
 		return graph.ConvertDType(x, dtypes.Float32)
 	})
 

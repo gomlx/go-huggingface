@@ -379,7 +379,8 @@ func TestSentenceBatchEmbedding(t *testing.T) {
 
 	exec, err := model.NewExec(testBackend, testStore, func(scope *model.Scope, tokens *graph.Node) *graph.Node {
 		mask := graph.NotEqual(tokens, graph.Const(tokens.Graph(), testPadID))
-		x := testModel.SentenceEmbeddingGraph(scope, tokens, mask)
+		seqLen := graph.ReduceSum(graph.ConvertDType(mask, dtypes.Int32), 1)
+		x := testModel.SentenceEmbeddingGraph(scope, tokens, seqLen)
 		return graph.ConvertDType(x, dtypes.Float32)
 	})
 	if err != nil {

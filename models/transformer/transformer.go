@@ -2,7 +2,6 @@ package transformer
 
 import (
 	"math"
-	"slices"
 
 	"github.com/gomlx/compute/dtypes"
 	"github.com/gomlx/gomlx/core/graph"
@@ -35,13 +34,13 @@ func (m *Model) WithCausalMask(useCausalMask bool) *Model {
 // If the model was trained as an embedding model (e.g. sentence-transformers), it will return the sentence embeddings,
 // usually as [batchSize, embedSize].
 // Otherwise, it will return the final hidden states of all layers, usually as [batchSize, seqLen, hiddenSize].
-func (m *Model) ForwardGraph(scope *model.Scope, tokens, mask *graph.Node) *graph.Node {
+func (m *Model) ForwardGraph(scope *model.Scope, tokens, seqLen *graph.Node) *graph.Node {
 	if len(m.Modules) > 0 || m.PoolingConfig != nil {
-		return m.SentenceEmbeddingGraph(scope, tokens, mask)
+		return m.SentenceEmbeddingGraph(scope, tokens, seqLen)
 	}
 
 	// Default to just getting the final hidden state of all layers
-	lastLayer, _ := m.AllLayers(scope, tokens, mask)
+	lastLayer, _ := m.AllLayers(scope, tokens, seqLen)
 	return lastLayer
 }
 
@@ -63,13 +62,12 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 
 	isBert := m.Config.ModelType == "bert" || (len(m.Config.Architectures) > 0 && m.Config.Architectures[0] == "BertModel")
 
-	tm := mltransformer.New(
-		m.Config.VocabSize,
-		m.Config.HiddenSize,
-		m.Config.NumHiddenLayers,
-		m.Config.NumAttentionHeads,
-		headDim,
-	).
+	tm := mltransformer.New(scope).
+		WithVocabSize(m.Config.VocabSize).
+		WithEmbedDim(m.Config.HiddenSize).
+		WithNumLayers(m.Config.NumHiddenLayers).
+		WithNumHeads(m.Config.NumAttentionHeads).
+		WithHeadDim(headDim).
 		WithFFNDim(m.Config.IntermediateSize).
 		WithMaxPosEmbed(m.Config.MaxPositionEmbeddings).
 		WithTransposedWeights(true).
@@ -106,12 +104,12 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 			arch = mltransformer.ArchitectureGemma3
 		}
 		tm.WithArchitecture(arch).
-									WithNormalization(layers.NormalizationRMSNorm).
-									WithNormEpsilon(m.Config.RMSNormEps).
-									WithActivation(activation.FromName(m.Config.HiddenActivation)).
-									WithNumKVHeads(m.Config.NumKeyValueHeads).
-									WithBias(false).
-									WithFinalNormalization(layers.NormalizationRMSNorm)
+			WithNormalization(layers.NormalizationRMSNorm).
+			WithNormEpsilon(m.Config.RMSNormEps).
+			WithActivation(activation.FromName(m.Config.HiddenActivation)).
+			WithNumKVHeads(m.Config.NumKeyValueHeads).
+			WithBias(false).
+			WithFinalNormalization(layers.NormalizationRMSNorm)
 
 		attnLogitCap := m.Config.AttentionLogitCap
 		if attnLogitCap == 0 && (m.Config.ModelType == "gemma4" || m.Config.ModelType == "gemma4_text") {
@@ -227,8 +225,7 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 // Inputs:
 //
 //   - tokens: shaped [batchSize, seqLen] with the tokens, including padding.
-//   - mask: shaped [batchSize, seqLen] with the mask, where 1 means valid token and 0 means padding. It can be nil,
-//     in which case not mask is set.
+//   - seqLen: shaped [batchSize] or scalar, with the number of non-padding tokens. It can be nil.
 //
 // It returns:
 //
@@ -236,7 +233,7 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 //   - allLayers: the input to the first layer and the output of each layer.
 //     It follows the HuggingFace convention, where the allLayers[0] is the input to the first attention layer,
 //     and the following nodes in allLayers are the outputs of all NumHiddenLayers attention layers.
-func (m *Model) AllLayers(scope *model.Scope, tokens, mask *graph.Node) (lastLayer *graph.Node, allLayers []*graph.Node) {
+func (m *Model) AllLayers(scope *model.Scope, tokens, seqLen *graph.Node) (lastLayer *graph.Node, allLayers []*graph.Node) {
 	// Sanity checking.
 	if tokens.Rank() == 1 {
 		// Add batch dimension if not present.
@@ -244,21 +241,20 @@ func (m *Model) AllLayers(scope *model.Scope, tokens, mask *graph.Node) (lastLay
 	} else if tokens.Rank() != 2 {
 		exceptions.Panicf("tokens must be shaped [batchSize, seqLen] or [seqLen], got %v", tokens.Shape())
 	}
-	if mask != nil {
-		if mask.Rank() == 1 {
-			// Add batch dimension if not present.
-			mask = graph.ExpandAxes(mask, 0)
-		} else if mask.Rank() != 2 {
-			exceptions.Panicf("mask must be shaped [batchSize, seqLen] or [seqLen], got %v", mask.Shape())
-		}
-		if !slices.Equal(tokens.Shape().Dimensions, mask.Shape().Dimensions) {
-			exceptions.Panicf("if mask is set, its shape must match the tokens: got tokens.shape=%s, mask.shape=%s", tokens.Shape(), mask.Shape())
+	if seqLen != nil {
+		if seqLen.Rank() == 1 {
+			// Okay, seqLen is shaped [batchSize] or [1] (or just 1D).
+		} else if seqLen.Rank() == 0 {
+			// Scalar is also fine, though typically it is [batchSize].
+			seqLen = graph.ExpandAxes(seqLen, 0)
+		} else {
+			exceptions.Panicf("seqLen must be shaped [batchSize] or scalar, got %v", seqLen.Shape())
 		}
 	}
 
 	// Create GoMLXModel and build the graph for all the layers.
 	tm := m.CreateGoMLXModel(scope)
-	lastLayer, allLayers, _ = tm.AllLayers(scope, tokens, nil, mask, nil)
+	lastLayer, allLayers, _ = tm.AllLayers(tokens, mltransformer.CallOptions{SeqLen: seqLen})
 	return lastLayer, allLayers
 }
 
@@ -269,11 +265,17 @@ func (m *Model) Forward(
 	scope *model.Scope,
 	tokenIds *graph.Node,
 	positionIds *graph.Node,
+	seqLen *graph.Node,
 	attentionMask *graph.Node,
 	cache mltransformer.KVCacheNodes,
 ) (logits *graph.Node, updatedCache mltransformer.KVCacheNodes) {
 	tm := m.CreateGoMLXModel(scope)
-	logits, updatedCache = tm.Forward(scope, tokenIds, positionIds, attentionMask, cache)
+	opts := mltransformer.CallOptions{
+		PositionIds:   positionIds,
+		Cache:         cache,
+		SeqLen:        seqLen,
+		AttentionMask: attentionMask,
+	}
+	logits, updatedCache = tm.Forward(tokenIds, opts)
 	return logits, updatedCache
 }
-

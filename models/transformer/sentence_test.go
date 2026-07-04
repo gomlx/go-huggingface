@@ -42,8 +42,10 @@ func TestApplySentencePooling(t *testing.T) {
 					hiddenStates := graph.OnePlus(graph.Iota(g, shapes.Make(dtypes.Float32, 2*4, 3), 0))
 					hiddenStates = graph.Reshape(hiddenStates, 2, 4, 3)
 					var mask *graph.Node
+					var seqLen *graph.Node
 					if tc.mask != nil {
 						mask = graph.Const(g, tc.mask)
+						seqLen = graph.ReduceSum(graph.ConvertDType(mask, dtypes.Int32), 1)
 					}
 					m := &transformer.Model{PoolingConfig: &transformer.PoolingConfig{}}
 					switch tc.poolType {
@@ -54,7 +56,7 @@ func TestApplySentencePooling(t *testing.T) {
 					default:
 						t.Fatalf("unknown pool type %d", tc.poolType)
 					}
-					out := m.ApplySentencePooling(hiddenStates, mask)
+					out := m.ApplySentencePooling(hiddenStates, seqLen)
 					fmt.Printf("out.shape=%s\n", out.Shape())
 					if mask != nil {
 						return []*graph.Node{hiddenStates, mask}, []*graph.Node{out}

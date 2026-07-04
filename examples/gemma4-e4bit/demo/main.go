@@ -118,11 +118,11 @@ func main() {
 	// Retrieve vocabulary sizes and head details from Model Config
 	runScope := store.RootScope()
 	tm := hfModel.CreateGoMLXModel(runScope)
-	tm.PopulateKVCacheConfigs(runScope)
+	tm.PopulateKVCacheConfigs()
 
 	// Create decoder with IncrementalModelFn
 	var incrementalModelFn generate.KVCacheModelFn = func(scope *model.Scope, newTokens *Node, position *Node, cache kvcache.KVCacheNodes) (*Node, kvcache.KVCacheNodes) {
-		return hfModel.Forward(scope, newTokens, position, nil, cache)
+		return hfModel.Forward(scope, newTokens, position, nil, nil, cache)
 	}
 
 	decoder := generate.New(incrementalModelFn).

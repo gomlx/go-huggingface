@@ -13,6 +13,7 @@ import (
 	"github.com/gomlx/gomlx/core/graph"
 	"github.com/gomlx/gomlx/core/tensors"
 	"github.com/gomlx/gomlx/ml/model"
+	mltransformer "github.com/gomlx/gomlx/ml/zoo/transformer"
 )
 
 func TestGemma(t *testing.T) {
@@ -69,8 +70,8 @@ func TestGemma(t *testing.T) {
 
 		exec, err := model.NewExec(backend, store, func(scope *model.Scope, tokens *graph.Node) []*graph.Node {
 			tm := hfModel.CreateGoMLXModel(scope)
-			lastLayer, allLayers, _ := tm.AllLayers(scope, tokens, nil, nil, nil)
-			logits := tm.LogitsFromEmbeddings(scope, lastLayer)
+			lastLayer, allLayers, _ := tm.AllLayers(tokens, mltransformer.CallOptions{})
+			logits := tm.LogitsFromEmbeddings(lastLayer)
 			return []*graph.Node{
 				graph.ConvertDType(allLayers[0], dtypes.Float32),
 				graph.ConvertDType(allLayers[1], dtypes.Float32),
@@ -202,7 +203,7 @@ func TestGemma(t *testing.T) {
 		// We'll run prompt step
 		runScope := store.RootScope()
 		tm := hfModel.CreateGoMLXModel(runScope)
-		tm.PopulateKVCacheConfigs(runScope)
+		tm.PopulateKVCacheConfigs()
 
 		// Step 1: Prompt Execution
 		promptIds32 := make([]int32, len(promptIds))
@@ -227,7 +228,7 @@ func TestGemma(t *testing.T) {
 			cache := tm.KVCache.DeserializeNodes(cacheNodes)
 			g := tokens.Graph()
 			positionNode := graph.Const(g, int32(0))
-			logits, updatedCache := hfModel.Forward(scope, tokens, positionNode, nil, cache)
+			logits, updatedCache := hfModel.Forward(scope, tokens, positionNode, nil, nil, cache)
 			serializedUpdatedCache, err := tm.KVCache.SerializeNodes(updatedCache)
 			if err != nil {
 				panic(err)
@@ -280,7 +281,7 @@ func TestGemma(t *testing.T) {
 			cacheNodes := inputs[2:]
 			tokenReshaped := graph.ExpandDims(token, -1)
 			cache := tm.KVCache.DeserializeNodes(cacheNodes)
-			logits, updatedCache := hfModel.Forward(scope, tokenReshaped, positionNode, nil, cache)
+			logits, updatedCache := hfModel.Forward(scope, tokenReshaped, positionNode, nil, nil, cache)
 			serializedUpdatedCache, err := tm.KVCache.SerializeNodes(updatedCache)
 			if err != nil {
 				panic(err)
@@ -329,7 +330,7 @@ func TestGemma(t *testing.T) {
 			cacheNodes := inputs[2:]
 			tokenReshaped := graph.ExpandDims(token, -1)
 			cache := tm.KVCache.DeserializeNodes(cacheNodes)
-			logits, updatedCache := hfModel.Forward(scope, tokenReshaped, positionNode, nil, cache)
+			logits, updatedCache := hfModel.Forward(scope, tokenReshaped, positionNode, nil, nil, cache)
 			serializedUpdatedCache, err := tm.KVCache.SerializeNodes(updatedCache)
 			if err != nil {
 				panic(err)

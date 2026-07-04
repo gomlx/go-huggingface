@@ -16,22 +16,20 @@ import (
 // layers sequentially according to the modules.json configuration.
 //
 //   - tokens: shaped [batchSize, seqLen] with the tokens, including padding.
-//   - mask: shaped [batchSize, seqLen] with the mask, where 1 means valid token and 0 means padding. It can be nil,
-//     in which case no mask is used and it's assumed all elements of the sentence are used.
+//   - seqLen: shaped [batchSize] or scalar, with the number of non-padding tokens. It can be nil.
 //
 // It returns the final pooled embedding (usually [batchSize, embedSize]) for the sentence.
-func (m *Model) SentenceEmbeddingGraph(scope *model.Scope, tokens, mask *graph.Node) *graph.Node {
+func (m *Model) SentenceEmbeddingGraph(scope *model.Scope, tokens, seqLen *graph.Node) *graph.Node {
 	var x *graph.Node
 	// Add a batch axis if not present.
 	if tokens.Rank() == 1 {
 		tokens = graph.ExpandAxes(tokens, 0) // [seqLen] -> [1, seqLen]
-		if mask != nil {
-			mask = graph.ExpandAxes(mask, 0) // [seqLen] -> [1, seqLen]
+		if seqLen != nil {
+			seqLen = graph.ExpandAxes(seqLen, 0)
 		}
 	}
-	if tokens.Rank() != 2 || (mask != nil && mask.Rank() != 2) {
-		exceptions.Panicf("tokens must be [batchSize, seqLen] and mask must be [batchSize, seqLen] or nil, got %v and %v",
-			tokens.Shape(), mask.Shape())
+	if tokens.Rank() != 2 {
+		exceptions.Panicf("tokens must be [batchSize, seqLen], got %v", tokens.Shape())
 	}
 
 	for _, mod := range m.Modules {
@@ -39,14 +37,14 @@ func (m *Model) SentenceEmbeddingGraph(scope *model.Scope, tokens, mask *graph.N
 		case "sentence_transformers.models.Transformer":
 			// The base transformer output is the list of layer outputs.
 			// The last item is the final hidden state.
-			lastLayer, _ := m.AllLayers(scope, tokens, mask)
+			lastLayer, _ := m.AllLayers(scope, tokens, seqLen)
 			x = lastLayer
 
 		case "sentence_transformers.models.Pooling":
 			if x == nil {
 				exceptions.Panicf("pooling module found before transformer module")
 			}
-			x = m.ApplySentencePooling(x, mask)
+			x = m.ApplySentencePooling(x, seqLen)
 
 		case "sentence_transformers.models.Normalize":
 			if x == nil {
@@ -69,11 +67,11 @@ func (m *Model) SentenceEmbeddingGraph(scope *model.Scope, tokens, mask *graph.N
 
 	if x == nil {
 		// Fallback if modules.json is not present or didn't contain sentence_transformers layers
-		lastLayer, _ := m.AllLayers(scope, tokens, mask)
+		lastLayer, _ := m.AllLayers(scope, tokens, seqLen)
 		x = lastLayer
 		// and apply default pooling if a pooling config exists
 		if m.PoolingConfig != nil {
-			x = m.ApplySentencePooling(x, mask)
+			x = m.ApplySentencePooling(x, seqLen)
 		}
 	}
 
@@ -96,18 +94,17 @@ func (m *Model) SingleSentenceEmbeddingExec(backend compute.Backend, scope *mode
 // ApplySentencePooling applies the configured pooling function to the hidden states.
 //
 // - hiddenStates: [batchSize, seqLen, hiddenSize]
-// - mask: nil or [batchSize, seqLen] of dtype Bool.
+// - seqLen: nil or [batchSize] of type Int32.
 //
 // Returns [batchSize, hiddenSize]
-func (m *Model) ApplySentencePooling(hiddenStates, mask *graph.Node) *graph.Node {
+func (m *Model) ApplySentencePooling(hiddenStates, seqLen *graph.Node) *graph.Node {
 	if m.PoolingConfig == nil {
 		exceptions.Panicf("no pooling config was loaded for this model")
 	}
 	cfg := m.PoolingConfig
 	g := hiddenStates.Graph()
 	batchSize := hiddenStates.Shape().Dimensions[0]
-	seqLen := hiddenStates.Shape().Dimensions[1]
-	// hiddenDim := hiddenStates.Shape().Dimensions[2]
+	maxSeqLen := hiddenStates.Shape().Dimensions[1]
 
 	switch {
 	case cfg.PoolingModeLastToken:
@@ -115,17 +112,15 @@ func (m *Model) ApplySentencePooling(hiddenStates, mask *graph.Node) *graph.Node
 		// mask) to find the last valid token.
 
 		var lastTokenIdx *graph.Node
-		if mask == nil {
-			// If no mask is provided, assume all tokens are valid and take the last one.
-			lastTokenIdx = graph.Scalar(g, dtypes.Int32, seqLen-1)
+		if seqLen == nil {
+			// If no seqLen is provided, assume all tokens are valid and take the last one.
+			lastTokenIdx = graph.Scalar(g, dtypes.Int32, maxSeqLen-1)
 			lastTokenIdx = graph.ExpandAxes(lastTokenIdx, 0)              // scalar -> [1]
 			lastTokenIdx = graph.BroadcastPrefix(lastTokenIdx, batchSize) // -> [batchSize, 1]
 		} else {
-			// Find the last token index by finding the last non-zero element in the mask.
-			// mask is [batchSize, seqLen]
-			sequenceIndices := graph.Iota(g, shapes.Make(dtypes.Int32, batchSize, seqLen), 1)
-			validIndices := graph.Where(mask, sequenceIndices, graph.Scalar(g, dtypes.Int32, -1))
-			lastTokenIdx = graph.ReduceAndKeep(validIndices, graph.ReduceMax, 1) // [batchSize, 1]
+			// seqLen is [batchSize]. Last token index is seqLen - 1.
+			lastTokenIdx = graph.Sub(seqLen, graph.Scalar(g, dtypes.Int32, 1))
+			lastTokenIdx = graph.ExpandAxes(lastTokenIdx, 1) // [batchSize, 1]
 		}
 		// Gather the last token embeddings of each example.
 		// Add the batch index to each lastTokenIdx:
@@ -136,7 +131,12 @@ func (m *Model) ApplySentencePooling(hiddenStates, mask *graph.Node) *graph.Node
 		return lastTokenEmbeddings
 
 	case cfg.PoolingModeMeanTokens:
-		// Plain mean pooling over the sequence tokens (assuming no padding for now).
+		if seqLen == nil {
+			return graph.ReduceMean(hiddenStates, 1) // [batch, hidden]
+		}
+		// Create a boolean mask from seqLen.
+		indices := graph.Iota(g, shapes.Make(dtypes.Int32, batchSize, maxSeqLen), 1)
+		mask := graph.LessThan(indices, graph.ExpandAxes(seqLen, 1))
 		return graph.MaskedReduceMean(hiddenStates, mask, 1) // [batch, hidden]
 
 	case cfg.PoolingModeClsToken:
