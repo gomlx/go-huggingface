@@ -18,6 +18,7 @@ import (
 	"github.com/gomlx/gomlx/ml/layers/attention/kvcache"
 	"github.com/gomlx/gomlx/ml/model"
 	"github.com/gomlx/gomlx/ml/zoo/transformer/generate"
+	"k8s.io/klog/v2"
 )
 
 var (
@@ -33,6 +34,7 @@ var (
 )
 
 func main() {
+	klog.InitFlags(nil)
 	flag.Parse()
 
 	// 1. Initialize Backend
