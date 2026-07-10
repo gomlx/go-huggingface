@@ -130,20 +130,17 @@ func (d *Dataset) DownloadCtx(ctx context.Context, parquetFiles ...ParquetFile) 
 			return nil, errors.Wrapf(err, "while creating directory to download %q", destPath)
 		}
 
-		wg.Add(1)
-		go func(idx int, pf ParquetFile, destPath string) {
-			defer wg.Done()
-
+		wg.Go(func() {
 			downloadingMu.Lock()
 			requireDownload++
 			downloadingMu.Unlock()
 			err := downloadManager.LockedDownload(ctx, pf.URL, destPath, false, func(downloadedBytes, totalBytes int64) {
 				downloadingMu.Lock()
 				defer downloadingMu.Unlock()
-				lastReportedBytes := perFileDownloaded[idx]
+				lastReportedBytes := perFileDownloaded[idxFile]
 				newDownloaded := uint64(downloadedBytes) - lastReportedBytes
 				allFilesDownloaded += newDownloaded
-				perFileDownloaded[idx] = uint64(downloadedBytes)
+				perFileDownloaded[idxFile] = uint64(downloadedBytes)
 				if d.Verbosity > 0 && time.Since(lastPrintTime) > time.Second {
 					ratePrintFn()
 				}
@@ -160,7 +157,7 @@ func (d *Dataset) DownloadCtx(ctx context.Context, parquetFiles ...ParquetFile) 
 				ratePrintFn()
 			}
 			downloadingMu.Unlock()
-		}(idxFile, pf, destPath)
+		})
 	}
 	wg.Wait()
 

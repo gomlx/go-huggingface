@@ -17,6 +17,9 @@ import (
 	"github.com/gomlx/go-huggingface/internal/files"
 )
 
+// Part is the file extension used for temporary files during download.
+const Part = "part"
+
 // ProgressCallback is called as download progresses.
 //   - totalBytes may be set to 0 if total size is not yet known.
 type ProgressCallback func(downloadedBytes, totalBytes int64)
@@ -74,6 +77,10 @@ func (m *Manager) setRequestHeader(req *http.Request) {
 // Progress of download is reported back to the given callback, if not nil.
 //
 // The context ctx can be used to interrupt the downloading.
+//
+// Note: this download files with a ".part" suffix (Part) first, and moves the file to filePath only after
+// the download has completed successfully. This way, if the download is interrupted, the
+// final file will not be present, and a re-run will download the file from scratch.
 func (m *Manager) Download(ctx context.Context, url string, filePath string, callback ProgressCallback) error {
 	m.semaphore.Acquire()
 	defer m.semaphore.Release()
@@ -93,14 +100,19 @@ func (m *Manager) Download(ctx context.Context, url string, filePath string, cal
 	if err = os.MkdirAll(path.Dir(filePath), 0777); err != nil {
 		return errors.Wrapf(err, "Failed to create the directory for the path: %q", path.Dir(filePath))
 	}
+	filePathPart := filePath + "." + Part
 	var file *os.File
-	file, err = os.Create(filePath)
+	file, err = os.Create(filePathPart)
 	if err != nil {
-		return errors.Wrapf(err, "failed creating file %q", filePath)
+		return errors.Wrapf(err, "failed creating file %q", filePathPart)
 	}
+	var downloadSuccess bool
 	defer func() {
 		if file != nil {
 			_ = file.Close()
+		}
+		if !downloadSuccess {
+			_ = os.Remove(filePathPart)
 		}
 	}()
 
@@ -153,11 +165,11 @@ func (m *Manager) Download(ctx context.Context, url string, filePath string, cal
 		if n > 0 {
 			wn, writeErr := file.Write(buf[:n])
 			if writeErr != nil && writeErr != io.EOF {
-				return errors.Wrapf(writeErr, "failed writing %q to %q", url, filePath)
+				return errors.Wrapf(writeErr, "failed writing %q to %q", url, filePathPart)
 			}
 			if wn != n {
 				return errors.Wrapf(io.ErrShortWrite, "failed writing %q to %q: not enough bytes written (wanted %d, wrote only %d)",
-					url, filePath, n, wn)
+					url, filePathPart, n, wn)
 			}
 		}
 		if readErr == io.EOF {
@@ -171,11 +183,15 @@ func (m *Manager) Download(ctx context.Context, url string, filePath string, cal
 	err = file.Close()
 	file = nil
 	if err != nil {
-		return errors.Wrapf(err, "failed closing file %q", filePath)
+		return errors.Wrapf(err, "failed closing file %q", filePathPart)
 	}
 	if err = resp.Body.Close(); err != nil {
 		return errors.Wrapf(err, "failed closing connection to %q", url)
 	}
+	if err = os.Rename(filePathPart, filePath); err != nil {
+		return errors.Wrapf(err, "failed moving %q to %q", filePathPart, filePath)
+	}
+	downloadSuccess = true
 	return nil
 }
 

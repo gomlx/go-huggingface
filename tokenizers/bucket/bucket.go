@@ -422,14 +422,12 @@ func (b *Bucketizer) Run(input <-chan SentenceRef, output chan<- Bucket) {
 	var wg sync.WaitGroup
 
 	for i := 0; i < maxParallelization; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for ref := range input {
 				ids := b.tokenizer.Encode(ref.Sentence)
 				results <- tokenized{ref: ref, ids: ids}
 			}
-		}()
+		})
 	}
 
 	go func() {
