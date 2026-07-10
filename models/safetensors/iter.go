@@ -222,9 +222,7 @@ func iterFromRepoToDevice(backend compute.Backend, done <-chan struct{}, chDevic
 
 	var wg sync.WaitGroup
 	for i := 0; i < MaxParallelBufferTransfers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			var waitTime time.Duration
 			defer func() {
 				totalWaitTime.Add(int64(waitTime))
@@ -277,7 +275,7 @@ func iterFromRepoToDevice(backend compute.Backend, done <-chan struct{}, chDevic
 					waitTime += time.Since(waitStart)
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

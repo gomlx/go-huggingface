@@ -221,10 +221,7 @@ func (r *Repo) DownloadFilesCtx(ctx context.Context, repoFiles ...string) (downl
 		}
 
 		// Start downloading in a separate goroutine.
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			// Download header of file for safety checks, and so we can find the blobPath.
 			header, contentLength, err := downloadManager.FetchHeader(ctx, fileURL)
 			if err != nil {
@@ -278,7 +275,7 @@ func (r *Repo) DownloadFilesCtx(ctx context.Context, repoFiles ...string) (downl
 			if err != nil {
 				reportErrorFn(errors.WithMessagef(err, "while downloading %q from repository %q", repoFileName, r.ID))
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if requireDownload > 0 {
