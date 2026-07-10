@@ -55,42 +55,9 @@ func (m *Manager) LockedDownload(ctx context.Context, url, filePath string, forc
 			}
 		}()
 
-		// Create tmpFile where to download.
-		var tmpFileClosed bool
-		tmpPath := filePath + ".downloading"
-		tmpFile, err := os.Create(tmpPath)
-		if err != nil {
-			mainErr = errors.Wrapf(err, "creating temporary file for download in %q", tmpPath)
-			return
-		}
-		defer func() {
-			// If we exit with an error, make sure to close and remove unfinished temporary file.
-			if !tmpFileClosed {
-				err := tmpFile.Close()
-				if err != nil {
-					log.Printf("Failed closing temporary file %q: %v", tmpPath, err)
-				}
-				err = os.Remove(tmpPath)
-				if err != nil {
-					log.Printf("Failed removing temporary file %q: %v", tmpPath, err)
-				}
-			}
-		}()
-
-		mainErr = m.Download(ctx, url, tmpPath, progressCallback)
+		mainErr = m.Download(ctx, url, filePath, progressCallback)
 		if mainErr != nil {
-			mainErr = errors.WithMessagef(mainErr, "while downloading %q to %q", url, tmpPath)
-			return
-		}
-
-		// Download succeeded, move to our target location.
-		tmpFileClosed = true
-		if err := tmpFile.Close(); err != nil {
-			mainErr = errors.Wrapf(err, "failed to close temporary download file %q", tmpPath)
-			return
-		}
-		if err := os.Rename(tmpPath, filePath); err != nil {
-			mainErr = errors.Wrapf(err, "failed to move downloaded file %q to %q", tmpPath, filePath)
+			mainErr = errors.WithMessagef(mainErr, "while downloading %q to %q", url, filePath)
 			return
 		}
 	})
