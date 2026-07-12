@@ -8,17 +8,17 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
-	"image/png"
 	_ "image/jpeg"
+	"image/png"
 	_ "image/png"
 	"log"
 	"os"
 	"strings"
 
 	"github.com/gomlx/compute"
-	_ "github.com/gomlx/gomlx/backends/default"
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/models/sam2"
+	_ "github.com/gomlx/gomlx/backends/default"
 )
 
 var (
@@ -90,7 +90,7 @@ func main() {
 	}
 
 	// 3. Segment image
-	options := &sam2.PredictOptions{
+	options := &sam2.SegmentationOptions{
 		Points:          points,
 		Boxes:           boxes,
 		MultiMaskOutput: *multimaskFlag,
