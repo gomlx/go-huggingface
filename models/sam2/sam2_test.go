@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gomlx/compute"
 	"github.com/gomlx/compute/dtypes"
 	"github.com/gomlx/go-huggingface/hub"
 	modelimage "github.com/gomlx/go-huggingface/models/image"
@@ -21,6 +20,7 @@ import (
 	"github.com/gomlx/gomlx/core/tensors"
 	"github.com/gomlx/gomlx/core/tensors/images"
 	"github.com/gomlx/gomlx/ml/model"
+	"github.com/gomlx/gomlx/support/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -39,17 +39,17 @@ type ExpectedData struct {
 }
 
 func TestSAM2Inference(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping SAM2 inference test in short mode")
+	}
+
 	// 1. Initialize backend
-	backend, err := compute.New()
-	require.NoError(t, err)
-	defer backend.Finalize()
+	backend := testutil.BuildTestBackend()
 
 	// 2. Load expected ground truth from Python
-	expectedPath := "/tmp/sam2_test_data.json"
+	expectedPath := "./sam2_test_data.json"
 	b, err := os.ReadFile(expectedPath)
-	if err != nil {
-		t.Skipf("Skipping test because ground truth file %s is not available: %v", expectedPath, err)
-	}
+	require.NoError(t, err)
 	var expected ExpectedData
 	require.NoError(t, json.Unmarshal(b, &expected))
 
@@ -64,7 +64,7 @@ func TestSAM2Inference(t *testing.T) {
 	require.NoError(t, modelObj.LoadStore(backend, store))
 
 	// 4. Load the test image
-	imagePath := "/home/janpf/Projects/gomlx/go-huggingface/models/image/test_image_1024.png"
+	imagePath := "../image/test_image_1024.png"
 	imgFile, err := os.Open(imagePath)
 	require.NoError(t, err)
 	defer imgFile.Close()
@@ -90,28 +90,28 @@ func TestSAM2Inference(t *testing.T) {
 		// Preprocess: Bilinear resize to 1024x1024, channels first, rescale, normalize
 		preprocessed := modelimage.PreprocessGraph(rawImage, 1024, 1024, mean, std)
 
-		predMasks, iouScores, fpnHiddenStates, sparseEmbeds, denseEmbeds, iouTokenOut, maskTokensOut, upscaled, upscaled2, hyperIn := Forward(scope, preprocessed, inputPoints, inputLabels, nil, nil, modelObj.Config, true)
+		predMasks, states := Forward(scope, preprocessed, inputPoints, inputLabels, nil, nil, modelObj.Config, true)
 
 		// Compute means/reduce of intermediate nodes to print
 		preprocessedMean := ReduceMean(preprocessed)
 		diff := Sub(preprocessed, preprocessedMean)
 		preprocessedStd := Sqrt(ReduceMean(Mul(diff, diff)))
-		imageEmbedsLastMean := ReduceMean(fpnHiddenStates[2])
-		denseEmbedsMean := ReduceMean(denseEmbeds)
-		sparseEmbedsMean := ReduceMean(sparseEmbeds)
-		iouTokenOutMean := ReduceMean(iouTokenOut)
-		maskTokensOutMean := ReduceMean(maskTokensOut)
-		upscaledMean := ReduceMean(upscaled)
-		upscaled2Mean := ReduceMean(upscaled2)
-		hyperInMean := ReduceMean(hyperIn)
-		qL0AfterLN1Mean := ReduceMean(fpnHiddenStates[0])
-		qL0AfterLN2Mean := ReduceMean(fpnHiddenStates[1])
+		imageEmbedsLastMean := ReduceMean(states.FpnHiddenStates[2])
+		denseEmbedsMean := ReduceMean(states.DenseEmbeddings)
+		sparseEmbedsMean := ReduceMean(states.SparseEmbeddings)
+		iouTokenOutMean := ReduceMean(states.IouTokenOut)
+		maskTokensOutMean := ReduceMean(states.MaskTokensOut)
+		upscaledMean := ReduceMean(states.Upscaled)
+		upscaled2Mean := ReduceMean(states.Upscaled2)
+		hyperInMean := ReduceMean(states.HyperIn)
+		qL0AfterLN1Mean := ReduceMean(states.FpnHiddenStates[0])
+		qL0AfterLN2Mean := ReduceMean(states.FpnHiddenStates[1])
 		qL0AfterLN3Mean := ScalarZero(g, dtypes.Float32)
 		kL0AfterLN4Mean := ScalarZero(g, dtypes.Float32)
 		debugLabels := ScalarZero(g, dtypes.Int32)
 		debugPointEmbedValues := ScalarZero(g, dtypes.Float32)
 
-		return []*Node{predMasks, iouScores, preprocessedMean, preprocessedStd, imageEmbedsLastMean, denseEmbedsMean, sparseEmbeds, iouTokenOutMean, maskTokensOutMean, upscaledMean, upscaled2Mean, hyperInMean, qL0AfterLN1Mean, qL0AfterLN2Mean, qL0AfterLN3Mean, kL0AfterLN4Mean, sparseEmbedsMean, debugLabels, debugPointEmbedValues}
+		return []*Node{predMasks, states.IoUScores, preprocessedMean, preprocessedStd, imageEmbedsLastMean, denseEmbedsMean, states.SparseEmbeddings, iouTokenOutMean, maskTokensOutMean, upscaledMean, upscaled2Mean, hyperInMean, qL0AfterLN1Mean, qL0AfterLN2Mean, qL0AfterLN3Mean, kL0AfterLN4Mean, sparseEmbedsMean, debugLabels, debugPointEmbedValues}
 	})
 	require.NoError(t, err)
 
