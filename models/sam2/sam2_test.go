@@ -9,10 +9,11 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"os"
-	"strings"
 	"testing"
+	"time"
 
 	"github.com/gomlx/compute/dtypes"
+	"github.com/gomlx/compute/support/humanize"
 	"github.com/gomlx/go-huggingface/hub"
 	modelimage "github.com/gomlx/go-huggingface/models/image"
 	_ "github.com/gomlx/gomlx/backends/default"
@@ -62,6 +63,7 @@ func TestSAM2Inference(t *testing.T) {
 
 	store := model.NewStore()
 	require.NoError(t, modelObj.LoadStore(backend, store))
+	fmt.Printf("- Number of variables: %d\n", store.NumVariables())
 
 	// 4. Load the test image
 	imagePath := "../image/test_image_1024.png"
@@ -115,42 +117,12 @@ func TestSAM2Inference(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	loadedVars := make(map[string]bool)
-	for v := range store.IterVariables() {
-		loadedVars[v.Path()] = true
-	}
-	fmt.Printf("--- TOTAL LOADED VARIABLES: %d ---\n", len(loadedVars))
-
-	for v := range store.IterVariables() {
-		if !strings.Contains(v.Path(), "blocks") {
-			var sum float32
-			var count int
-			v.MustValue().ConstFlatData(func(flatAny any) {
-				flat := flatAny.([]float32)
-				for _, x := range flat {
-					sum += x
-				}
-				count = len(flat)
-			})
-			_ = count
-			// fmt.Printf("Store variable %s mean: %v (shape: %s)\n", v.Path(), sum/float32(count), v.Shape())
-		}
-	}
-
 	// 6. Run the graph
+	fmt.Printf("- Compiling and executing graph ...")
+	start := time.Now()
 	results, err := exec.Exec(imgTensor, pointsTensor, labelsTensor)
+	fmt.Printf(" done (elapsed: %s)\n", humanize.Duration(time.Since(start)))
 	require.NoError(t, err)
-
-	fmt.Println("--- DYNAMICALLY CREATED VARIABLES (NOT LOADED) ---")
-	var dynamicCount int
-	for v := range store.IterVariables() {
-		if !loadedVars[v.Path()] {
-			fmt.Printf("Dynamic: %s %s\n", v.Path(), v.Shape())
-			dynamicCount++
-		}
-	}
-	fmt.Printf("Total dynamic variables: %d\n", dynamicCount)
-	fmt.Println("--------------------------------------------------")
 
 	predMasksTensor := results[0]
 	iouScoresTensor := results[1]
@@ -172,41 +144,40 @@ func TestSAM2Inference(t *testing.T) {
 	_ = results[17]
 	_ = results[18]
 
-	fmt.Printf("Preprocessed image mean: %v (expected: %v)\n", preprocessedMeanTensor.Value(), expected.PixelValuesMean)
-	fmt.Printf("Preprocessed image std:  %v (expected: %v)\n", preprocessedStdTensor.Value(), expected.PixelValuesStd)
-	fmt.Printf("Backbone Stage 2 mean:   %v (expected: 0.018796)\n", imageEmbedsLastMeanTensor.Value())
-	fmt.Printf("Dense embeds mean:       %v (expected: %v)\n", denseEmbedsMeanTensor.Value(), expected.DenseEmbeddingsMean)
-	fmt.Printf("Sparse embeds mean:      %v (expected: 0.0196135)\n", sparseEmbedsMeanTensor.Value())
-	fmt.Printf("iouTokenOut mean:        %v (expected: 0.002727542)\n", iouTokenOutMeanTensor.Value())
-	fmt.Printf("maskTokensOut mean:      %v (expected: -0.02376326)\n", maskTokensOutMeanTensor.Value())
-	fmt.Printf("upscaled mean:           %v (expected: 0.05955713)\n", upscaledMeanTensor.Value())
-	fmt.Printf("upscaled2 mean:          %v (expected: 0.010523845)\n", upscaled2MeanTensor.Value())
-	fmt.Printf("hyperIn mean:            %v (expected: -0.6389069)\n", hyperInMeanTensor.Value())
-	fmt.Printf("Backbone Stage 0 mean:   %v (expected: -0.046504)\n", qL0AfterLN1Tensor.Value())
-	fmt.Printf("Backbone Stage 1 mean:   %v (expected: 0.056898)\n", qL0AfterLN2Tensor.Value())
-	fmt.Printf("Backbone Stage 3 mean:   %v (expected: -0.001673)\n", qL0AfterLN3Tensor.Value())
-	fmt.Printf("L1 keys after LN4:       %v (expected: 0.044682167)\n", kL0AfterLN4Tensor.Value())
-
-
+	fmt.Printf("- Model output compared to original (Python):\n")
+	fmt.Printf("  - Preprocessed image mean: %v (expected: %v)\n", preprocessedMeanTensor.Value(), expected.PixelValuesMean)
+	fmt.Printf("  - Preprocessed image std:  %v (expected: %v)\n", preprocessedStdTensor.Value(), expected.PixelValuesStd)
+	fmt.Printf("  - Backbone Stage 2 mean:   %v (expected: 0.018796)\n", imageEmbedsLastMeanTensor.Value())
+	fmt.Printf("  - Dense embeds mean:       %v (expected: %v)\n", denseEmbedsMeanTensor.Value(), expected.DenseEmbeddingsMean)
+	fmt.Printf("  - Sparse embeds mean:      %v (expected: 0.0196135)\n", sparseEmbedsMeanTensor.Value())
+	fmt.Printf("  - iouTokenOut mean:        %v (expected: 0.002727542)\n", iouTokenOutMeanTensor.Value())
+	fmt.Printf("  - maskTokensOut mean:      %v (expected: -0.02376326)\n", maskTokensOutMeanTensor.Value())
+	fmt.Printf("  - upscaled mean:           %v (expected: 0.05955713)\n", upscaledMeanTensor.Value())
+	fmt.Printf("  - upscaled2 mean:          %v (expected: 0.010523845)\n", upscaled2MeanTensor.Value())
+	fmt.Printf("  - hyperIn mean:            %v (expected: -0.6389069)\n", hyperInMeanTensor.Value())
+	fmt.Printf("  - Backbone Stage 0 mean:   %v (expected: -0.046504)\n", qL0AfterLN1Tensor.Value())
+	fmt.Printf("  - Backbone Stage 1 mean:   %v (expected: 0.056898)\n", qL0AfterLN2Tensor.Value())
+	fmt.Printf("  - Backbone Stage 3 mean:   %v (expected: -0.001673)\n", qL0AfterLN3Tensor.Value())
+	fmt.Printf("  - L1 keys after LN4:       %v (expected: 0.044682167)\n", kL0AfterLN4Tensor.Value())
 
 	// Print sparseEmbeds shape and sample
-	fmt.Printf("Sparse embeds shape: %v\n", sparseEmbedsTensor.Shape())
+	fmt.Printf("  - Sparse embeds shape: %v\n", sparseEmbedsTensor.Shape())
 	sparseEmbedsTensor.ConstFlatData(func(flatAny any) {
 		flat := flatAny.([]float32)
 		var sum0, sum1 float32
-		for i := 0; i < 256; i++ {
+		for i := range 256 {
 			sum0 += flat[i]
 			sum1 += flat[256+i]
 		}
-		fmt.Printf("Token 0 mean: %v\n", sum0/256.0)
-		fmt.Printf("Token 0 first 10: %v\n", flat[0:10])
-		fmt.Printf("Token 1 mean: %v\n", sum1/256.0)
-		fmt.Printf("Token 1 first 10: %v\n", flat[256:266])
+		fmt.Printf("    - Token 0 mean: %v\n", sum0/256.0)
+		fmt.Printf("    - Token 0 first 10: %v\n", flat[0:10])
+		fmt.Printf("    - Token 1 mean: %v\n", sum1/256.0)
+		fmt.Printf("    - Token 1 first 10: %v\n", flat[256:266])
 	})
 
 	// 7. Verify the predictions
-	fmt.Printf("Predicted masks shape: %v\n", predMasksTensor.Shape())
-	fmt.Printf("Predicted IoU scores: %v\n", iouScoresTensor.Value())
+	fmt.Printf("  - Predicted masks shape: %v\n", predMasksTensor.Shape())
+	fmt.Printf("  - Predicted IoU scores: %v\n", iouScoresTensor.Value())
 
 	gotIoUScores := iouScoresTensor.Value().([][][]float32)
 	require.Len(t, gotIoUScores, 1)
@@ -227,8 +198,15 @@ func TestSAM2Inference(t *testing.T) {
 			sum += float64(val)
 		}
 		meanVal := float32(sum / float64(len(flat)))
-		fmt.Printf("Predicted masks mean logit: %f (expected: %f)\n", meanVal, expected.PredMasksMean)
+		fmt.Printf("  - Predicted masks mean logit: %f (expected: %f)\n", meanVal, expected.PredMasksMean)
 		require.InDelta(t, expected.PredMasksMean, meanVal, 1.0,
 			"Mean predicted mask logit doesn't match Python reference closely enough")
 	})
+
+	// Measure execution time, without recompilation:
+	fmt.Printf("- Re-executing graph ...")
+	start = time.Now()
+	_, err = exec.Exec(imgTensor, pointsTensor, labelsTensor)
+	fmt.Printf(" done (elapsed: %s)\n", humanize.Duration(time.Since(start)))
+	require.NoError(t, err)
 }

@@ -4,6 +4,7 @@ package sam2
 
 import (
 	"math"
+	"slices"
 
 	"github.com/gomlx/compute"
 	"github.com/gomlx/compute/dtypes"
@@ -450,7 +451,7 @@ func Sam2VisionNeck(scope *model.Scope, hiddenStates []*Node, config *Config) (f
 			ChannelsAxis(images.ChannelsFirst).
 			Done()
 
-		if !contains(config.VisionConfig.FpnTopDownLevels, i) || i == n {
+		if !slices.Contains(config.VisionConfig.FpnTopDownLevels, i) || i == n {
 			prevFeatures = lat
 		} else {
 			h := lat.Shape().Dimensions[2]
@@ -957,13 +958,4 @@ func Forward(scope *model.Scope, pixelValues *Node, inputPoints, inputLabels, in
 	}
 
 	return predMasks, internalStates
-}
-
-func contains(slice []int, val int) bool {
-	for _, item := range slice {
-		if item == val {
-			return true
-		}
-	}
-	return false
 }
