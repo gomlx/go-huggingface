@@ -31,14 +31,20 @@ type HieraDetConfig struct {
 }
 
 // VisionConfig represents the vision encoder configuration.
+// It includes parameters for the Feature Pyramid Network (FPN) neck.
 type VisionConfig struct {
 	BackboneChannelList  []int          `json:"backbone_channel_list"`
 	BackboneFeatureSizes [][]int        `json:"backbone_feature_sizes"`
-	FpnHiddenSize        int            `json:"fpn_hidden_size"`
-	FpnKernelSize        int            `json:"fpn_kernel_size"`
-	FpnStride            int            `json:"fpn_stride"`
-	FpnPadding           int            `json:"fpn_padding"`
-	FpnTopDownLevels     []int          `json:"fpn_top_down_levels"`
+	// FPNHiddenSize is the hidden dimension of the Feature Pyramid Network (FPN) neck.
+	FPNHiddenSize        int            `json:"fpn_hidden_size"`
+	// FPNKernelSize is the kernel size used in the Feature Pyramid Network (FPN) neck.
+	FPNKernelSize        int            `json:"fpn_kernel_size"`
+	// FPNStride is the stride used in the Feature Pyramid Network (FPN) neck.
+	FPNStride            int            `json:"fpn_stride"`
+	// FPNPadding is the padding used in the Feature Pyramid Network (FPN) neck.
+	FPNPadding           int            `json:"fpn_padding"`
+	// FPNTopDownLevels specifies the levels of the Feature Pyramid Network (FPN) involved in top-down connections.
+	FPNTopDownLevels     []int          `json:"fpn_top_down_levels"`
 	NumFeatureLevels     int            `json:"num_feature_levels"`
 	HiddenAct            string         `json:"hidden_act"`
 	LayerNormEps         float64        `json:"layer_norm_eps"`
