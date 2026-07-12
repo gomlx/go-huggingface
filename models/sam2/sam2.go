@@ -1,5 +1,16 @@
 // Copyright 2026 The GoMLX Authors. SPDX-License-Identifier: Apache-2.0
 
+// Package sam2 implements the Facebook's image segmentation foundation model "Segment Anything in Images And Videos"
+// (SAM2), see [1], [2].
+//
+// This package implements the image part of the model (the Hiera backbone), not the video part.
+// It's based on the HuggingFace implementation in [3].
+//
+// In includes a Go friendly [Segmenter], see [NewSegmenter].
+//
+// [1] https://arxiv.org/pdf/2408.00714
+// [2] https://huggingface.co/facebook/sam2-hiera-base-plus
+// [3] https://github.com/huggingface/transformers/tree/main/src/transformers/models/sam2
 package sam2
 
 import (
