@@ -8,7 +8,7 @@ require (
 	github.com/eliben/go-sentencepiece v0.7.0
 	github.com/gofrs/flock v0.13.0
 	github.com/gomlx/compute v0.0.0-20260711051148-8bbe6fb70a7b
-	github.com/gomlx/gomlx v0.27.4-0.20260711111820-b0d706552a5c
+	github.com/gomlx/gomlx v0.27.4-0.20260712085317-875b5a7dc1d9
 	github.com/google/uuid v1.6.0
 	github.com/parquet-go/parquet-go v0.29.0
 	github.com/pkg/errors v0.9.1
