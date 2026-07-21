@@ -1,12 +1,13 @@
 # `go-huggingface` Changelog
 
-## Next
+## v0.4.0: Updated to GoMLX v0.28.0, added SAM2 and Gemma4; add CLI tool `cmd/hubinfo`.
 
 - #46, #47: Expanded the HuggingFace repository metadata retrieval to support detailed file/LFS size information and adds a new command-line tool `cmd/hubinfo` to display this metadata in the terminal.
   - Added `hub.Repo.IterFileInfos()` to iterate over files with complete `FileInfo` records without triggering file downloads.
   - **New CLI Tool (`cmd/hubinfo`):**
 - Improve support for large datasets, on-demand downloads, and CLI styling`
 - Refreshed README.md, with fixes and updates to new features. Including fixing of the accompanying `go-huggingface.ipynb` notebook.
+- Added SAM2 and Gemma4 models support.
 
 ## v0.3.5 Added `datasets`, `tokenizers/bucket`, significant improvements on `transformer` and `safetensors`.
 
