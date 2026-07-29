@@ -128,9 +128,16 @@ func (r *Repo) DownloadFiles(repoFiles ...string) (downloadedPaths []string, err
 }
 
 // DownloadFilesCtx is like DownloadFiles but accepts a context for cancellation support.
+//
+// In local-directory mode (see NewLocal), no network access is made and ctx is ignored: it simply resolves
+// repoFiles to paths inside the local directory.
 func (r *Repo) DownloadFilesCtx(ctx context.Context, repoFiles ...string) (downloadedPaths []string, err error) {
 	if len(repoFiles) == 0 {
 		return nil, nil
+	}
+
+	if r.IsLocal() {
+		return r.localFiles(repoFiles...)
 	}
 
 	// Create download manager, if one hasn't been created yet.
