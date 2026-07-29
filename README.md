@@ -3,7 +3,7 @@
 [![GoDev](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white)](https://pkg.go.dev/github.com/gomlx/go-huggingface?tab=doc)
 [![Tests](https://github.com/gomlx/go-huggingface/actions/workflows/linux_amd64_tests.yaml/badge.svg)](https://github.com/gomlx/go-huggingface/actions/workflows/linux_amd64_tests.yaml)
 [![Slack](https://img.shields.io/badge/Slack-GoMLX-purple.svg?logo=slack)](https://app.slack.com/client/T029RQSE6/C08TX33BX6U)
-[![Sponsor gomlx](https://img.shields.io/badge/Sponsor-gomlx-white?logo=github&style=flat-square)](https://github.com/sponsors/gomlx)
+[![Sponsor GoMLX](https://img.shields.io/badge/Sponsor-GoMLX-white?logo=github&style=flat-square)](https://github.com/gomlx/gomlx/blob/main/README.md#-support-the-project)
 
 ## 📖 Overview
 
@@ -537,3 +537,18 @@ Embeddings:	[2][8][384]float32{
   {0.1354, 0.5587, 0.2699, ..., 0.5424, 0.47, -0.5306},
   {0.2323, 0.2985, 0.1732, ..., 0.4245, 0.07187, -0.3455}}}
   ```
+
+## 💖 Support the Project
+
+If you find this project helpful, please consider donating (using Stripe.com):
+
+- [GoMLX Sponsorship for Users](https://donate.stripe.com/aFa6oGcrmghAaItbo4gnK00)
+- [GoMLX Sponsorship for Organizations](https://donate.stripe.com/dRmdR80IEc1k5o92RygnK01)
+
+Your contribution helps us (currently mostly [me](https://github.com/janpfeifer)) dedicate more time to maintenance
+and add new features for the entire GoMLX ecosystem.
+
+It also helps us acquire access (buying or cloud) to hardware for more portability: e.g.: ROCm, Apple Metal (GPU), 
+Multi-GPU/TPU, NVidia DGX Spark, Tenstorrent, etc.
+
+And we are happy to prioritize features for donations.
