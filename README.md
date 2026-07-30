@@ -283,8 +283,8 @@ import dtok "github.com/daulet/tokenizers"
 %%
 modelID := "KnightsAnalytics/all-MiniLM-L6-v2"
 repo := hub.New(modelID).WithAuth(hfAuthToken)
-localFile := must.M1(repo.DownloadFile("tokenizer.json"))
-tokenizer := must.M1(dtok.FromFile(localFile))
+tokenizerBytes := must.M1(repo.ReadFile("tokenizer.json"))
+tokenizer := must.M1(dtok.FromBytes(tokenizerBytes))
 defer tokenizer.Close()
 tokens, _ := tokenizer.Encode(sentence, true)
 
@@ -544,9 +544,10 @@ import (
 %%
 // Get ONNX model.
 repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(hfAuthToken)
-onnxFilePath, err := repo.DownloadFile("onnx/model.onnx")
+onnxFile, err := repo.Open("onnx/model.onnx")
 if err != nil { panic(err) }
-onnxModel, err := onnxparser.FromFile(onnxFilePath)
+defer onnxFile.Close()
+onnxModel, err := onnxparser.FromReadSeeker(onnxFile)
 if err != nil { panic(err) }
 
 // Convert ONNX variables to a GoMLX store:
