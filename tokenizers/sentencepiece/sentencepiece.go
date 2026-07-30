@@ -20,7 +20,7 @@ func New(config *api.Config, repo *hub.Repo) (api.Tokenizer, error) {
 	}
 	tokenizerFile, err := repo.DownloadFile("tokenizer.model")
 	if err != nil {
-		return nil, errors.Wrapf(err, "can't download tokenizer.json file")
+		return nil, errors.Wrapf(err, "can't download tokenizer.model file")
 	}
 	proc, err := esentencepiece.NewProcessorFromPath(tokenizerFile)
 	if err != nil {

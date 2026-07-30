@@ -76,11 +76,11 @@ func GetConfig(repo *hub.Repo) (*api.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	localConfigFile, err := repo.DownloadFile("tokenizer_config.json")
+	content, err := repo.ReadFile("tokenizer_config.json")
 	if err != nil {
 		return nil, err
 	}
-	config, err := api.ParseConfigFile(localConfigFile) // tokenizer_config.json
+	config, err := api.ParseConfigContent(content) // tokenizer_config.json
 	if err != nil {
 		return nil, err
 	}

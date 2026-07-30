@@ -17,25 +17,11 @@ type Header struct {
 	Metadata map[string]interface{}     // Optional __metadata__ field
 }
 
-// parseHeader reads and parses the header from a safetensors file.
-// Safetensor format:
-//
-//	[8 bytes: header size as little-endian u64]
-//	[header_size bytes: JSON header]
-//	[remaining bytes: tensor data]
-//
-// It returns the parsed header of the file, the offset of the actual data (same as the total header size)
-// and any error that may have occurred.
-func (m *Model) parseHeader(path string) (*Header, int64, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, 0, errors.Wrapf(err, "failed to open file %s", path)
-	}
-	defer f.Close()
-
+// parseHeaderFromReader reads and parses the header from an io.Reader.
+func parseHeaderFromReader(r io.Reader) (*Header, int64, error) {
 	// Read header size (8 bytes, little-endian)
 	var headerSize uint64
-	if err := binary.Read(f, binary.LittleEndian, &headerSize); err != nil {
+	if err := binary.Read(r, binary.LittleEndian, &headerSize); err != nil {
 		return nil, 0, errors.Wrap(err, "failed to read header size")
 	}
 
@@ -45,7 +31,7 @@ func (m *Model) parseHeader(path string) (*Header, int64, error) {
 
 	// Read JSON header
 	headerBytes := make([]byte, headerSize)
-	if _, err := io.ReadFull(f, headerBytes); err != nil {
+	if _, err := io.ReadFull(r, headerBytes); err != nil {
 		return nil, 0, errors.Wrap(err, "failed to read header JSON")
 	}
 
@@ -79,6 +65,24 @@ func (m *Model) parseHeader(path string) (*Header, int64, error) {
 	// Data offset is after the 8-byte size + header
 	dataOffset := int64(8 + headerSize)
 	return header, dataOffset, nil
+}
+
+// parseHeader reads and parses the header from a safetensors file path or via m.Repo.Open.
+func (m *Model) parseHeader(path string) (*Header, int64, error) {
+	if m.Repo != nil {
+		f, err := m.Repo.Open(path)
+		if err == nil {
+			defer f.Close()
+			return parseHeaderFromReader(f)
+		}
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, 0, errors.Wrapf(err, "failed to open file %s", path)
+	}
+	defer f.Close()
+	return parseHeaderFromReader(f)
 }
 
 func dtypeToGoMLX(stDtype string) (dtypes.DType, error) {

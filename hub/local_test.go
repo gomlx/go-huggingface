@@ -164,3 +164,19 @@ func TestLocalRepo_ScanDoesNotMutateDirectory(t *testing.T) {
 	after := snapshotDirEntries(t, dir)
 	assert.ElementsMatch(t, before, after)
 }
+
+func TestSave_LocalRepoFails(t *testing.T) {
+	_, repo := newTestLocalRepo(t)
+	targetDir := t.TempDir()
+	err := repo.Save(targetDir, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot Save local repository")
+}
+
+func TestDeleteCache_LocalRepoFails(t *testing.T) {
+	_, repo := newTestLocalRepo(t)
+	err := repo.DeleteCache()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot DeleteCache of a local repository")
+}
+

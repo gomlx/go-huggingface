@@ -14,13 +14,18 @@ import (
 )
 
 var (
-	fullFlag = flag.Bool("full", false, "list all available repository metadata")
+	fullFlag        = flag.Bool("full", false, "list all available repository metadata")
+	localFlag       = flag.Bool("local", false, "treat repo_id argument as a local directory path using hub.NewLocal")
+	saveDirFlag     = flag.String("save", "", "save repository files to the specified target directory")
+	linkOnlyFlag    = flag.Bool("link_only", false, "create hard links instead of copying files when using -save")
+	deleteCacheFlag = flag.Bool("delete_cache", false, "delete downloaded repository cache (executed after -save if specified)")
 )
 
 func main() {
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [flags] <repo_id>\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "Example: %s Qwen/Qwen3-0.6B\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [flags] <repo_id|local_path>\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Example: %s Qwen/Qwen3-0.6B\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Example (local): %s -local /path/to/model\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
 	}
@@ -31,10 +36,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	repoID := flag.Arg(0)
+	repoArg := flag.Arg(0)
 
 	// Fetch repository info
-	repo := hub.New(repoID)
+	var repo *hub.Repo
+	if *localFlag {
+		repo = hub.NewLocal(repoArg)
+	} else {
+		repo = hub.New(repoArg)
+	}
 	err := repo.DownloadInfo(false)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error downloading repository info: %+v\n", err)
@@ -68,7 +78,7 @@ func main() {
 		return s
 	})
 
-	metaTable.Row("Model ID", repoID)
+	metaTable.Row("Model ID", repo.ID)
 	metaTable.Row("Tags", strings.Join(info.Tags, ", "))
 	metaTable.Row("Downloads / Likes", fmt.Sprintf("%s / %s", humanize.Count(info.Downloads), humanize.Count(info.Likes)))
 	metaTable.Row("Latest Update", info.LastModified.Local().Format(time.RFC1123))
@@ -166,4 +176,23 @@ func main() {
 
 	fmt.Println(lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true).Render("Files:"))
 	fmt.Println(filesTable)
+
+	if *saveDirFlag != "" {
+		fmt.Printf("\nSaving repository %s to %s (link_only=%v)...\n", repo.ID, *saveDirFlag, *linkOnlyFlag)
+		if err := repo.Save(*saveDirFlag, *linkOnlyFlag); err != nil {
+			fmt.Fprintf(os.Stderr, "Error saving repository: %+v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("Repository saved successfully.")
+	}
+
+	if *deleteCacheFlag {
+		fmt.Printf("\nDeleting cache for repository %s...\n", repo.ID)
+		if err := repo.DeleteCache(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error deleting repository cache: %+v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("Repository cache deleted successfully.")
+	}
 }
+
