@@ -100,6 +100,49 @@ google/gemma-2-2b-it:
 …
 ```
 
+### Local Copies and Saving Repositories
+
+You can save a complete local copy of a repository to a target directory, making it independent of the HuggingFace cache directory. This is useful when bundling models in version control, Docker containers, or offline distributions.
+
+#### Using `hubinfo` CLI tool
+
+You can use the `hubinfo` command-line tool (`./cmd/hubinfo`) to inspect, save, and manage local repositories:
+
+```bash
+# Save a repository to a local directory:
+go run ./cmd/hubinfo -save=/path/to/local/model Qwen/Qwen3-0.6B
+
+# Save using hard links (to save disk space on the same filesystem):
+go run ./cmd/hubinfo -save=/path/to/local/model -link_only Qwen/Qwen3-0.6B
+
+# Save and delete the downloaded cache afterwards:
+go run ./cmd/hubinfo -save=/path/to/local/model -delete_cache Qwen/Qwen3-0.6B
+
+# Inspect a local directory repository:
+go run ./cmd/hubinfo -local /path/to/local/model
+```
+
+#### Programmatically saving and loading local repositories
+
+```go
+// 1. Download and save the repository locally:
+repo := hub.New("Qwen/Qwen3-0.6B")
+if err := repo.Save("/path/to/local/model", false); err != nil {
+    log.Fatalf("Failed to save repo: %v", err)
+}
+
+// Optionally delete the downloaded cache if you no longer need it:
+if err := repo.DeleteCache(); err != nil {
+    log.Printf("Failed to delete cache: %v", err)
+}
+
+// 2. Load the repository directly from the saved local directory:
+localRepo := hub.NewLocal("/path/to/local/model")
+
+// Use localRepo just like a normal Repo (no network requests are ever made):
+tokenizer, err := tokenizers.New(localRepo)
+```
+
 
 ---
 
