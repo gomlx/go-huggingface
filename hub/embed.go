@@ -262,3 +262,16 @@ func osStatMatches(path string, size int64) bool {
 	st, err := os.Stat(path)
 	return err == nil && st.Size() == size
 }
+
+// verifyEmbedFilesExist checks that all requested files exist in r.embedFS without extracting them to disk.
+func (r *Repo) verifyEmbedFilesExist(repoFiles ...string) error {
+	for _, name := range repoFiles {
+		fsPath := r.fsOpenPath(name)
+		f, err := r.embedFS.Open(fsPath)
+		if err != nil {
+			return errors.Wrapf(err, "embedded file %q (path %q) not found", name, fsPath)
+		}
+		f.Close()
+	}
+	return nil
+}

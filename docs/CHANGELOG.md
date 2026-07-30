@@ -13,6 +13,7 @@
   - Added `Repo.IsEmbed()` and `Repo.IsLocal()` helper methods.
   - Added `Repo.Open(name)` and `Repo.ReadFile(name)` stream reading methods that work across all repository modes
     (remote, local, and embedded) without requiring disk file extraction in embedded mode.
+  - Added `Repo.FetchFiles()` and `Repo.FetchFile()` methods to pre-download and cache repository files upfront without returning OS disk paths.
   - Added `Repo.Save(dirPath, linkOnly)` and `Repo.SaveCtx(ctx, dirPath, linkOnly)` methods to save/copy/hard-link
     the files of a repository to a local directory.
   - Added `Repo.DeleteCache()`.

@@ -86,3 +86,15 @@ func TestEmbedRepo_SaveAndDeleteCacheFail(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot DeleteCache of an embedded repository")
 }
+
+func TestEmbedRepo_FetchFilesDoesNotExtractToDisk(t *testing.T) {
+	repo := NewEmbed(testEmbedFS, "testdata/embed_repo")
+
+	// FetchFiles should verify files exist without failing or extracting to disk
+	err := repo.FetchFiles("config.json", "subfolder/config.json")
+	require.NoError(t, err)
+
+	err = repo.FetchFiles("non_existent_file.json")
+	require.Error(t, err)
+}
+
