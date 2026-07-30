@@ -14,7 +14,10 @@ import (
 )
 
 var (
-	fullFlag = flag.Bool("full", false, "list all available repository metadata")
+	fullFlag        = flag.Bool("full", false, "list all available repository metadata")
+	saveDirFlag     = flag.String("save", "", "save repository files to the specified target directory")
+	linkOnlyFlag    = flag.Bool("link_only", false, "create hard links instead of copying files when using -save")
+	deleteCacheFlag = flag.Bool("delete_cache", false, "delete downloaded repository cache (executed after -save if specified)")
 )
 
 func main() {
@@ -166,4 +169,23 @@ func main() {
 
 	fmt.Println(lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true).Render("Files:"))
 	fmt.Println(filesTable)
+
+	if *saveDirFlag != "" {
+		fmt.Printf("\nSaving repository %s to %s (link_only=%v)...\n", repoID, *saveDirFlag, *linkOnlyFlag)
+		if err := repo.Save(*saveDirFlag, *linkOnlyFlag); err != nil {
+			fmt.Fprintf(os.Stderr, "Error saving repository: %+v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("Repository saved successfully.")
+	}
+
+	if *deleteCacheFlag {
+		fmt.Printf("\nDeleting cache for repository %s...\n", repoID)
+		if err := repo.DeleteCache(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error deleting repository cache: %+v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("Repository cache deleted successfully.")
+	}
 }
+
