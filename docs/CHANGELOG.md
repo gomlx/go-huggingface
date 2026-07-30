@@ -6,7 +6,7 @@
   files straight from a plain local directory (e.g. a `git clone` or `huggingface-cli download --local-dir`
   output) instead of downloading from HuggingFace Hub. No network access is made in this mode; every consumer
   of `*hub.Repo` (`models/transformer`, `models/safetensors`, `models/gguf`, `models/sam2`, `tokenizers/*`)
-  works unchanged. See `docs/local-model-loading-plan.md` for the design rationale.
+  works unchanged.
 
 ## v0.4.0: Updated to GoMLX v0.28.0, added SAM2 and Gemma4; add CLI tool `cmd/hubinfo`.
 
