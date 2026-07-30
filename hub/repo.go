@@ -44,6 +44,10 @@ type Repo struct {
 	// cacheDir is where to store the downloaded files.
 	cacheDir string
 
+	// localDir, if not empty, puts the Repo in local-directory mode: no network access is made,
+	// files are read directly from this directory instead of the HuggingFace cache. See NewLocal.
+	localDir string
+
 	// Info about the Repo in HuggingFace, including the list of files.
 	// It is only available after DownloadInfo is called.
 	info *RepoInfo
@@ -163,7 +167,12 @@ func (r *Repo) flatFolderName() string {
 
 // repoCacheDir joins cacheDir and flatFolderName to return the cache subdirectory for the repository.
 // It also creates the directory, and returns an error if creation failed.
+//
+// In local-directory mode (see NewLocal), it instead returns the local directory, and doesn't create anything.
 func (r *Repo) repoCacheDir() (string, error) {
+	if r.IsLocal() {
+		return r.localDir, nil
+	}
 	dir := path.Join(r.cacheDir, r.flatFolderName())
 	err := os.MkdirAll(dir, DefaultDirCreationPerm)
 	if err != nil {
@@ -174,6 +183,8 @@ func (r *Repo) repoCacheDir() (string, error) {
 
 // CacheDir returns the cache subdirectory for the repository.
 // It creates the directory if it doesn't exist.
+//
+// In local-directory mode (see NewLocal), it returns the local directory instead.
 func (r *Repo) CacheDir() (string, error) {
 	return r.repoCacheDir()
 }
@@ -181,7 +192,12 @@ func (r *Repo) CacheDir() (string, error) {
 // FileURL returns the URL from which to download the file from HuggingFace.
 //
 // Usually, not used directly (use DownloadFile instead), but in case someone needs for debugging.
+//
+// It returns an error if the Repo is in local-directory mode (see NewLocal), since there is no remote URL.
 func (r *Repo) FileURL(fileName string) (string, error) {
+	if r.IsLocal() {
+		return "", errors.Errorf("repository %q is in local-directory mode (dir %q): it has no remote URL", r.ID, r.localDir)
+	}
 	commitHash, err := r.readCommitHashForRevision()
 	if err != nil {
 		return "", err
@@ -208,7 +224,12 @@ func (r *Repo) readCommitHashForRevision() (string, error) {
 }
 
 // repoSnapshotsDir returns the snapshots directory for this repo at its revision.
+//
+// It is not used, and returns an error, in local-directory mode (see NewLocal).
 func (r *Repo) repoSnapshotsDir() (string, error) {
+	if r.IsLocal() {
+		return "", errors.Errorf("repository %q is in local-directory mode (dir %q): it has no snapshots directory", r.ID, r.localDir)
+	}
 	cacheDir, err := r.repoCacheDir()
 	if err != nil {
 		return "", err

@@ -1,5 +1,13 @@
 # `go-huggingface` Changelog
 
+## Unreleased
+
+- Added local-directory mode to `hub`: `hub.NewLocal(dir)` / `Repo.WithLocalDir(dir)` let a `*hub.Repo` read
+  files straight from a plain local directory (e.g. a `git clone` or `huggingface-cli download --local-dir`
+  output) instead of downloading from HuggingFace Hub. No network access is made in this mode; every consumer
+  of `*hub.Repo` (`models/transformer`, `models/safetensors`, `models/gguf`, `models/sam2`, `tokenizers/*`)
+  works unchanged.
+
 ## v0.4.0: Updated to GoMLX v0.28.0, added SAM2 and Gemma4; add CLI tool `cmd/hubinfo`.
 
 - #46, #47: Expanded the HuggingFace repository metadata retrieval to support detailed file/LFS size information and adds a new command-line tool `cmd/hubinfo` to display this metadata in the terminal.
