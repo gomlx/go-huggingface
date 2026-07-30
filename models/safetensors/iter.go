@@ -137,7 +137,8 @@ func iterFromRepoDownload(backend compute.Backend, repo *hub.Repo, done <-chan s
 			return
 		}
 
-		header, dataOffset, err := (*Model)(nil).parseHeader(localPath)
+		m := &Model{Repo: repo}
+		header, dataOffset, err := m.parseHeader(localPath)
 		if err != nil {
 			reportErrFn(errors.Wrapf(err, "failed to parse header for %s", localPath))
 			return

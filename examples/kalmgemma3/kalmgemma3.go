@@ -10,7 +10,6 @@ package kalmgemma3
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/pkg/errors"
@@ -45,11 +44,7 @@ type TaskPrompts map[string]string
 
 // LoadTaskPrompts loads the task prompts specific to KaLM-Gemma3 ("task_prompts.json").
 func LoadTaskPrompts(repo *hub.Repo) (TaskPrompts, error) {
-	path, err := repo.DownloadFile("task_prompts.json")
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to download task_prompts.json")
-	}
-	b, err := os.ReadFile(path)
+	b, err := repo.ReadFile("task_prompts.json")
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to read task_prompts.json")
 	}

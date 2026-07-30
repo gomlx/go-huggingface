@@ -100,6 +100,79 @@ google/gemma-2-2b-it:
 …
 ```
 
+### Local Copies and Saving Repositories
+
+You can save a complete local copy of a repository to a target directory, making it independent of the HuggingFace cache directory. This is useful when bundling models in version control, Docker containers, or offline distributions.
+
+#### Using `hubinfo` CLI tool
+
+You can use the `hubinfo` command-line tool (`./cmd/hubinfo`) to inspect, save, and manage local repositories:
+
+```bash
+# Save a repository to a local directory:
+go run ./cmd/hubinfo -save=/path/to/local/model Qwen/Qwen3-0.6B
+
+# Save using hard links (to save disk space on the same filesystem):
+go run ./cmd/hubinfo -save=/path/to/local/model -link_only Qwen/Qwen3-0.6B
+
+# Save and delete the downloaded cache afterwards:
+go run ./cmd/hubinfo -save=/path/to/local/model -delete_cache Qwen/Qwen3-0.6B
+
+# Inspect a local directory repository:
+go run ./cmd/hubinfo -local /path/to/local/model
+```
+
+#### Programmatically saving and loading local repositories
+
+```go
+// 1. Download and save the repository locally:
+repo := hub.New("Qwen/Qwen3-0.6B")
+if err := repo.Save("/path/to/local/model", false); err != nil {
+    log.Fatalf("Failed to save repo: %v", err)
+}
+
+// Optionally delete the downloaded cache if you no longer need it:
+if err := repo.DeleteCache(); err != nil {
+    log.Printf("Failed to delete cache: %v", err)
+}
+
+// 2. Load the repository directly from the saved local directory:
+localRepo := hub.NewLocal("/path/to/local/model")
+
+// Use localRepo just like a normal Repo (no network requests are ever made):
+tokenizer, err := tokenizers.New(localRepo)
+```
+
+### Embedded Models (`//go:embed`)
+
+You can also embed an entire model repository directly into your compiled Go binary using Go's standard `embed` package and `hub.NewEmbed()`:
+
+```go
+import (
+    "embed"
+    "github.com/gomlx/go-huggingface/hub"
+    "github.com/gomlx/go-huggingface/tokenizers"
+)
+
+// Embed the model files into the binary (e.g. tokenizer.json, config.json, model.safetensors):
+//go:embed my_model/*
+var embeddedModelFS embed.FS
+
+func main() {
+    // Create a Repo directly from the embedded filesystem:
+    embedRepo := hub.NewEmbed(embeddedModelFS, "my_model")
+
+    // Use embedRepo with any tokenizer or model parser without network requests or disk extraction:
+    tokenizer, err := tokenizers.New(embedRepo)
+    if err != nil {
+        log.Fatalf("Failed to load embedded tokenizer: %v", err)
+    }
+
+    // Read files directly from memory:
+    configBytes, err := embedRepo.ReadFile("config.json")
+}
+```
+
 
 ---
 
@@ -210,8 +283,8 @@ import dtok "github.com/daulet/tokenizers"
 %%
 modelID := "KnightsAnalytics/all-MiniLM-L6-v2"
 repo := hub.New(modelID).WithAuth(hfAuthToken)
-localFile := must.M1(repo.DownloadFile("tokenizer.json"))
-tokenizer := must.M1(dtok.FromFile(localFile))
+tokenizerBytes := must.M1(repo.ReadFile("tokenizer.json"))
+tokenizer := must.M1(dtok.FromBytes(tokenizerBytes))
 defer tokenizer.Close()
 tokens, _ := tokenizer.Encode(sentence, true)
 
@@ -471,9 +544,10 @@ import (
 %%
 // Get ONNX model.
 repo := hub.New("sentence-transformers/all-MiniLM-L6-v2").WithAuth(hfAuthToken)
-onnxFilePath, err := repo.DownloadFile("onnx/model.onnx")
+onnxFile, err := repo.Open("onnx/model.onnx")
 if err != nil { panic(err) }
-onnxModel, err := onnxparser.FromFile(onnxFilePath)
+defer onnxFile.Close()
+onnxModel, err := onnxparser.FromReadSeeker(onnxFile)
 if err != nil { panic(err) }
 
 // Convert ONNX variables to a GoMLX store:

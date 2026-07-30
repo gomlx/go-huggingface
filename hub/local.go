@@ -1,6 +1,8 @@
 package hub
 
 import (
+	"context"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -27,8 +29,9 @@ var localDirsToSkip = map[string]bool{
 // from HuggingFace Hub.
 //
 // dir is expected to be a plain directory containing the repository files (e.g. config.json, *.safetensors,
-// tokenizer.json, ...), such as what one gets from `git clone` or `huggingface-cli download --local-dir`. It
-// can also point directly at a snapshot directory inside an existing HuggingFace cache
+// tokenizer.json, ...), such as what one gets from `git clone` or using `hubinfo -save <dir> <repo>` (or
+// if not installed, `go run github.com/gomlx/go-huggingface/cmd/hubinfo`) or `huggingface-cli download --local-dir`.
+// It can also point directly at a snapshot directory inside an existing HuggingFace cache
 // (".../snapshots/<commit-hash>").
 //
 // In local-directory mode, no network access is ever made: Repo.DownloadInfo scans dir for files instead of
@@ -162,4 +165,92 @@ func (r *Repo) localFiles(repoFiles ...string) ([]string, error) {
 		paths[i] = p
 	}
 	return paths, nil
+}
+
+// Save downloads/resolves all files in the repository and copies (or hard-links) them into dirPath,
+// creating a local copy of the repository that can be loaded using NewLocal(dirPath).
+//
+// If linkOnly is true, hard links (os.Link) are created instead of copying the files. If dirPath is on a
+// different filesystem/device than the HuggingFace cache, hard linking will return an error (cross-device link).
+// Existing files in dirPath will be overwritten.
+//
+// Save fails if r is in local-directory mode (r.IsLocal() is true).
+func (r *Repo) Save(dirPath string, linkOnly bool) error {
+	return r.SaveCtx(context.Background(), dirPath, linkOnly)
+}
+
+// SaveCtx is like Save, but takes a context to allow cancellation during downloading/saving files.
+func (r *Repo) SaveCtx(ctx context.Context, dirPath string, linkOnly bool) error {
+	if r.IsLocal() {
+		return errors.Errorf("cannot Save local repository %q (local dir %q)", r.ID, r.localDir)
+	}
+	if r.IsEmbed() {
+		return errors.Errorf("cannot Save embedded repository %q", r.ID)
+	}
+
+	resolvedDir, err := files.ReplaceTildeInDir(dirPath)
+	if err != nil {
+		resolvedDir = dirPath
+	}
+	resolvedDir = filepath.Clean(resolvedDir)
+
+	fileNames := make([]string, 0)
+	for fileName, err := range r.IterFileNames() {
+		if err != nil {
+			return errors.Wrapf(err, "failed to get file list for repository %q", r.ID)
+		}
+		fileNames = append(fileNames, fileName)
+	}
+
+	cachedPaths, err := r.DownloadFilesCtx(ctx, fileNames...)
+	if err != nil {
+		return errors.Wrapf(err, "failed to download files for repository %q to save to %q", r.ID, resolvedDir)
+	}
+
+	for i, relPath := range fileNames {
+		src := cachedPaths[i]
+		rel := cleanRelativeFilePath(relPath)
+		dst := filepath.Join(resolvedDir, rel)
+
+		if err := os.MkdirAll(filepath.Dir(dst), DefaultDirCreationPerm); err != nil {
+			return errors.Wrapf(err, "failed to create directory for %q", dst)
+		}
+
+		if files.Exists(dst) {
+			if err := os.Remove(dst); err != nil {
+				return errors.Wrapf(err, "failed to remove existing file %q before overwriting", dst)
+			}
+		}
+
+		if linkOnly {
+			if err := os.Link(src, dst); err != nil {
+				return errors.Wrapf(err, "failed to create hard link from %q to %q", src, dst)
+			}
+		} else {
+			if err := copyFile(src, dst); err != nil {
+				return errors.Wrapf(err, "failed to copy file from %q to %q", src, dst)
+			}
+		}
+	}
+	return nil
+}
+
+// copyFile copies a single file from src to dst.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
 }

@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
 	"os"
 	"runtime"
@@ -484,7 +485,7 @@ func TestSimilarity(t *testing.T) {
 // to test the speed.
 func TestReadAllShards(t *testing.T) {
 	var buf [1 << 20]byte
-	var f *os.File
+	var f fs.File
 	defer func() {
 		if f != nil {
 			f.Close()
@@ -500,8 +501,7 @@ func TestReadAllShards(t *testing.T) {
 		if !strings.HasSuffix(filename, ".safetensors") {
 			continue
 		}
-		localPath := must1(testRepo.DownloadFile(filename))
-		f = must1(os.Open(localPath))
+		f = must1(testRepo.Open(filename))
 		for {
 			_, err = f.Read(buf[:])
 			if err != nil {

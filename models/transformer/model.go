@@ -3,7 +3,6 @@ package transformer
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/gomlx/compute"
@@ -51,14 +50,10 @@ func LoadModel(repo *hub.Repo) (*Model, error) {
 	}
 
 	loadFile := func(filename string, v any) (bool, error) {
-		path, err := repo.DownloadFile(filename)
+		b, err := repo.ReadFile(filename)
 		if err != nil {
 			// File likely doesn't exist or network error. We treat as missing.
 			return false, nil
-		}
-		b, err := os.ReadFile(path)
-		if err != nil {
-			return true, fmt.Errorf("failed to read %s: %w", filename, err)
 		}
 		if err := json.Unmarshal(b, v); err != nil {
 			return true, fmt.Errorf("failed to unmarshal %s: %w", filename, err)
@@ -250,19 +245,16 @@ func (m *Model) Description() string {
 
 func (m *Model) estimateSizeFromIndex() {
 	// Try to see if there is an index with total_size metadata
-	path, err := m.Repo.DownloadFile("model.safetensors.index.json")
+	b, err := m.Repo.ReadFile("model.safetensors.index.json")
 	if err == nil {
-		b, err := os.ReadFile(path)
-		if err == nil {
-			var index struct {
-				Metadata struct {
-					TotalSize int64 `json:"total_size"`
-				} `json:"metadata"`
-			}
-			if json.Unmarshal(b, &index) == nil && index.Metadata.TotalSize > 0 {
-				size := index.Metadata.TotalSize
-				m.totalBytes = &size
-			}
+		var index struct {
+			Metadata struct {
+				TotalSize int64 `json:"total_size"`
+			} `json:"metadata"`
+		}
+		if json.Unmarshal(b, &index) == nil && index.Metadata.TotalSize > 0 {
+			size := index.Metadata.TotalSize
+			m.totalBytes = &size
 		}
 	}
 }
