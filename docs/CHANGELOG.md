@@ -11,7 +11,7 @@
   - Added `Repo.Save(dirPath, linkOnly)` and `Repo.SaveCtx(ctx, dirPath, linkOnly)` methods to save/copy/hard-link
     the files of a repository to a local directory.
   - Added `Repo.DeleteCache()`.
-  - Added flags `-save`, `-link_only` and `-delete_cache` to CLI tool `cmd/hubinfo`.
+  - Added flags `-local`, `-save`, `-link_only` and `-delete_cache` to CLI tool `cmd/hubinfo`.
   
 ## v0.4.0: Updated to GoMLX v0.28.0, added SAM2 and Gemma4; add CLI tool `cmd/hubinfo`.
 

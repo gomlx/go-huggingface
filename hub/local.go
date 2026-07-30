@@ -29,8 +29,9 @@ var localDirsToSkip = map[string]bool{
 // from HuggingFace Hub.
 //
 // dir is expected to be a plain directory containing the repository files (e.g. config.json, *.safetensors,
-// tokenizer.json, ...), such as what one gets from `git clone` or `huggingface-cli download --local-dir`. It
-// can also point directly at a snapshot directory inside an existing HuggingFace cache
+// tokenizer.json, ...), such as what one gets from `git clone` or using `hubinfo -save <dir> <repo>` (or
+// if not installed, `go run github.com/gomlx/go-huggingface/cmd/hubinfo`) or `huggingface-cli download --local-dir`.
+// It can also point directly at a snapshot directory inside an existing HuggingFace cache
 // (".../snapshots/<commit-hash>").
 //
 // In local-directory mode, no network access is ever made: Repo.DownloadInfo scans dir for files instead of
@@ -250,4 +251,3 @@ func copyFile(src, dst string) error {
 	}
 	return out.Close()
 }
-
