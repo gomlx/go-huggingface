@@ -20,6 +20,15 @@
 //
 // From here, downloadedFiles will point to files in the local cache that one can read.
 //
+// If the model/dataset files are already available in a plain local directory (e.g. from `git clone` or
+// `huggingface-cli download --local-dir`), use NewLocal instead of New to read them directly, without any
+// network access:
+//
+//	repo := hub.NewLocal("/path/to/local/model/dir")
+//
+// A Repo created with NewLocal is a drop-in replacement: every function in this module that takes a *Repo
+// works the same way, whether it is backed by the HuggingFace cache or by a local directory.
+//
 // Environment variables:
 //
 // - HF_ENDPOINT: Where to connect to huggingface, default is https://huggingface.co

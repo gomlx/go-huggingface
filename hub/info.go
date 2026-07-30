@@ -158,9 +158,15 @@ func (r *Repo) infoURL() string {
 //
 // If forceDownload is set to true, it ignores the current info or the cached one, and download it again from HuggingFace.
 //
+// In local-directory mode (see NewLocal), no network access is made: it instead (re)scans the local directory
+// for files, and forceDownload forces a rescan.
+//
 // See Repo.Info to access the Info directory.
 // Most users don't need to call this directly, instead use the various iterators.
 func (r *Repo) DownloadInfo(forceDownload bool) error {
+	if r.IsLocal() {
+		return r.scanLocalInfo(forceDownload)
+	}
 	if r.info != nil && !forceDownload {
 		return nil
 	}
