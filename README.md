@@ -143,6 +143,36 @@ localRepo := hub.NewLocal("/path/to/local/model")
 tokenizer, err := tokenizers.New(localRepo)
 ```
 
+### Embedded Models (`//go:embed`)
+
+You can also embed an entire model repository directly into your compiled Go binary using Go's standard `embed` package and `hub.NewEmbed()`:
+
+```go
+import (
+    "embed"
+    "github.com/gomlx/go-huggingface/hub"
+    "github.com/gomlx/go-huggingface/tokenizers"
+)
+
+// Embed the model files into the binary (e.g. tokenizer.json, config.json, model.safetensors):
+//go:embed my_model/*
+var embeddedModelFS embed.FS
+
+func main() {
+    // Create a Repo directly from the embedded filesystem:
+    embedRepo := hub.NewEmbed(embeddedModelFS, "my_model")
+
+    // Use embedRepo with any tokenizer or model parser without network requests or disk extraction:
+    tokenizer, err := tokenizers.New(embedRepo)
+    if err != nil {
+        log.Fatalf("Failed to load embedded tokenizer: %v", err)
+    }
+
+    // Read files directly from memory:
+    configBytes, err := embedRepo.ReadFile("config.json")
+}
+```
+
 
 ---
 

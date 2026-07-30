@@ -14,6 +14,9 @@ func (r *Repo) DeleteCache() error {
 	if r.IsLocal() {
 		return errors.Errorf("cannot DeleteCache of a local repository %q (local dir %q)", r.ID, r.localDir)
 	}
+	if r.IsEmbed() {
+		return errors.Errorf("cannot DeleteCache of an embedded repository %q", r.ID)
+	}
 
 	cacheDir, err := r.repoCacheDir()
 	if err != nil {

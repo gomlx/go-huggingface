@@ -107,11 +107,11 @@ func New(config *api.Config, repo *hub.Repo) (api.Tokenizer, error) {
 	if !repo.HasFile("tokenizer.json") {
 		return nil, errors.Errorf("\"tokenizer.json\" file not found in repo")
 	}
-	tokenizerFile, err := repo.DownloadFile("tokenizer.json")
+	content, err := repo.ReadFile("tokenizer.json")
 	if err != nil {
-		return nil, errors.Wrapf(err, "can't download tokenizer.json file")
+		return nil, errors.Wrapf(err, "can't read tokenizer.json file")
 	}
-	return NewFromFile(config, tokenizerFile)
+	return NewFromContent(config, content)
 }
 
 // NewFromFile creates a HuggingFace tokenizer from a local tokenizer.json file path.

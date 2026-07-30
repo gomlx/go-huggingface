@@ -8,6 +8,11 @@
     output) instead of downloading from HuggingFace Hub. No network access is made in this mode; every consumer
     of `*hub.Repo` (`models/transformer`, `models/safetensors`, `models/gguf`, `models/sam2`, `tokenizers/*`)
     works unchanged.
+  - Added embedded-filesystem mode to `hub`: `hub.NewEmbed(fsys, subDir)` / `Repo.WithEmbedFS(fsys, subDir)` let a `*hub.Repo`
+    read files directly from a Go `fs.FS` (e.g. `//go:embed` binaries) without requiring network access.
+  - Added `Repo.IsEmbed()` and `Repo.IsLocal()` helper methods.
+  - Added `Repo.Open(name)` and `Repo.ReadFile(name)` stream reading methods that work across all repository modes
+    (remote, local, and embedded) without requiring disk file extraction in embedded mode.
   - Added `Repo.Save(dirPath, linkOnly)` and `Repo.SaveCtx(ctx, dirPath, linkOnly)` methods to save/copy/hard-link
     the files of a repository to a local directory.
   - Added `Repo.DeleteCache()`.

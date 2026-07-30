@@ -184,6 +184,9 @@ func (r *Repo) SaveCtx(ctx context.Context, dirPath string, linkOnly bool) error
 	if r.IsLocal() {
 		return errors.Errorf("cannot Save local repository %q (local dir %q)", r.ID, r.localDir)
 	}
+	if r.IsEmbed() {
+		return errors.Errorf("cannot Save embedded repository %q", r.ID)
+	}
 
 	resolvedDir, err := files.ReplaceTildeInDir(dirPath)
 	if err != nil {

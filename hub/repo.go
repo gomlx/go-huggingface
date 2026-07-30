@@ -2,6 +2,7 @@ package hub
 
 import (
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path"
@@ -47,6 +48,11 @@ type Repo struct {
 	// localDir, if not empty, puts the Repo in local-directory mode: no network access is made,
 	// files are read directly from this directory instead of the HuggingFace cache. See NewLocal.
 	localDir string
+
+	// embedFS, if not nil, puts the Repo in embedded-filesystem mode: no network access is made,
+	// files are read from this fs.FS (e.g. //go:embed). See NewEmbed.
+	embedFS     fs.FS
+	embedSubDir string
 
 	// Info about the Repo in HuggingFace, including the list of files.
 	// It is only available after DownloadInfo is called.

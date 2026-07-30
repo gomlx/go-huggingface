@@ -167,6 +167,9 @@ func (r *Repo) DownloadInfo(forceDownload bool) error {
 	if r.IsLocal() {
 		return r.scanLocalInfo(forceDownload)
 	}
+	if r.IsEmbed() {
+		return r.scanFSInfo(forceDownload)
+	}
 	if r.info != nil && !forceDownload {
 		return nil
 	}

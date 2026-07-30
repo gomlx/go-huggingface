@@ -139,6 +139,9 @@ func (r *Repo) DownloadFilesCtx(ctx context.Context, repoFiles ...string) (downl
 	if r.IsLocal() {
 		return r.localFiles(repoFiles...)
 	}
+	if r.IsEmbed() {
+		return r.extractEmbedFiles(repoFiles...)
+	}
 
 	// Create download manager, if one hasn't been created yet.
 	downloadManager := r.GetDownloadManager()
