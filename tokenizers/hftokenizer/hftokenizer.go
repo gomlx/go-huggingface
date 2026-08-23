@@ -449,14 +449,22 @@ func (t *Tokenizer) applyNormalizerWithSpans(text string, n *Normalizer) (string
 
 	switch n.Type {
 	case "Lowercase":
-		// Lowercase preserves character positions (1:1 mapping)
+		// Lowercase preserves character positions (1:1 mapping), but the
+		// lowercased form of a single rune can occupy a different number of
+		// BYTES than the original (e.g. "É" (2 bytes) -> "é" (2 bytes) is
+		// fine, but some runes lowercase to a differently-sized UTF-8
+		// encoding). offsets is indexed by byte position in `normalized`
+		// (len(normalized) is a byte count), so it must be filled one entry
+		// per output BYTE, not per output RUNE — iterating rune-by-rune
+		// under-fills it for any multi-byte lowercased character, leaving
+		// trailing entries at their zero value instead of a real offset.
 		normalized := strings.ToLower(text)
 		offsets := make([]int, len(normalized))
 		origPos := 0
 		normPos := 0
 		for _, r := range text {
-			lowerRunes := []rune(strings.ToLower(string(r)))
-			for range lowerRunes {
+			lowerStr := strings.ToLower(string(r))
+			for range len(lowerStr) {
 				if normPos < len(offsets) {
 					offsets[normPos] = origPos
 					normPos++
@@ -483,7 +491,14 @@ func (t *Tokenizer) applyNormalizerWithSpans(text string, n *Normalizer) (string
 				result.WriteRune(' ')
 				offsets = append(offsets, origPos)
 				result.WriteRune(r)
-				offsets = append(offsets, origPos)
+				// r itself may be a multi-byte rune (CJK characters are
+				// typically 3 bytes in UTF-8) — append one offset entry per
+				// BYTE written, not one entry for the whole rune. See the
+				// "else" branch below for the same class of bug and a
+				// fuller explanation.
+				for range runeLen {
+					offsets = append(offsets, origPos)
+				}
 				result.WriteRune(' ')
 				offsets = append(offsets, origPos)
 			} else if isWhitespace(r) {
@@ -498,7 +513,23 @@ func (t *Tokenizer) applyNormalizerWithSpans(text string, n *Normalizer) (string
 				if n.Lowercase {
 					s = strings.ToLower(s)
 				}
-				for range s {
+				// offsets is a per-BYTE map (result.String() is indexed by
+				// byte, and downstream code treats offsets[i] as the
+				// original-text position of normalized BYTE i). `for range
+				// s` iterates s's RUNES, not its bytes, so for any `s` that
+				// passes through as (or becomes) a multi-byte UTF-8
+				// sequence — every accented Latin character on a cased
+				// model that does not strip accents or lowercase, e.g.
+				// á/é/í/ó/ú/ñ/ã/ç/ă/â/î/ș/ț/ü/ö/ä — this appended exactly
+				// one offset entry while result.WriteString(s) wrote 2+
+				// bytes, under-filling offsets by one per such character.
+				// The deficit compounds across the string until downstream
+				// code indexes past the now-too-short offsets slice
+				// (observed live as `slice bounds out of range` panics on
+				// Romanian/Spanish/Portuguese/CJK-heavy text). Iterate by
+				// byte count instead so offsets always has exactly
+				// len(result.String()) entries.
+				for range len(s) {
 					offsets = append(offsets, origPos)
 				}
 				result.WriteString(s)
