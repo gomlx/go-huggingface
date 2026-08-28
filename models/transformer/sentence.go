@@ -5,7 +5,6 @@ import (
 
 	"github.com/gomlx/compute"
 	"github.com/gomlx/compute/dtypes"
-	"github.com/gomlx/compute/shapes"
 	"github.com/gomlx/gomlx/core/graph"
 	"github.com/gomlx/gomlx/ml/model"
 	"github.com/gomlx/gomlx/support/exceptions"
@@ -103,8 +102,6 @@ func (m *Model) ApplySentencePooling(hiddenStates, seqLen *graph.Node) *graph.No
 	}
 	cfg := m.PoolingConfig
 	g := hiddenStates.Graph()
-	batchSize := hiddenStates.Shape().Dimensions[0]
-	maxSeqLen := hiddenStates.Shape().Dimensions[1]
 
 	switch {
 	case cfg.PoolingModeLastToken:
@@ -114,9 +111,10 @@ func (m *Model) ApplySentencePooling(hiddenStates, seqLen *graph.Node) *graph.No
 		var lastTokenIdx *graph.Node
 		if seqLen == nil {
 			// If no seqLen is provided, assume all tokens are valid and take the last one.
-			lastTokenIdx = graph.Scalar(g, dtypes.Int32, maxSeqLen-1)
-			lastTokenIdx = graph.ExpandAxes(lastTokenIdx, 0)              // scalar -> [1]
-			lastTokenIdx = graph.BroadcastPrefix(lastTokenIdx, batchSize) // -> [batchSize, 1]
+			maxSeqLenNode := graph.DimensionSize(hiddenStates, 1)
+			lastTokenIdx = graph.Sub(maxSeqLenNode, graph.Scalar(g, dtypes.Int32, 1))
+			lastTokenIdx = graph.ExpandAxes(lastTokenIdx, 0, 1) // [1, 1]
+			lastTokenIdx = graph.DynamicBroadcastInDim(lastTokenIdx, []int{0, 1}, graph.DimensionSpecFor(hiddenStates, 0), graph.StaticDim(1))
 		} else {
 			// seqLen is [batchSize]. Last token index is seqLen - 1.
 			lastTokenIdx = graph.Sub(seqLen, graph.Scalar(g, dtypes.Int32, 1))
@@ -124,7 +122,7 @@ func (m *Model) ApplySentencePooling(hiddenStates, seqLen *graph.Node) *graph.No
 		}
 		// Gather the last token embeddings of each example.
 		// Add the batch index to each lastTokenIdx:
-		batchIndices := graph.Iota(g, lastTokenIdx.Shape(), 0)
+		batchIndices := graph.DynamicIota(g, dtypes.Int32, 0, graph.DimensionSpecFor(lastTokenIdx, 0), graph.StaticDim(1))
 		lastTokenIdx = graph.Concatenate([]*graph.Node{batchIndices, lastTokenIdx}, -1)                        // [batchSize, 2]
 		lastTokenEmbeddings := graph.GatherSlices(hiddenStates, []int{0, 1}, lastTokenIdx, []int{1, 1}, false) // [batchSize, 1, 1, hiddenDim]
 		lastTokenEmbeddings = graph.Squeeze(lastTokenEmbeddings, 1, 2)                                         // [batchSize, hiddenDim]
@@ -135,7 +133,7 @@ func (m *Model) ApplySentencePooling(hiddenStates, seqLen *graph.Node) *graph.No
 			return graph.ReduceMean(hiddenStates, 1) // [batch, hidden]
 		}
 		// Create a boolean mask from seqLen.
-		indices := graph.Iota(g, shapes.Make(dtypes.Int32, batchSize, maxSeqLen), 1)
+		indices := graph.DynamicIota(g, dtypes.Int32, 1, graph.DimensionSpecFor(hiddenStates, 0), graph.DimensionSpecFor(hiddenStates, 1))
 		mask := graph.LessThan(indices, graph.ExpandAxes(seqLen, 1))
 		return graph.MaskedReduceMean(hiddenStates, mask, 1) // [batch, hidden]
 
@@ -144,7 +142,7 @@ func (m *Model) ApplySentencePooling(hiddenStates, seqLen *graph.Node) *graph.No
 		// hiddenStates: [batchSize, seqLen, hiddenSize]
 		// We take the slice [batchSize, 0, hiddenSize]
 		clsTokenEmbeddings := graph.Slice(hiddenStates, graph.AxisRange(), graph.AxisElem(0)) // [batchSize, 1, hiddenSize]
-		clsTokenEmbeddings = graph.Squeeze(clsTokenEmbeddings, 1)                             // [batchSize, hiddenSize]
+		clsTokenEmbeddings = graph.Squeeze(clsTokenEmbeddings, 1)                             // [batchSize, hiddenDim]
 		return clsTokenEmbeddings
 	}
 
