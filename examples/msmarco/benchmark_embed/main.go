@@ -112,7 +112,7 @@ func main() {
 		x := hfModel.SentenceEmbeddingGraph(scope, tokens, seqLen)
 		return graph.ConvertDType(x, dtypes.Float32)
 	})
-	if backend.Capabilities().DynamicAxes {
+	if backend.Capabilities().HasDynamicShapes() {
 		embedExec.WithDynamicAxes([]string{"batch", "seq_len"})
 	}
 
