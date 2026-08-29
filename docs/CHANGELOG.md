@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- 2026/08/28:
+  - Unified sentence pooling in `models/transformer/sentence.go` to use `DimensionSpecFor`, `DimensionSize`, `DynamicBroadcastInDim`, and `DynamicIota` without conditional shape branching.
+
 - 2026/07/30: 
   - Added local-directory mode to `hub`: `hub.NewLocal(dir)` / `Repo.WithLocalDir(dir)` let a `*hub.Repo` read
     files straight from a plain local directory (e.g. a `git clone` or `huggingface-cli download --local-dir`

@@ -419,7 +419,7 @@ func TestSentenceBatchEmbedding(t *testing.T) {
 
 	fmt.Printf(" - Pre-compiling model ...")
 	start := time.Now()
-	err = exec.PreCompile(batch)
+	_, err = exec.Compile(batch.Shape())
 	if err != nil {
 		t.Fatalf("Failed to compile graph: %+v", err)
 	}
