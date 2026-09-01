@@ -189,7 +189,17 @@ func iterFromRepoDownload(backend compute.Backend, repo *hub.Repo, done <-chan s
 				return
 			}
 
-			readBuffer := fr.mmap[dataOffset+meta.DataOffsets[0] : dataOffset+meta.DataOffsets[1]]
+			// data_offsets are from the untrusted file header; validate they
+			// fall within the mapped data before slicing to avoid a
+			// slice-out-of-range panic on a crafted header.
+			tensorOffset := dataOffset + meta.DataOffsets[0]
+			tensorEnd := dataOffset + meta.DataOffsets[1]
+			if tensorOffset < 0 || tensorEnd < tensorOffset || tensorEnd > int64(len(fr.mmap)) {
+				reportErrFn(errors.Errorf("tensor %q data offsets [%d:%d] out of range for %d-byte data section", name, tensorOffset, tensorEnd, int64(len(fr.mmap))))
+				return
+			}
+
+			readBuffer := fr.mmap[tensorOffset:tensorEnd]
 
 			waitStart = time.Now()
 			select {

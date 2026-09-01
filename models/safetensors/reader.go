@@ -100,6 +100,13 @@ func (mr *TensorReader) ReadTensor(backend compute.Backend, tensorName string) (
 		return nil, errors.Errorf("tensor shape %s expected %d bytes, but got %d bytes in file", shape, expectedBytes, tensorEnd-tensorOffset)
 	}
 
+	// data_offsets come from the (untrusted) file header, so validate they fall
+	// within the mapped data before slicing: otherwise a crafted header makes
+	// mr.mmapBuf[tensorOffset:tensorEnd] panic with a slice-out-of-range.
+	if tensorOffset < 0 || tensorEnd < tensorOffset || tensorEnd > int64(len(mr.mmapBuf)) {
+		return nil, errors.Errorf("tensor %q data offsets [%d:%d] out of range for %d-byte data section", tensorName, tensorOffset, tensorEnd, int64(len(mr.mmapBuf)))
+	}
+
 	readBuffer := mr.mmapBuf[tensorOffset:tensorEnd]
 
 	t, err := tensors.FromRaw(backend, 0, shape, readBuffer)
