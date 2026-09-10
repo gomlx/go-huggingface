@@ -49,6 +49,7 @@ var (
 	flagCPUProf = flag.String("cpuprof", "", "Write CPU profile to file.")
 	flagWarmup  = flag.Bool("warmup", false, "Do a warmup run over the dataset first, compiling the execution graph for each new batch shape encountered.")
 	flagShapes  = flag.Bool("shapes", false, "Report the shapes of the batches encountered during the warmup run.")
+	flagDynamic = flag.Bool("dynamic", true, "Use dynamic shapes if supported by the backend.")
 )
 
 func MapHas[K comparable, V any](m map[K]V, k K) bool {
@@ -112,7 +113,7 @@ func main() {
 		x := hfModel.SentenceEmbeddingGraph(scope, tokens, seqLen)
 		return graph.ConvertDType(x, dtypes.Float32)
 	})
-	if backend.Capabilities().HasDynamicShapes() {
+	if *flagDynamic && backend.Capabilities().HasDynamicShapes() {
 		embedExec.WithDynamicAxes([]string{"batch", "seq_len"})
 	}
 

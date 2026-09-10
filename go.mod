@@ -7,8 +7,8 @@ require (
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/eliben/go-sentencepiece v0.7.0
 	github.com/gofrs/flock v0.13.0
-	github.com/gomlx/compute v0.1.9
-	github.com/gomlx/gomlx v0.28.11
+	github.com/gomlx/compute v0.1.10-0.20260910074435-86167c7211d9
+	github.com/gomlx/gomlx v0.28.12-0.20260910101048-511fe9a89cfc
 	github.com/google/uuid v1.6.0
 	github.com/parquet-go/parquet-go v0.29.0
 	github.com/pkg/errors v0.9.1
@@ -44,8 +44,8 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/twpayne/go-geom v1.6.1 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
-	golang.org/x/sys v0.43.0 // indirect
+	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
+	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/term v0.40.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
