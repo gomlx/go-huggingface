@@ -112,17 +112,17 @@ func (m *Model) ApplySentencePooling(hiddenStates, seqLen *graph.Node) *graph.No
 		if seqLen == nil {
 			// If no seqLen is provided, assume all tokens are valid and take the last one.
 			maxSeqLenNode := graph.DimensionSize(hiddenStates, 1)
-			lastTokenIdx = graph.Sub(maxSeqLenNode, graph.Scalar(g, dtypes.Int32, 1))
+			lastTokenIdx = graph.Sub(maxSeqLenNode, graph.Scalar(g, maxSeqLenNode.DType(), 1))
 			lastTokenIdx = graph.ExpandAxes(lastTokenIdx, 0, 1) // [1, 1]
 			lastTokenIdx = graph.DynamicBroadcastInDim(lastTokenIdx, []int{0, 1}, graph.DimensionSpecFor(hiddenStates, 0), graph.StaticDim(1))
 		} else {
 			// seqLen is [batchSize]. Last token index is seqLen - 1.
-			lastTokenIdx = graph.Sub(seqLen, graph.Scalar(g, dtypes.Int32, 1))
+			lastTokenIdx = graph.Sub(seqLen, graph.Scalar(g, seqLen.DType(), 1))
 			lastTokenIdx = graph.ExpandAxes(lastTokenIdx, 1) // [batchSize, 1]
 		}
 		// Gather the last token embeddings of each example.
 		// Add the batch index to each lastTokenIdx:
-		batchIndices := graph.DynamicIota(g, dtypes.Int32, 0, graph.DimensionSpecFor(lastTokenIdx, 0), graph.StaticDim(1))
+		batchIndices := graph.DynamicIota(g, lastTokenIdx.DType(), 0, graph.DimensionSpecFor(lastTokenIdx, 0), graph.StaticDim(1))
 		lastTokenIdx = graph.Concatenate([]*graph.Node{batchIndices, lastTokenIdx}, -1)                        // [batchSize, 2]
 		lastTokenEmbeddings := graph.GatherSlices(hiddenStates, []int{0, 1}, lastTokenIdx, []int{1, 1}, false) // [batchSize, 1, 1, hiddenDim]
 		lastTokenEmbeddings = graph.Squeeze(lastTokenEmbeddings, 1, 2)                                         // [batchSize, hiddenDim]
@@ -133,7 +133,7 @@ func (m *Model) ApplySentencePooling(hiddenStates, seqLen *graph.Node) *graph.No
 			return graph.ReduceMean(hiddenStates, 1) // [batch, hidden]
 		}
 		// Create a boolean mask from seqLen.
-		indices := graph.DynamicIota(g, dtypes.Int32, 1, graph.DimensionSpecFor(hiddenStates, 0), graph.DimensionSpecFor(hiddenStates, 1))
+		indices := graph.DynamicIota(g, seqLen.DType(), 1, graph.DimensionSpecFor(hiddenStates, 0), graph.DimensionSpecFor(hiddenStates, 1))
 		mask := graph.LessThan(indices, graph.ExpandAxes(seqLen, 1))
 		return graph.MaskedReduceMean(hiddenStates, mask, 1) // [batch, hidden]
 
