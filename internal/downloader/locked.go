@@ -12,20 +12,14 @@ import (
 
 // LockedDownload downloads url to the given filePath using a lock file to coordinate parallel downloads.
 //
-// If filePath exits and forceDownload is false, it is assumed to already have been correctly downloaded, and it will return immediately.
+// If filePath exists and forceDownload is false, it is assumed to already have been correctly downloaded, and it will return immediately.
 //
-// It downloads the file to filePath+".tmp" and then atomically move it to filePath.
+// It downloads the file to filePath+"."+Part and then atomically moves it to filePath, preserving any existing file until download completes.
 //
 // It uses a temporary filePath+".lock" to coordinate multiple processes/programs trying to download the same file at the same time.
 func (m *Manager) LockedDownload(ctx context.Context, url, filePath string, forceDownload bool, progressCallback ProgressCallback) error {
-	if files.Exists(filePath) {
-		if !forceDownload {
-			return nil
-		}
-		err := os.Remove(filePath)
-		if err != nil {
-			return errors.Wrapf(err, "failed to remove %q while force-downloading %q", filePath, url)
-		}
+	if files.Exists(filePath) && !forceDownload {
+		return nil
 	}
 
 	// Checks whether context has already been cancelled, and exit immediately.
@@ -42,7 +36,7 @@ func (m *Manager) LockedDownload(ctx context.Context, url, filePath string, forc
 	lockPath := filePath + ".lock"
 	var mainErr error
 	errLock := files.ExecOnFileLock(lockPath, func() {
-		if files.Exists(filePath) {
+		if files.Exists(filePath) && !forceDownload {
 			// Some concurrent other process (or goroutine) already downloaded the file.
 			return
 		}

@@ -27,10 +27,6 @@ type Repo struct {
 	// revision to download, usually set to "main", but it can use a commit-hash version.
 	revision string
 
-	// revisionHashRefreshed indicates whether the revision hash has been refreshed.
-	// We force it to be refreshed at least once before hitting the server, just in case.
-	revisionHashRefreshed bool
-
 	// authToken is the HuggingFace authentication token to be used when downloading the files.
 	authToken string
 
@@ -73,6 +69,11 @@ type Repo struct {
 // shared with huggingface-hub for python library. The cache is share across various programs, including Python
 // programs.
 // Use Repo.WithCacheDir to change it, or NewWithDir to use a plain directory structure, that is not shared across programs.
+//
+// If the model is already in cache, no network communication is issued. But if one wants to force a check
+// for an update, one can follow the creation of the Repo with a call to DownloadInfo(true) to poll for changes:
+// if the revision has been updated, the cache is busted if there is a new release, and model files are
+// re-downloaded as requested.
 //
 // The id typically include owner/model. E.g.: "google/gemma-2-2b-it"
 //
@@ -215,17 +216,31 @@ func (r *Repo) FileURL(fileName string) (string, error) {
 	}
 }
 
+// isCommitHash returns whether revision is a 40-character hexadecimal git commit hash.
+func isCommitHash(revision string) bool {
+	if len(revision) != 40 {
+		return false
+	}
+	for _, c := range revision {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
 // readCommitHashForRevision finds the commit-hash for the revision, it should already be written to disk.
 // The revision can be itself a commit-hash, in which case it is returned directly.
 //
 // repoCacheDir is returned by Repo.repoCacheDir().
 func (r *Repo) readCommitHashForRevision() (string, error) {
-	forceDownload := !r.revisionHashRefreshed
-	err := r.DownloadInfo(forceDownload)
+	if isCommitHash(r.revision) {
+		return r.revision, nil
+	}
+	err := r.DownloadInfo(false)
 	if err != nil {
 		return "", err
 	}
-	r.revisionHashRefreshed = true
 	return r.info.CommitHash, nil
 }
 

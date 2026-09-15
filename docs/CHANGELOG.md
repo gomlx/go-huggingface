@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- 2026/09/15:
+  - Cache and offline reliability improvements in `hub`:
+    - Avoid re-downloading model revision info when it is already cached by default. Documented update polling via `DownloadInfo(true)`.
+    - Short-circuit revision lookup when `revision` is already a 40-character commit hash.
+    - Removed unused `revisionHashRefreshed` field.
+    - Fixed `LockedDownload` to preserve existing cached files until a forced re-download successfully completes and atomically replaces them, avoiding cache deletion on network failure (issue #59).
+
 - 2026/08/28:
   - Unified sentence pooling in `models/transformer/sentence.go` to use `DimensionSpecFor`, `DimensionSize`, `DynamicBroadcastInDim`, and `DynamicIota` without conditional shape branching.
 

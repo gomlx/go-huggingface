@@ -55,7 +55,6 @@ func (r *Repo) WithEmbedFS(fsys fs.FS, subDir string) *Repo {
 
 	// Invalidate cached info from previous configuration.
 	r.info = nil
-	r.revisionHashRefreshed = false
 	if r.ID == "" {
 		if subDir != "" {
 			r.ID = path.Base(subDir)
