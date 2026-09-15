@@ -160,7 +160,7 @@ func (m *Manager) Download(ctx context.Context, url string, filePath string, cal
 			if ctx.Err() != nil {
 				return CancellationError
 			}
-			return errors.Wrapf(err, "failed downloading %q", url)
+			return errors.Wrapf(readErr, "failed downloading %q", url)
 		}
 		if n > 0 {
 			wn, writeErr := file.Write(buf[:n])
