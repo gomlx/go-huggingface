@@ -26,13 +26,13 @@ type ProgressCallback func(downloadedBytes, totalBytes int64)
 
 // Manager handles downloads, reporting back progress and errors.
 type Manager struct {
-	semaphore            *Semaphore
+	semaphore            *FIFOSemaphore
 	authToken, userAgent string
 }
 
 // New creates a Manager that download files in parallel -- by default mostly 20 in parallel.
 func New() *Manager {
-	return &Manager{semaphore: NewSemaphore(20)}
+	return &Manager{semaphore: NewFIFOSemaphore(20)}
 }
 
 // MaxParallel indicates how many files to download at the same time. Default is 20.
@@ -82,7 +82,12 @@ func (m *Manager) setRequestHeader(req *http.Request) {
 // the download has completed successfully. This way, if the download is interrupted, the
 // final file will not be present, and a re-run will download the file from scratch.
 func (m *Manager) Download(ctx context.Context, url string, filePath string, callback ProgressCallback) error {
-	m.semaphore.Acquire()
+	if err := m.semaphore.Acquire(ctx); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return CancellationError
+		}
+		return err
+	}
 	defer m.semaphore.Release()
 
 	client := &http.Client{
@@ -201,7 +206,12 @@ func (m *Manager) Download(ctx context.Context, url string, filePath string, cal
 //
 // The context ctx can be used to interrupt the downloading.
 func (m *Manager) FetchHeader(ctx context.Context, url string) (header http.Header, contentLength int64, err error) {
-	m.semaphore.Acquire()
+	if err = m.semaphore.Acquire(ctx); err != nil {
+		if errors.Is(err, context.Canceled) {
+			err = CancellationError
+		}
+		return
+	}
 	defer m.semaphore.Release()
 
 	client := &http.Client{
