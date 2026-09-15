@@ -7,7 +7,9 @@
     - Avoid re-downloading model revision info when it is already cached by default. Documented update polling via `DownloadInfo(true)`.
     - Short-circuit revision lookup when `revision` is already a 40-character commit hash.
     - Removed unused `revisionHashRefreshed` field.
-    - Fixed `LockedDownload` to preserve existing cached files until a forced re-download successfully completes and atomically replaces them, avoiding cache deletion on network failure (issue #59).
+    - Fixed `LockedDownload` to preserve existing cached files until a forced re-download successfully completes and atomically replaces them, avoiding cache deletion on network failure (fixes #59).
+  - Replaced `Semaphore` with `FIFOSemaphore` in `internal/downloader`: added support for `context.Context` cancellation during semaphore acquisition and ensured strict FIFO ordering (fixes #60).
+  - Fixed error reporting in `internal/downloader`: correctly wrap `readErr` instead of nil when an error occurs while reading the response body (fixes #61).
 
 - 2026/08/28:
   - Unified sentence pooling in `models/transformer/sentence.go` to use `DimensionSpecFor`, `DimensionSize`, `DynamicBroadcastInDim`, and `DynamicIota` without conditional shape branching.
