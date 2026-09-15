@@ -64,7 +64,6 @@ func (r *Repo) WithLocalDir(dir string) *Repo {
 	// Local mode changes what DownloadInfo means, so invalidate anything cached from a possible previous
 	// (remote) configuration.
 	r.info = nil
-	r.revisionHashRefreshed = false
 	if r.ID == "" {
 		r.ID = filepath.Base(r.localDir)
 	}
