@@ -102,3 +102,115 @@ func TestRepoInfoLegacyModelID(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "legacy_model", info.ModelID)
 }
+
+// Hugging Face dataset cards often set license as a YAML list, which the Hub API
+// returns as a JSON array (e.g. bigcode/the-stack-v2 → ["other"], openai/gsm8k → ["mit"]).
+// CardData.License stays a string for callers; arrays are joined with ", ".
+func TestRepoInfoUnmarshal_LicenseAsArray(t *testing.T) {
+	jsonData := `{
+		"id": "bigcode/the-stack-v2",
+		"sha": "e565caa3a78c2423bd374333a472b049eb090e47",
+		"siblings": [{"rfilename": "README.md"}],
+		"cardData": {
+			"license": ["other"],
+			"library_name": "datasets",
+			"pipeline_tag": "text-generation",
+			"pretty_name": "The Stack v2"
+		}
+	}`
+	var info RepoInfo
+	err := json.Unmarshal([]byte(jsonData), &info)
+	require.NoError(t, err, "cardData.license as JSON array must unmarshal (Hub datasets often use list licenses)")
+	require.NotNil(t, info.CardData)
+	assert.Equal(t, "other", info.CardData.License)
+	assert.Equal(t, "datasets", info.CardData.LibraryName)
+	assert.Equal(t, "text-generation", info.CardData.PipelineTag)
+	assert.Equal(t, "e565caa3a78c2423bd374333a472b049eb090e47", info.CommitHash)
+}
+
+func TestRepoInfoUnmarshal_LicenseAsString(t *testing.T) {
+	jsonData := `{"id":"demo","cardData":{"license":"apache-2.0"}}`
+	var info RepoInfo
+	require.NoError(t, json.Unmarshal([]byte(jsonData), &info))
+	require.NotNil(t, info.CardData)
+	assert.Equal(t, "apache-2.0", info.CardData.License)
+}
+
+func TestRepoInfoUnmarshal_LicenseAsMultiValueArray(t *testing.T) {
+	jsonData := `{"id":"demo","cardData":{"license":["cc-by-sa-3.0","gfdl"]}}`
+	var info RepoInfo
+	require.NoError(t, json.Unmarshal([]byte(jsonData), &info))
+	require.NotNil(t, info.CardData)
+	assert.Equal(t, "cc-by-sa-3.0, gfdl", info.CardData.License)
+}
+
+func TestRepoInfoUnmarshal_LicenseMissingOrNullOrEmpty(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		json string
+	}{
+		{name: "missing", json: `{"id":"demo","cardData":{"library_name":"datasets"}}`},
+		{name: "null", json: `{"id":"demo","cardData":{"license":null}}`},
+		{name: "empty array", json: `{"id":"demo","cardData":{"license":[]}}`},
+		{name: "empty string", json: `{"id":"demo","cardData":{"license":""}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var info RepoInfo
+			require.NoError(t, json.Unmarshal([]byte(tc.json), &info))
+			require.NotNil(t, info.CardData)
+			assert.Equal(t, "", info.CardData.License)
+		})
+	}
+}
+
+func TestRepoInfoUnmarshal_LicenseInvalidType(t *testing.T) {
+	t.Parallel()
+	cases := []string{
+		`{"id":"demo","cardData":{"license":123}}`,
+		`{"id":"demo","cardData":{"license":true}}`,
+		`{"id":"demo","cardData":{"license":{"name":"mit"}}}`,
+	}
+	for _, jsonData := range cases {
+		var info RepoInfo
+		err := json.Unmarshal([]byte(jsonData), &info)
+		require.Error(t, err, "expected error for %s", jsonData)
+		assert.Contains(t, err.Error(), "cardData.license")
+	}
+}
+
+func TestCardDataUnmarshal_Null(t *testing.T) {
+	t.Parallel()
+	var c CardData
+	require.NoError(t, json.Unmarshal([]byte("null"), &c))
+	assert.Equal(t, CardData{}, c)
+}
+
+func TestRepoInfoUnmarshal_CardDataNull(t *testing.T) {
+	t.Parallel()
+	var info RepoInfo
+	require.NoError(t, json.Unmarshal([]byte(`{"id":"demo","cardData":null}`), &info))
+	assert.Equal(t, "demo", info.ID)
+	assert.Nil(t, info.CardData)
+}
+
+func TestDownloadInfo_DatasetLicenseArray(t *testing.T) {
+	// Live Hub call: openai/gsm8k has cardData.license = ["mit"] and is public/ungated.
+	t.Parallel()
+	dir := t.TempDir()
+	repo := New("openai/gsm8k").
+		WithType(RepoTypeDataset).
+		WithCacheDir(dir).
+		WithProgressBar(false)
+	repo.Verbosity = 0
+
+	err := repo.DownloadInfo(false)
+	require.NoError(t, err, "DownloadInfo must succeed for datasets whose card license is a JSON array")
+	info := repo.Info()
+	require.NotNil(t, info)
+	require.NotEmpty(t, info.CommitHash)
+	require.NotNil(t, info.CardData)
+	assert.Equal(t, "mit", info.CardData.License)
+}
