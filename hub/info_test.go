@@ -198,6 +198,9 @@ func TestRepoInfoUnmarshal_CardDataNull(t *testing.T) {
 
 func TestDownloadInfo_DatasetLicenseArray(t *testing.T) {
 	// Live Hub call: openai/gsm8k has cardData.license = ["mit"] and is public/ungated.
+	if testing.Short() {
+		t.Skip("skipping live Hub call in short mode")
+	}
 	t.Parallel()
 	dir := t.TempDir()
 	repo := New("openai/gsm8k").
