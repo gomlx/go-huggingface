@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 	"path"
-	"strings"
 	"time"
 
 	"github.com/gomlx/go-huggingface/internal/files"
@@ -71,16 +70,15 @@ type RepoConfig struct {
 }
 
 // CardData contains metadata about the model/dataset card.
-//
-// License is always exposed as a string for callers. Hugging Face may send either a
-// string or a list of strings in cardData.license (common for datasets); lists are
-// joined with ", " on unmarshal so existing readers (e.g. hubinfo) keep working.
 type CardData struct {
 	LibraryName string `json:"library_name"`
-	License     string `json:"license"`
-	LicenseLink string `json:"license_link"`
-	PipelineTag string `json:"pipeline_tag"`
-	BaseModel   any    `json:"base_model"` // Can be a string, or slice of strings, or nil.
+	// License holds one or more licenses from the Hub card. Hugging Face may send
+	// cardData.license as a string or a list of strings (common for datasets); a
+	// single string is stored as a one-element slice.
+	License     []string `json:"license"`
+	LicenseLink string   `json:"license_link"`
+	PipelineTag string   `json:"pipeline_tag"`
+	BaseModel   any      `json:"base_model"` // Can be a string, or slice of strings, or nil.
 }
 
 // UnmarshalJSON accepts cardData.license as either a string or an array of strings.
@@ -110,14 +108,17 @@ func (c *CardData) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// parseCardLicense normalizes Hub license JSON (string or []string) to a single string.
-func parseCardLicense(raw json.RawMessage) (string, error) {
+// parseCardLicense normalizes Hub license JSON (string or []string) to []string.
+func parseCardLicense(raw json.RawMessage) ([]string, error) {
 	if len(raw) == 0 || string(raw) == "null" {
-		return "", nil
+		return nil, nil
 	}
 	var asString string
 	if err := json.Unmarshal(raw, &asString); err == nil {
-		return asString, nil
+		if asString == "" {
+			return nil, nil
+		}
+		return []string{asString}, nil
 	}
 	var asList []string
 	if err := json.Unmarshal(raw, &asList); err == nil {
@@ -128,9 +129,12 @@ func parseCardLicense(raw json.RawMessage) (string, error) {
 			}
 			parts = append(parts, p)
 		}
-		return strings.Join(parts, ", "), nil
+		if len(parts) == 0 {
+			return nil, nil
+		}
+		return parts, nil
 	}
-	return "", fmt.Errorf("cardData.license: unsupported JSON value %s", string(raw))
+	return nil, fmt.Errorf("cardData.license: unsupported JSON value %s", string(raw))
 }
 
 // TransformersInfo contains information related to the Hugging Face Transformers integration.

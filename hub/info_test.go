@@ -48,7 +48,7 @@ func TestRepoInfoUnmarshal(t *testing.T) {
 	// Assert cardData
 	require.NotNil(t, info.CardData)
 	assert.Equal(t, "transformers", info.CardData.LibraryName)
-	assert.Equal(t, "apache-2.0", info.CardData.License)
+	assert.Equal(t, []string{"apache-2.0"}, info.CardData.License)
 	assert.Equal(t, "https://huggingface.co/Qwen/Qwen3-0.6B/blob/main/LICENSE", info.CardData.LicenseLink)
 	assert.Equal(t, "text-generation", info.CardData.PipelineTag)
 	assert.Equal(t, []any{"Qwen/Qwen3-0.6B-Base"}, info.CardData.BaseModel)
@@ -105,7 +105,6 @@ func TestRepoInfoLegacyModelID(t *testing.T) {
 
 // Hugging Face dataset cards often set license as a YAML list, which the Hub API
 // returns as a JSON array (e.g. bigcode/the-stack-v2 → ["other"], openai/gsm8k → ["mit"]).
-// CardData.License stays a string for callers; arrays are joined with ", ".
 func TestRepoInfoUnmarshal_LicenseAsArray(t *testing.T) {
 	jsonData := `{
 		"id": "bigcode/the-stack-v2",
@@ -122,7 +121,7 @@ func TestRepoInfoUnmarshal_LicenseAsArray(t *testing.T) {
 	err := json.Unmarshal([]byte(jsonData), &info)
 	require.NoError(t, err, "cardData.license as JSON array must unmarshal (Hub datasets often use list licenses)")
 	require.NotNil(t, info.CardData)
-	assert.Equal(t, "other", info.CardData.License)
+	assert.Equal(t, []string{"other"}, info.CardData.License)
 	assert.Equal(t, "datasets", info.CardData.LibraryName)
 	assert.Equal(t, "text-generation", info.CardData.PipelineTag)
 	assert.Equal(t, "e565caa3a78c2423bd374333a472b049eb090e47", info.CommitHash)
@@ -133,7 +132,7 @@ func TestRepoInfoUnmarshal_LicenseAsString(t *testing.T) {
 	var info RepoInfo
 	require.NoError(t, json.Unmarshal([]byte(jsonData), &info))
 	require.NotNil(t, info.CardData)
-	assert.Equal(t, "apache-2.0", info.CardData.License)
+	assert.Equal(t, []string{"apache-2.0"}, info.CardData.License)
 }
 
 func TestRepoInfoUnmarshal_LicenseAsMultiValueArray(t *testing.T) {
@@ -141,7 +140,7 @@ func TestRepoInfoUnmarshal_LicenseAsMultiValueArray(t *testing.T) {
 	var info RepoInfo
 	require.NoError(t, json.Unmarshal([]byte(jsonData), &info))
 	require.NotNil(t, info.CardData)
-	assert.Equal(t, "cc-by-sa-3.0, gfdl", info.CardData.License)
+	assert.Equal(t, []string{"cc-by-sa-3.0", "gfdl"}, info.CardData.License)
 }
 
 func TestRepoInfoUnmarshal_LicenseMissingOrNullOrEmpty(t *testing.T) {
@@ -161,7 +160,7 @@ func TestRepoInfoUnmarshal_LicenseMissingOrNullOrEmpty(t *testing.T) {
 			var info RepoInfo
 			require.NoError(t, json.Unmarshal([]byte(tc.json), &info))
 			require.NotNil(t, info.CardData)
-			assert.Equal(t, "", info.CardData.License)
+			assert.Empty(t, info.CardData.License)
 		})
 	}
 }
@@ -215,5 +214,5 @@ func TestDownloadInfo_DatasetLicenseArray(t *testing.T) {
 	require.NotNil(t, info)
 	require.NotEmpty(t, info.CommitHash)
 	require.NotNil(t, info.CardData)
-	assert.Equal(t, "mit", info.CardData.License)
+	assert.Equal(t, []string{"mit"}, info.CardData.License)
 }

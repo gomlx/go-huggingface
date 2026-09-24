@@ -120,8 +120,8 @@ func main() {
 			}
 		}
 		if info.CardData != nil {
-			if info.CardData.License != "" {
-				metaTable.Row("Card Data: License", info.CardData.License)
+			if len(info.CardData.License) > 0 {
+				metaTable.Row("Card Data: License", strings.Join(info.CardData.License, ", "))
 			}
 			if info.CardData.LicenseLink != "" {
 				metaTable.Row("Card Data: License Link", info.CardData.LicenseLink)
