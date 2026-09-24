@@ -69,13 +69,72 @@ type RepoConfig struct {
 	TokenizerConfig map[string]any `json:"tokenizer_config"`
 }
 
-// CardData contains metadata about the model card.
+// CardData contains metadata about the model/dataset card.
 type CardData struct {
 	LibraryName string `json:"library_name"`
-	License     string `json:"license"`
-	LicenseLink string `json:"license_link"`
-	PipelineTag string `json:"pipeline_tag"`
-	BaseModel   any    `json:"base_model"` // Can be a string, or slice of strings, or nil.
+	// License holds one or more licenses from the Hub card. Hugging Face may send
+	// cardData.license as a string or a list of strings (common for datasets); a
+	// single string is stored as a one-element slice.
+	License     []string `json:"license"`
+	LicenseLink string   `json:"license_link"`
+	PipelineTag string   `json:"pipeline_tag"`
+	BaseModel   any      `json:"base_model"` // Can be a string, or slice of strings, or nil.
+}
+
+// UnmarshalJSON accepts cardData.license as either a string or an array of strings.
+// Other fields decode via a type alias so new CardData fields are not omitted.
+func (c *CardData) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*c = CardData{}
+		return nil
+	}
+	type Alias CardData
+	aux := &struct {
+		License json.RawMessage `json:"license"`
+		*Alias
+	}{
+		Alias: (*Alias)(c),
+	}
+	// Pass aux (not &aux): unmarshaling JSON null into &aux would nil the pointer
+	// and panic on aux.License below.
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	license, err := parseCardLicense(aux.License)
+	if err != nil {
+		return err
+	}
+	c.License = license
+	return nil
+}
+
+// parseCardLicense normalizes Hub license JSON (string or []string) to []string.
+func parseCardLicense(raw json.RawMessage) ([]string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var asString string
+	if err := json.Unmarshal(raw, &asString); err == nil {
+		if asString == "" {
+			return nil, nil
+		}
+		return []string{asString}, nil
+	}
+	var asList []string
+	if err := json.Unmarshal(raw, &asList); err == nil {
+		parts := make([]string, 0, len(asList))
+		for _, p := range asList {
+			if p == "" {
+				continue
+			}
+			parts = append(parts, p)
+		}
+		if len(parts) == 0 {
+			return nil, nil
+		}
+		return parts, nil
+	}
+	return nil, fmt.Errorf("cardData.license: unsupported JSON value %s", string(raw))
 }
 
 // TransformersInfo contains information related to the Hugging Face Transformers integration.
