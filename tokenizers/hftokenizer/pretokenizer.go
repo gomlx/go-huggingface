@@ -415,6 +415,8 @@ func splitPreTokenizeWithOffsets(text string, normOffsets []int, pt *PreTokenize
 			re, err = regexp.Compile(pt.Pattern.Regex)
 		} else if pt.Pattern.String != "" {
 			re, err = regexp.Compile(regexp.QuoteMeta(pt.Pattern.String))
+		} else {
+			re, err = regexp.Compile(`(?s:.)`)
 		}
 	}
 
