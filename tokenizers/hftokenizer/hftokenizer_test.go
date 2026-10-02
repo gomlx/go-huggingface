@@ -1693,6 +1693,37 @@ func TestEncodeWithAnnotations_AllOutputs(t *testing.T) {
 	}
 }
 
+func TestSplitPreTokenizerEmptyRegexIsolatesCharacters(t *testing.T) {
+	tok, err := NewFromContent(nil, []byte(`{
+		"pre_tokenizer": {
+			"type": "Split",
+			"pattern": {"Regex": ""},
+			"behavior": "Isolated"
+		},
+		"model": {"type": "WordPiece", "vocab": {}}
+	}`))
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	input := "aé\nb"
+	words := tok.preTokenizeWithSpans(input, []int{0, 1, 2, 3, 4})
+	want := []wordWithOffset{
+		{text: "a", start: 0, end: 1},
+		{text: "é", start: 1, end: 3},
+		{text: "\n", start: 3, end: 4},
+		{text: "b", start: 4, end: 5},
+	}
+	if len(words) != len(want) {
+		t.Fatalf("preTokenizeWithSpans() returned %d words, want %d: %+v", len(words), len(want), words)
+	}
+	for i := range want {
+		if words[i] != want[i] {
+			t.Errorf("preTokenizeWithSpans() word %d = %+v, want %+v", i, words[i], want[i])
+		}
+	}
+}
+
 func stringSliceEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
