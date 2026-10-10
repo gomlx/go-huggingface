@@ -18,11 +18,12 @@ import (
 const (
 	// Repository for KaLM-Embedding-Gemma3-12B-2511.
 	//
-	// This is an embedding model, not a language model. It is trained to produce
-	// embeddings for sentences, not to generate text.
-	//
-	// Remember to set Model.WithCausalMask(false) when using this model.
-	// (The default is set to use causal mask, but the model shouldn't use it)
+	// This is an embedding model, not a text generation model. In HuggingFace,
+	// it uses the Gemma3TextModel architecture with last-token pooling and a causal mask.
+	// Although the KaLM paper mentions training without a causal mask, HuggingFace's
+	// weights and Python sentence-transformers run it with a causal mask.
+	// LoadModel will default to using a causal mask (true), but it can be overridden
+	// with Model.WithCausalMask(false) if desired.
 	Repository = "tencent/KaLM-Embedding-Gemma3-12B-2511"
 
 	// Embedding dimension, per token, or pooled for sentence.

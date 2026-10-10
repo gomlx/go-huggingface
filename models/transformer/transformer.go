@@ -15,10 +15,11 @@ import (
 
 // WithCausalMask sets whether to use a causal mask in the attention layers.
 //
-// Some models are trained with a causal mask, others without, but it is not documented
-// in the usual model configuration.
+// By default, [LoadModel] automatically detects whether to use a causal mask based on
+// the model configuration: causal decoders (e.g. Gemma, LLaMA, GPT) default to true,
+// while bidirectional encoders (e.g. BERT) default to false.
 //
-//	The default is to use a causal mask.
+// WithCausalMask can be called after loading to override the automatically detected setting.
 func (m *Model) WithCausalMask(useCausalMask bool) *Model {
 	m.useCausalMask = useCausalMask
 	return m
@@ -76,8 +77,7 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 	if isBert {
 		tm.WithArchitecture(mltransformer.ArchitectureStandard).
 			WithNormalization(layers.NormalizationLayerNorm).
-			WithBias(true).
-			WithCausalMask(false)
+			WithBias(true)
 
 		if m.Config.LayerNormEps > 0 {
 			tm.WithNormEpsilon(m.Config.LayerNormEps)
