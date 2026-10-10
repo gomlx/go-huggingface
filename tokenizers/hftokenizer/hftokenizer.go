@@ -260,7 +260,7 @@ func (t *Tokenizer) resolveSpecialTokens() {
 	}
 }
 
-// Normalize returns the normalization used by the tokenizer (e.g.: BERT lower cases the string).
+// Normalize the text using the tokenizer normalization rules (e.g.: BERT lower cases the string).
 func (t *Tokenizer) Normalize(text string) string {
 	if t.tokenizer.Normalizer == nil {
 		return text

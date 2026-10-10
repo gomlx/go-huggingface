@@ -1,6 +1,10 @@
 package hftokenizer
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/gomlx/go-huggingface/tokenizers/api"
+)
 
 // These tests guard against a byte/rune accounting bug in
 // applyNormalizerWithSpans: the returned offsets slice must have exactly
@@ -175,3 +179,103 @@ func TestApplyNormalizerWithSpans_Lowercase_MultiByteResult(t *testing.T) {
 		})
 	}
 }
+
+// TestIssue67_GemmaReplaceNormalizerSpans reproduces GitHub issue #67:
+// When normalizer replaces " " with "▁" (as in Gemma's tokenizer),
+// token byte spans drift because they are tracked in normalized text where "▁"
+// takes 3 bytes instead of 1 byte in the original text.
+func TestIssue67_GemmaReplaceNormalizerSpans(t *testing.T) {
+	const gemmaTokenizerJSON = `{
+  "version": "1.0",
+  "truncation": null,
+  "padding": null,
+  "added_tokens": [
+    {"id": 0, "content": "<pad>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+    {"id": 1, "content": "<eos>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+    {"id": 2, "content": "<bos>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+    {"id": 3, "content": "<unk>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+    {"id": 107, "content": "\n", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": false}
+  ],
+  "normalizer": {"type": "Replace", "pattern": {"String": " "}, "content": "▁"},
+  "pre_tokenizer": {"type": "Split", "pattern": {"String": " "}, "behavior": "MergedWithPrevious", "invert": false},
+  "post_processor": {
+    "type": "TemplateProcessing",
+    "single": [{"SpecialToken": {"id": "<bos>", "type_id": 0}}, {"Sequence": {"id": "A", "type_id": 0}}],
+    "pair": [{"SpecialToken": {"id": "<bos>", "type_id": 0}}, {"Sequence": {"id": "A", "type_id": 0}}, {"SpecialToken": {"id": "<bos>", "type_id": 1}}, {"Sequence": {"id": "B", "type_id": 1}}],
+    "special_tokens": {"<bos>": {"id": "<bos>", "ids": [2], "tokens": ["<bos>"]}}
+  },
+  "decoder": {
+    "type": "Sequence",
+    "decoders": [
+      {"type": "Replace", "pattern": {"String": "▁"}, "content": " "},
+      {"type": "ByteFallback"},
+      {"type": "Fuse"}
+    ]
+  },
+  "model": {
+    "type": "BPE",
+    "dropout": null,
+    "unk_token": "<unk>",
+    "continuing_subword_prefix": null,
+    "end_of_word_suffix": null,
+    "fuse_unk": true,
+    "byte_fallback": true,
+    "ignore_merges": false,
+    "vocab": {
+      "<pad>": 0, "<eos>": 1, "<bos>": 2, "<unk>": 3,
+      "T": 4, "h": 5, "e": 6, "▁": 7, "q": 8, "u": 9, "i": 10, "c": 11, "k": 12, "b": 13, "r": 14, "o": 15, "w": 16, "n": 17,
+      "Th": 18, "The": 19, "▁q": 20, "▁qu": 21, "▁qui": 22, "▁quic": 23, "▁quick": 24,
+      "▁b": 25, "▁br": 26, "▁bro": 27, "▁brow": 28, "▁brown": 29, "\n": 107
+    },
+    "merges": [
+      ["T", "h"], ["Th", "e"], ["▁", "q"], ["▁q", "u"], ["▁qu", "i"], ["▁qui", "c"], ["▁quic", "k"],
+      ["▁", "b"], ["▁b", "r"], ["▁br", "o"], ["▁bro", "w"], ["▁brow", "n"]
+    ]
+  }
+}`
+	tok, err := NewFromContent(nil, []byte(gemmaTokenizerJSON))
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+	if err := tok.With(api.EncodeOptions{AddSpecialTokens: true, IncludeSpans: true}); err != nil {
+		t.Fatalf("With options failed: %v", err)
+	}
+
+	text := "The quick brown\nThe quick brown"
+	enc := tok.EncodeWithAnnotations(text)
+
+	wantIDs := []int{2, 19, 24, 29, 107, 19, 24, 29}
+	if !intSliceEqual(enc.IDs, wantIDs) {
+		t.Errorf("IDs = %v, want %v", enc.IDs, wantIDs)
+	}
+
+	wantSpans := []api.TokenSpan{
+		{Start: -1, End: -1}, // <bos>
+		{Start: 0, End: 3},   // "The"
+		{Start: 3, End: 9},   // " quick"
+		{Start: 9, End: 15},  // " brown"
+		{Start: 15, End: 16}, // "\n"
+		{Start: 16, End: 19}, // "The"
+		{Start: 19, End: 25}, // " quick"
+		{Start: 25, End: 31}, // " brown"
+	}
+	if !spansEqual(enc.Spans, wantSpans) {
+		t.Errorf("Spans = %v, want %v", enc.Spans, wantSpans)
+	}
+
+	// Verify that text[span] actually corresponds to each token decoded text:
+	for i, id := range enc.IDs {
+		sp := enc.Spans[i]
+		if sp.Start == -1 && sp.End == -1 {
+			continue
+		}
+		if sp.Start < 0 || sp.End > len(text) || sp.Start > sp.End {
+			t.Errorf("token %d (%q): invalid span [%d, %d] for text length %d",
+				i, tok.Decode([]int{id}), sp.Start, sp.End, len(text))
+			continue
+		}
+		gotText := text[sp.Start:sp.End]
+		t.Logf("token %-9q span [%2d,%2d) -> text[span] = %q", tok.Decode([]int{id}), sp.Start, sp.End, gotText)
+	}
+}
+
