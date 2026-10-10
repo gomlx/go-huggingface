@@ -6,6 +6,85 @@ import (
 	"github.com/gomlx/go-huggingface/tokenizers/api"
 )
 
+func TestCleanText(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"hello world", "hello world"},
+		{"hello\tworld", "hello world"},
+		{"hello\nworld", "hello world"},
+		{"hello\x00world", "helloworld"}, // null char removed
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := cleanText(tt.input)
+			if got != tt.want {
+				t.Errorf("cleanText(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUnicodeNormalization(t *testing.T) {
+	// Test tokenizer with NFD normalizer
+	nfdTokenizerJSON := []byte(`{
+		"normalizer": {"type": "NFD"},
+		"pre_tokenizer": {"type": "Whitespace"},
+		"model": {
+			"type": "WordPiece",
+			"vocab": {"cafe": 1, "e": 2, "\u0301": 3},
+			"unk_token": ""
+		}
+	}`)
+
+	tok, err := NewFromContent(nil, nfdTokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	// "café" in NFC form (single é character) should be normalized to NFD (e + combining accent)
+	// The combining acute accent is U+0301
+	cafeNFC := "caf\u00e9"  // café with precomposed é
+	cafeNFD := "cafe\u0301" // café with e + combining acute accent
+
+	// After NFD normalization, both should produce the same result
+	ids1 := tok.Encode(cafeNFC)
+	ids2 := tok.Encode(cafeNFD)
+
+	if !intSliceEqual(ids1, ids2) {
+		t.Errorf("NFD normalization failed: Encode(%q) = %v, Encode(%q) = %v", cafeNFC, ids1, cafeNFD, ids2)
+	}
+}
+
+func TestNFKCNormalization(t *testing.T) {
+	// Test NFKC normalization (used by some models)
+	nfkcTokenizerJSON := []byte(`{
+		"normalizer": {"type": "NFKC"},
+		"pre_tokenizer": {"type": "Whitespace"},
+		"model": {
+			"type": "WordPiece",
+			"vocab": {"fi": 1},
+			"unk_token": ""
+		}
+	}`)
+
+	tok, err := NewFromContent(nil, nfkcTokenizerJSON)
+	if err != nil {
+		t.Fatalf("NewFromContent failed: %v", err)
+	}
+
+	// The fi ligature (U+FB01) should be normalized to "fi" by NFKC
+	fiLigature := "\ufb01" // ﬁ ligature
+
+	ids := tok.Encode(fiLigature)
+	// Should find "fi" in vocab after NFKC normalization
+	if len(ids) != 1 || ids[0] != 1 {
+		t.Errorf("NFKC normalization failed: Encode(%q) = %v, want [1]", fiLigature, ids)
+	}
+}
+
 // These tests guard against a byte/rune accounting bug in
 // applyNormalizerWithOffsets: the returned offsets slice must have exactly
 // one entry per BYTE of the returned normalized string, because downstream
@@ -350,4 +429,3 @@ func TestApplyNormalizerWithOffsets_Replace(t *testing.T) {
 		t.Errorf("offsets2 = %v, want %v", offsets2, wantOffsets2)
 	}
 }
-
