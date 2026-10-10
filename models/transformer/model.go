@@ -28,8 +28,9 @@ type Model struct {
 	Modules                   []ModuleConfig
 	PoolingConfig             *PoolingConfig
 
-	// useCausalMask: The KaLM paper says that the model is trained without a causal mask, but HuggingFace transformer
-	// leaves that on by default. We default to off, but we make it configurable via WithCausalMask.
+	// useCausalMask controls whether attention layers use a causal mask.
+	// Initialized automatically in LoadModel based on model configuration,
+	// and can be overridden via WithCausalMask.
 	useCausalMask bool
 
 	// Cached parameter count and bytes for Description
@@ -85,7 +86,81 @@ func LoadModel(repo *hub.Repo) (*Model, error) {
 		m.PoolingConfig = pc
 	}
 
+	m.useCausalMask = m.detectCausalMask()
+
 	return m, nil
+}
+
+// UseCausalMask returns whether causal masking will be used in attention layers.
+func (m *Model) UseCausalMask() bool {
+	return m.useCausalMask
+}
+
+// detectCausalMask inspects the loaded model configurations to determine whether
+// attention layers should use a causal mask.
+//
+// Decoder models (such as Gemma, LLaMA, GPT, etc.) and sentence embedding models
+// with last-token pooling default to true.
+// Bidirectional encoder models (such as BERT, RoBERTa, DeBERTa, etc.) default to false.
+// If unknown, it defaults to true (the standard for modern autoregressive models and GoMLX default).
+func (m *Model) detectCausalMask() bool {
+	// 1. Explicit is_decoder in config.Extra:
+	if isDecoderRaw, ok := m.Config.Extra["is_decoder"]; ok {
+		if isDecoder, ok := isDecoderRaw.(bool); ok {
+			return isDecoder
+		}
+	}
+
+	modelType := strings.ToLower(strings.TrimSpace(m.Config.ModelType))
+
+	// 2. Known bidirectional encoder types:
+	switch modelType {
+	case "bert", "roberta", "deberta", "deberta-v2", "distilbert", "albert", "electra", "camembert", "xlm-roberta", "modernbert":
+		return false
+	}
+
+	for _, arch := range m.Config.Architectures {
+		archLower := strings.ToLower(arch)
+		if strings.Contains(archLower, "bert") ||
+			strings.Contains(archLower, "roberta") ||
+			strings.Contains(archLower, "deberta") ||
+			strings.Contains(archLower, "electra") ||
+			strings.Contains(archLower, "albert") ||
+			strings.HasSuffix(archLower, "formaskedlm") {
+			return false
+		}
+	}
+
+	// 3. Known decoder types:
+	switch modelType {
+	case "gemma", "gemma2", "gemma3", "gemma3_text", "gemma4", "gemma4_text",
+		"llama", "mistral", "qwen", "qwen2", "qwen3", "gpt2", "gpt_neox", "opt",
+		"phi", "phi3", "starcoder", "starcoder2", "falcon", "deepseek":
+		return true
+	}
+
+	for _, arch := range m.Config.Architectures {
+		archLower := strings.ToLower(arch)
+		if strings.Contains(archLower, "causallm") ||
+			strings.Contains(archLower, "conditionalgeneration") ||
+			strings.Contains(archLower, "lmheadmodel") ||
+			strings.Contains(archLower, "gemma") ||
+			strings.Contains(archLower, "llama") ||
+			strings.Contains(archLower, "mistral") ||
+			strings.Contains(archLower, "qwen") ||
+			strings.Contains(archLower, "gpt2") ||
+			strings.Contains(archLower, "phi") {
+			return true
+		}
+	}
+
+	// 4. Sentence transformer pooling mode: last-token pooling is typically used for causal decoders.
+	if m.PoolingConfig != nil && m.PoolingConfig.PoolingModeLastToken {
+		return true
+	}
+
+	// 5. Default fallback to true (GoMLX default and modern autoregressive LLM default).
+	return true
 }
 
 // LoadStore uses models/safetensors to load the variables of the model into a GoMLX's [model.Store].
@@ -217,6 +292,7 @@ func (m *Model) Description() string {
 	if m.Config.NumKeyValueHeads > 0 {
 		sb.WriteString(fmt.Sprintf("KV Heads: %d\n", m.Config.NumKeyValueHeads))
 	}
+	sb.WriteString(fmt.Sprintf("Causal Mask: %v\n", m.useCausalMask))
 
 	// Calculate and summarize total parameters/bytes if we haven't already and safetensors index is available
 	if m.totalParameters == nil {

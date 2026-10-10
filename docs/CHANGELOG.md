@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- 2026/10/10:
+  - `models/transformer`: Fix `LoadModel` leaving causal mask off by default (fixes #65). `LoadModel` now automatically detects whether to use a causal mask based on the model configuration (true for decoders like Gemma, LLaMA, or KaLM; false for bidirectional encoders like BERT, falling back to true if unknown). Added `Model.UseCausalMask()`, package-level documentation, and updated/harmonized documentation and comments across the codebase.
+
 - 2026/09/15:
   - Cache and offline reliability improvements in `hub`:
     - Avoid re-downloading model revision info when it is already cached by default. Documented update polling via `DownloadInfo(true)`.

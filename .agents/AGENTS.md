@@ -174,8 +174,9 @@ When modifying or extending this repo, keep these specific architectural nuances
    - `hftokenizer.Model.UnmarshalJSON` explicitly handles both formats.
 
 7. **Transformer Causal Mask Defaults**:
-   - `transformer.Model` defaults causal masking to **true**.
-   - **Crucial**: Many sentence embedding models (such as KaLM-Gemma3) are bidirectional and trained *without* causal masks. For sentence embedders, always verify whether `hfModel.WithCausalMask(false)` must be explicitly called.
+   - `transformer.LoadModel` automatically detects whether to use a causal mask based on the loaded model configuration (`true` for autoregressive decoders like Gemma, LLaMA, or KaLM; `false` for bidirectional encoders like BERT).
+   - If unknown, it defaults to **true** (the standard for modern LLMs and the GoMLX default).
+   - Callers can inspect the setting via `hfModel.UseCausalMask()` and explicitly override it via `hfModel.WithCausalMask(bool)`.
 
 8. **Parquet 3-Level List Schema Compatibility (`ParquetFixListSchema`)**:
    - The Go `parquet-go` package expects repeated lists to follow a rigid standard schema with node names `"list"` and `"element"`.
