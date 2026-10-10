@@ -7,9 +7,9 @@ import (
 )
 
 // These tests guard against a byte/rune accounting bug in
-// applyNormalizerWithSpans: the returned offsets slice must have exactly
+// applyNormalizerWithOffsets: the returned offsets slice must have exactly
 // one entry per BYTE of the returned normalized string, because downstream
-// code (encodeCore, preTokenizeWithSpans, tokenizeWordWithSpans) treats
+// code (encodeCore, preTokenizeWithOffsets, tokenizeWordWithSpans) treats
 // offsets[i] as a direct byte-slice index into the normalized text.
 //
 // The bug: for a "BertNormalizer" configured like a real cased model
@@ -58,7 +58,7 @@ func assertOffsetsCoverBytes(t *testing.T, label, input, normalized string, offs
 	}
 }
 
-func TestApplyNormalizerWithSpans_BertNormalizer_AccentedLatin(t *testing.T) {
+func TestApplyNormalizerWithOffsets_BertNormalizer_AccentedLatin(t *testing.T) {
 	tok := &Tokenizer{}
 	n := bertNERNormalizer()
 
@@ -78,13 +78,13 @@ func TestApplyNormalizerWithSpans_BertNormalizer_AccentedLatin(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			normalized, offsets := tok.applyNormalizerWithSpans(tc.text, n)
+			normalized, offsets := tok.applyNormalizerWithOffsets(tc.text, n)
 			assertOffsetsCoverBytes(t, tc.name, tc.text, normalized, offsets)
 		})
 	}
 }
 
-func TestApplyNormalizerWithSpans_BertNormalizer_ChineseChars(t *testing.T) {
+func TestApplyNormalizerWithOffsets_BertNormalizer_ChineseChars(t *testing.T) {
 	tok := &Tokenizer{}
 	n := bertNERNormalizer()
 
@@ -99,23 +99,23 @@ func TestApplyNormalizerWithSpans_BertNormalizer_ChineseChars(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			normalized, offsets := tok.applyNormalizerWithSpans(tc.text, n)
+			normalized, offsets := tok.applyNormalizerWithOffsets(tc.text, n)
 			assertOffsetsCoverBytes(t, tc.name, tc.text, normalized, offsets)
 		})
 	}
 }
 
-// TestApplyNormalizerWithSpans_BertNormalizer_OffsetsResolveCorrectSubstring
+// TestApplyNormalizerWithOffsets_BertNormalizer_OffsetsResolveCorrectSubstring
 // goes one step further than byte-count parity: it confirms that for every
 // byte position in the normalized string, offsets[pos] actually points at
 // a byte position in the original text that is part of the SAME source
 // rune — i.e. the mapping is not just the right length, it is right.
-func TestApplyNormalizerWithSpans_BertNormalizer_OffsetsResolveCorrectSubstring(t *testing.T) {
+func TestApplyNormalizerWithOffsets_BertNormalizer_OffsetsResolveCorrectSubstring(t *testing.T) {
 	tok := &Tokenizer{}
 	n := bertNERNormalizer()
 
 	text := "Ștefan Popescu vizitează Bucureşti."
-	normalized, offsets := tok.applyNormalizerWithSpans(text, n)
+	normalized, offsets := tok.applyNormalizerWithOffsets(text, n)
 	assertOffsetsCoverBytes(t, "resolve-substring", text, normalized, offsets)
 
 	// Since strip_accents=false and lowercase=false, BertNormalizer with
@@ -147,14 +147,14 @@ func TestApplyNormalizerWithSpans_BertNormalizer_OffsetsResolveCorrectSubstring(
 	}
 }
 
-// TestApplyNormalizerWithSpans_Lowercase_MultiByteResult guards the same
+// TestApplyNormalizerWithOffsets_Lowercase_MultiByteResult guards the same
 // class of bug in the "Lowercase" branch: offsets must be filled one entry
 // per output BYTE, not one per output RUNE, even though the offsets slice
 // itself is (correctly) pre-sized to len(normalized) bytes. Before the fix
 // this branch didn't panic (bounds-checked) but silently left trailing
 // entries at their zero value for any text containing multi-byte
 // lowercased characters, corrupting the offset mapping.
-func TestApplyNormalizerWithSpans_Lowercase_MultiByteResult(t *testing.T) {
+func TestApplyNormalizerWithOffsets_Lowercase_MultiByteResult(t *testing.T) {
 	tok := &Tokenizer{}
 	n := &Normalizer{Type: "Lowercase"}
 
@@ -165,7 +165,7 @@ func TestApplyNormalizerWithSpans_Lowercase_MultiByteResult(t *testing.T) {
 	}
 	for _, text := range cases {
 		t.Run(text, func(t *testing.T) {
-			normalized, offsets := tok.applyNormalizerWithSpans(text, n)
+			normalized, offsets := tok.applyNormalizerWithOffsets(text, n)
 			assertOffsetsCoverBytes(t, text, text, normalized, offsets)
 			// No trailing zero-valued (unfilled) entries once real content
 			// has already advanced origPos past 0: every offset actually
@@ -276,6 +276,78 @@ func TestIssue67_GemmaReplaceNormalizerSpans(t *testing.T) {
 		}
 		gotText := text[sp.Start:sp.End]
 		t.Logf("token %-9q span [%2d,%2d) -> text[span] = %q", tok.Decode([]int{id}), sp.Start, sp.End, gotText)
+	}
+}
+
+func TestNormalizationType_StringAndParse(t *testing.T) {
+	types := []struct {
+		typ NormalizationType
+		str string
+	}{
+		{NormalizationLowercase, "Lowercase"},
+		{NormalizationBert, "BertNormalizer"},
+		{NormalizationNFD, "NFD"},
+		{NormalizationNFC, "NFC"},
+		{NormalizationNFKD, "NFKD"},
+		{NormalizationNFKC, "NFKC"},
+		{NormalizationStripAccents, "StripAccents"},
+		{NormalizationSequence, "Sequence"},
+		{NormalizationReplace, "Replace"},
+		{NormalizationPrepend, "Prepend"},
+	}
+
+	for _, tc := range types {
+		if tc.typ.String() != tc.str {
+			t.Errorf("%v.String() = %q, want %q", tc.typ, tc.typ.String(), tc.str)
+		}
+		if parsed := ParseNormalizationType(tc.str); parsed != tc.typ {
+			t.Errorf("ParseNormalizationType(%q) = %v, want %v", tc.str, parsed, tc.typ)
+		}
+		n := &Normalizer{Type: tc.str}
+		if n.NormalizationType() != tc.typ {
+			t.Errorf("Normalizer.NormalizationType() = %v, want %v", n.NormalizationType(), tc.typ)
+		}
+	}
+
+	if ParseNormalizationType("NonExistent") != NormalizationUnknown {
+		t.Errorf("ParseNormalizationType(unknown) should be NormalizationUnknown")
+	}
+}
+
+func TestApplyNormalizerWithOffsets_Replace(t *testing.T) {
+	tok := &Tokenizer{}
+
+	// Test literal string replacement: " " -> "▁"
+	nString := &Normalizer{
+		Type:    "Replace",
+		Pattern: &Pattern{String: " "},
+		Content: "▁",
+	}
+	text := "a b"
+	norm, offsets := tok.applyNormalizerWithOffsets(text, nString)
+	assertOffsetsCoverBytes(t, "replace-string", text, norm, offsets)
+	// norm is "a▁b", 5 bytes: 'a' (1) + '▁' (3) + 'b' (1)
+	wantOffsets := []int{0, 1, 1, 1, 2}
+	if !intSliceEqual(offsets, wantOffsets) {
+		t.Errorf("offsets = %v, want %v", offsets, wantOffsets)
+	}
+
+	// Test regex replacement: multiple digits to "NUM"
+	nRegex := &Normalizer{
+		Type:    "Replace",
+		Pattern: &Pattern{Regex: `\d+`},
+		Content: "NUM",
+	}
+	text2 := "page 123 end"
+	norm2, offsets2 := tok.applyNormalizerWithOffsets(text2, nRegex)
+	assertOffsetsCoverBytes(t, "replace-regex", text2, norm2, offsets2)
+	// "page NUM end"
+	// "page " (5 bytes: 0..4) -> 0, 1, 2, 3, 4
+	// "NUM" (3 bytes) -> 5, 5, 5
+	// " end" (4 bytes: 8..11) -> 8, 9, 10, 11
+	wantOffsets2 := []int{0, 1, 2, 3, 4, 5, 5, 5, 8, 9, 10, 11}
+	if !intSliceEqual(offsets2, wantOffsets2) {
+		t.Errorf("offsets2 = %v, want %v", offsets2, wantOffsets2)
 	}
 }
 

@@ -5,6 +5,20 @@ import (
 	"strings"
 )
 
+// spanForSubword returns the original text span [origStart, origEnd] for a subword
+// spanning bytes [startByte:endByte] within word.text.
+func (word *wordWithOffset) spanForSubword(startByte, endByte int) api.TokenSpan {
+	if len(word.offsets) == len(word.text) && endByte <= len(word.offsets) && startByte < endByte {
+		origStart := word.offsets[startByte]
+		origEnd := word.offsets[endByte-1] + 1
+		return api.TokenSpan{Start: origStart, End: origEnd}
+	}
+	return api.TokenSpan{
+		Start: word.start + startByte,
+		End:   word.start + endByte,
+	}
+}
+
 // tokenizeWordWithSpans tokenizes a single word and returns IDs with their offsets.
 func (t *Tokenizer) tokenizeWordWithSpans(word wordWithOffset) ([]int, []api.TokenSpan) {
 	// First check if word is an added token
@@ -78,11 +92,7 @@ func (t *Tokenizer) wordPieceTokenizeWithSpans(word wordWithOffset) ([]int, []ap
 				startByte := len(string(runes[:start]))
 				endByte := len(string(runes[:end]))
 
-				// Add the word's start offset to get positions in original text
-				origStart := word.start + startByte
-				origEnd := word.start + endByte
-
-				offsets = append(offsets, api.TokenSpan{Start: origStart, End: origEnd})
+				offsets = append(offsets, word.spanForSubword(startByte, endByte))
 				found = true
 				break
 			}
@@ -189,11 +199,7 @@ func (t *Tokenizer) bpeTokenizeWithSpans(word wordWithOffset) ([]int, []api.Toke
 		startByte := len(string(runes[:sym.start]))
 		endByte := len(string(runes[:sym.end]))
 
-		// Add the word's start offset to get positions in original text
-		origStart := word.start + startByte
-		origEnd := word.start + endByte
-
-		offsets = append(offsets, api.TokenSpan{Start: origStart, End: origEnd})
+		offsets = append(offsets, word.spanForSubword(startByte, endByte))
 	}
 
 	return ids, offsets
@@ -225,11 +231,7 @@ func (t *Tokenizer) unigramTokenizeWithSpans(word wordWithOffset) ([]int, []api.
 				startByte := len(string(runes[:start]))
 				endByte := len(string(runes[:end]))
 
-				// Add the word's start offset to get positions in original text
-				origStart := word.start + startByte
-				origEnd := word.start + endByte
-
-				offsets = append(offsets, api.TokenSpan{Start: origStart, End: origEnd})
+				offsets = append(offsets, word.spanForSubword(startByte, endByte))
 				found = true
 				start = end
 				break
@@ -243,16 +245,12 @@ func (t *Tokenizer) unigramTokenizeWithSpans(word wordWithOffset) ([]int, []api.
 			startByte := len(string(runes[:start]))
 			endByte := len(string(runes[:start+1]))
 
-			// Add the word's start offset to get positions in original text
-			origStart := word.start + startByte
-			origEnd := word.start + endByte
-
 			if id, ok := t.tokenizer.Model.Vocab[char]; ok {
 				ids = append(ids, id)
 			} else if t.unkID >= 0 {
 				ids = append(ids, t.unkID)
 			}
-			offsets = append(offsets, api.TokenSpan{Start: origStart, End: origEnd})
+			offsets = append(offsets, word.spanForSubword(startByte, endByte))
 			start++
 		}
 	}

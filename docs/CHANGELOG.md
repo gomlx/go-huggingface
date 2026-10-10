@@ -3,6 +3,11 @@
 ## Unreleased
 
 - 2026/10/10:
+  - `tokenizers/hftokenizer`: Fix token byte spans drifting when using Replace normalizer (fixes #67).
+    - Modularized normalization logic into `normalizer.go` and renamed `WithSpan` to `WithOffsets` to clarify the normalized-to-original byte mapping.
+    - Added `NormalizationType` enum with string conversion functions.
+    - Added `applyReplaceNormalizerWithOffsets` to accurately track byte offsets during string/regex replacement.
+    - Propagated byte offsets into `wordWithOffset` and updated subword tokenizers (`BPE`, `WordPiece`, `Unigram`) to compute token spans via `spanForSubword`.
   - `models/transformer`: Fix `LoadModel` leaving causal mask off by default (fixes #65). `LoadModel` now automatically detects whether to use a causal mask based on the model configuration (true for decoders like Gemma, LLaMA, or KaLM; false for bidirectional encoders like BERT, falling back to true if unknown). Added `Model.UseCausalMask()`, package-level documentation, and updated/harmonized documentation and comments across the codebase.
 
 - 2026/09/15:

@@ -1718,7 +1718,7 @@ func TestSplitPreTokenizerEmptyRegexIsolatesCharacters(t *testing.T) {
 		t.Fatalf("preTokenizeWithSpans() returned %d words, want %d: %+v", len(words), len(want), words)
 	}
 	for i := range want {
-		if words[i] != want[i] {
+		if words[i].text != want[i].text || words[i].start != want[i].start || words[i].end != want[i].end {
 			t.Errorf("preTokenizeWithSpans() word %d = %+v, want %+v", i, words[i], want[i])
 		}
 	}
