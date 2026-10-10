@@ -24,8 +24,6 @@ import (
 )
 
 var (
-	flagUseCausalMask = flag.Bool("use_causal_mask", true, "Use causal mask in the transformer: the paper suggests one shouldn't, "+
-		"but for testing it makes the result closer to Python's using HF transformer library, which seems to use it.")
 	flagListPrompts        = flag.Bool("prompts", false, "During initialization lists prompts from the dataset and exit immediately.")
 	flagSkipLoadingWeights = flag.Bool("skip_loading_weights", false, "Skip loading weights from the model.")
 )
@@ -90,7 +88,6 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	testModel = testModel.WithCausalMask(*flagUseCausalMask)
 	if *flagListPrompts {
 		fmt.Printf("Prompts:\n")
 		for _, taskCode := range testModel.RegisteredPromptTasks() {
