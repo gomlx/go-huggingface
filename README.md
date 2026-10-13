@@ -305,8 +305,6 @@ Tokens:  	[101 1996 2338 2003 2006 1996 2795 1012 102 0 0 0…]
 
 **Package**: `github.com/gomlx/go-huggingface/models/transformer`
 
-> 🚧 **EXPERIMENTAL**: fresh from the oven, and likely only works for a few models now, but it should be easy to extend the support for other models -- feel free add an issue to any model you want to use.
-
 The `models/transformer` package allows downloading and inspecting HuggingFace transformer models, reading their configurations and weights, and building a `GoMLX` computation graph dynamically based on the model architectures (such as `sentence_transformers` pipelines).
 
 ### Example with `tencent/KaLM-Embedding-Gemma3-12B-2511`
@@ -347,6 +345,87 @@ tokens := tokenzier.Encode(prompt)
 embeddings := kalmExec.MustCall(tokens)
 
 //...
+```
+
+### Fine-Tuning, Checkpoints, and Offline Model Distribution
+
+When fine-tuning a transformer model with GoMLX, model variables are saved by GoMLX's checkpointing system ([`checkpoint.Handler`](https://pkg.go.dev/github.com/gomlx/gomlx/ml/model/checkpoint)). To make checkpoints fully self-contained and reloadable without re-downloading original base weights from HuggingFace Hub, `models/transformer` can export the model configuration and tokenizer files directly into the checkpoint directory.
+
+#### Saving Configurations to a Checkpoint Directory
+
+During training or setup, call `SaveToCheckpoint` to export all configuration files (`config.json`, `generation_config.json`, `modules.json`, etc.) and tokenizer files (`tokenizer.json`, `tokenizer_config.json`, `vocab.txt`, `*.model`) into a dedicated `hf/` sub-directory within the checkpoint directory:
+
+```go
+// Export configuration and tokenizer files into checkpointDir/hf:
+err := hfModel.SaveToCheckpoint(checkpointDir)
+if err != nil { panic(err) }
+```
+
+> **Alternative**: Use `hfModel.SaveConfigs(customDir)` to export configurations to an arbitrary directory if you are not using a standard GoMLX checkpoint directory.
+
+#### Loading a Model from a Checkpoint
+
+When reloading a saved model (for resumed training, evaluation, or inference), reload the architecture directly from the checkpoint directory. You **do not** need to re-download the base model or call `LoadStore`, as the fine-tuned weights are restored directly by GoMLX's checkpoint handler:
+
+```go
+import (
+	"github.com/gomlx/go-huggingface/models/transformer"
+	"github.com/gomlx/gomlx/ml/model"
+	"github.com/gomlx/gomlx/ml/model/checkpoint"
+)
+
+// 1. Rebuild the model architecture from the checkpoint's hf/ directory (no network access required):
+hfModel, err := transformer.LoadModelFromCheckpoint(checkpointDir)
+if err != nil { panic(err) }
+
+// 2. Load the fine-tuned weights from the GoMLX checkpoint into the store:
+store := model.NewStore()
+_, err = checkpoint.Build(store).Dir(checkpointDir).Done()
+if err != nil { panic(err) }
+
+// 3. The tokenizer is also immediately available from the checkpoint:
+tokenizer, err := hfModel.GetTokenizer()
+```
+
+If your training script calls `hfModel.LoadStore(backend, store)` unconditionally, `LoadStore` automatically checks whether variables already exist in `store` (e.g., from a restored checkpoint). Existing checkpoint weights are preserved, and unneeded base weights are released immediately without leaking memory.
+
+#### Packaging and Loading from In-Memory / Embedded Filesystems (`fs.FS`)
+
+You can package your checkpoint and its `hf/` directory into a `.zip` archive or embed them into your binary with Go's `//go:embed`, and load the model directly with `LoadModelFromFS`:
+
+```go
+import (
+	"archive/zip"
+	"bytes"
+	_ "embed"
+	"io/fs"
+
+	"github.com/gomlx/go-huggingface/models/transformer"
+	"github.com/gomlx/gomlx/ml/model"
+	"github.com/gomlx/gomlx/ml/model/checkpoint"
+)
+
+//go:embed model_checkpoint.zip
+var zipBytes []byte
+
+func LoadModel() (*transformer.Model, *model.Store, error) {
+	// In Go 1.16+, *zip.Reader implements io/fs.FS:
+	zipReader, err := zip.NewReader(bytes.NewReader(zipBytes), int64(len(zipBytes)))
+	if err != nil { return nil, nil, err }
+
+	// Load model architecture directly from the zip filesystem:
+	hfModel, err := transformer.LoadModelFromFS(zipReader, "")
+	if err != nil { return nil, nil, err }
+
+	// Restore checkpoint weights from the embedded archive:
+	store := model.NewStore()
+	chkJSON, _ := fs.ReadFile(zipReader, "checkpoint.json")
+	chkBin, _ := fs.ReadFile(zipReader, "checkpoint.bin")
+	err = checkpoint.Build(store).FromEmbed(string(chkJSON), chkBin).Done()
+	if err != nil { return nil, nil, err }
+
+	return hfModel, store, nil
+}
 ```
 
 

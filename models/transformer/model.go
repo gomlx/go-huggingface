@@ -210,6 +210,13 @@ func (m *Model) LoadStoreFiltered(backend compute.Backend, store *model.Store, f
 			continue
 		}
 
+		if store.GetVariable(fullPath) != nil {
+			// Variable is already initialized in store (e.g. loaded from checkpoint).
+			// Do not overwrite it with base weights, and free the unused tensor immediately.
+			tensorToLoad.FinalizeAll()
+			continue
+		}
+
 		// Track size
 		shape := tensorToLoad.Shape()
 		totalParams += int64(shape.Size())
@@ -240,7 +247,7 @@ func (m *Model) LoadStoreFiltered(backend compute.Backend, store *model.Store, f
 
 	if tieEmbeddings {
 		embedVar := store.GetVariable("/token_embed/embeddings")
-		if embedVar != nil {
+		if embedVar != nil && store.GetVariable("/output/dense/weights") == nil {
 			embedTensor, err := embedVar.Value()
 			if err != nil {
 				return err

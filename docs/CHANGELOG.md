@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- 2026/10/12:
+  - `models/transformer`: Support saving and reloading fine-tuned models with GoMLX checkpoints and embedded filesystems.
+    - Added `Model.SaveConfigs(dir)` and `Model.SaveToCheckpoint(checkpointDir)` to export model and tokenizer configurations into a standalone directory or into the `hf/` sub-directory of a GoMLX checkpoint.
+    - Added `LoadModelFromCheckpoint(checkpointDir)` to reload model configurations directly from a checkpoint directory without needing to re-download base weights.
+    - Added `LoadModelFromFS(fsys, subDir)` to load model configurations directly from in-memory and embedded filesystems (`embed.FS`, `*zip.Reader`, etc.).
+    - Updated `LoadStoreFiltered` to check if a variable is already loaded in `model.Store` (e.g. from a checkpoint), preventing fine-tuned weights from being overwritten by base model safetensors and finalizing unused tensors to avoid memory leaks.
+
 - 2026/10/10:
   - `tokenizers/hftokenizer`: Fix token byte spans drifting when using Replace normalizer (fixes #67).
     - Modularized normalization logic into `normalizer.go` and renamed `WithSpan` to `WithOffsets` to clarify the normalized-to-original byte mapping.
