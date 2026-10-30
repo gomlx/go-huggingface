@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- 2026/10/30:
+  - `hub`: Resolve symlinks via `filepath.EvalSymlinks` in `Repo.Save` / `Repo.SaveCtx` when `linkOnly=true` so hard links point to the underlying blob files rather than copying relative snapshot symlinks.
+
 - 2026/10/12:
   - `models/transformer`: Support saving and reloading fine-tuned models with GoMLX checkpoints and embedded filesystems.
     - Added `Model.SaveConfigs(dir)` and `Model.SaveToCheckpoint(checkpointDir)` to export model and tokenizer configurations into a standalone directory or into the `hf/` sub-directory of a GoMLX checkpoint.

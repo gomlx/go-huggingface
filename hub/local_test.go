@@ -180,3 +180,41 @@ func TestDeleteCache_LocalRepoFails(t *testing.T) {
 	assert.Contains(t, err.Error(), "cannot DeleteCache of a local repository")
 }
 
+func TestSave_LinkOnlyResolvesSymlinks(t *testing.T) {
+	tempCacheDir := t.TempDir()
+	repo := New("test/model").
+		WithCacheDir(tempCacheDir).
+		WithEndpoint("http://invalid.unreachable.endpoint")
+
+	cacheDir, err := repo.repoCacheDir()
+	require.NoError(t, err)
+
+	commitHash := "0123456789abcdef0123456789abcdef01234567"
+	infoDir := filepath.Join(cacheDir, "info")
+	require.NoError(t, os.MkdirAll(infoDir, 0755))
+	infoJSON := `{"id":"test/model","sha":"` + commitHash + `","siblings":[{"rfilename":"config.json","size":19}]}`
+	require.NoError(t, os.WriteFile(filepath.Join(infoDir, "main"), []byte(infoJSON), 0644))
+
+	blobsDir := filepath.Join(cacheDir, "blobs")
+	require.NoError(t, os.MkdirAll(blobsDir, 0755))
+	blobPath := filepath.Join(blobsDir, "etag123")
+	require.NoError(t, os.WriteFile(blobPath, []byte(`{"model_type":"ok"}`), 0644))
+
+	snapshotDir := filepath.Join(cacheDir, "snapshots", commitHash)
+	require.NoError(t, os.MkdirAll(snapshotDir, 0755))
+	require.NoError(t, createSymLink(filepath.Join(snapshotDir, "config.json"), blobPath))
+
+	targetDir := filepath.Join(tempCacheDir, "saved")
+	require.NoError(t, repo.Save(targetDir, true))
+
+	savedFile := filepath.Join(targetDir, "config.json")
+	fi, err := os.Lstat(savedFile)
+	require.NoError(t, err)
+	assert.Zero(t, fi.Mode()&os.ModeSymlink, "saved file with linkOnly=true should be a regular hard-linked file, not a symlink")
+
+	data, err := os.ReadFile(savedFile)
+	require.NoError(t, err)
+	assert.Equal(t, `{"model_type":"ok"}`, string(data))
+}
+
+
