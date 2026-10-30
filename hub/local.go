@@ -215,15 +215,17 @@ func (r *Repo) SaveCtx(ctx context.Context, dirPath string, linkOnly bool) error
 			return errors.Wrapf(err, "failed to create directory for %q", dst)
 		}
 
-		if files.Exists(dst) {
-			if err := os.Remove(dst); err != nil {
-				return errors.Wrapf(err, "failed to remove existing file %q before overwriting", dst)
-			}
+		if err := os.Remove(dst); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return errors.Wrapf(err, "failed to remove existing file %q before overwriting", dst)
 		}
 
 		if linkOnly {
-			if err := os.Link(src, dst); err != nil {
-				return errors.Wrapf(err, "failed to create hard link from %q to %q", src, dst)
+			realSrc, err := filepath.EvalSymlinks(src)
+			if err != nil {
+				return errors.Wrapf(err, "failed to resolve symlink %q", src)
+			}
+			if err := os.Link(realSrc, dst); err != nil {
+				return errors.Wrapf(err, "failed to create hard link from %q to %q", realSrc, dst)
 			}
 		} else {
 			if err := copyFile(src, dst); err != nil {
