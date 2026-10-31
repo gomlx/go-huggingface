@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- 2026/10/31:
+  - `models/timestral`: Added native GoMLX support for Mistral AI's Timestral time-series foundation models (`mistralai/Timestral-5M`, `mistralai/Timestral-28M`, `mistralai/Timestral-123M`, `mistralai/Timestral-209M`, and any compatible `*hub.Repo`), including causal Welford per-patch scaling with `asinh`, Decoupled Horizon Forecasting (DHF) two-stream time/variate attention masks, partial Sin/Cos RoPE, monotone softplus quantile heads, advancing block frame refinement, block-autoregressive decoding, `clampsym` symmetric averaging, and numerical/categorical covariates (`TargetEncode`).
+  - `examples/timestral`: Added CLI tool and PyTorch reference accuracy test for native GoMLX Timestral forecasting.
+
 - 2026/10/30:
   - `hub`: Resolve symlinks via `filepath.EvalSymlinks` in `Repo.Save` / `Repo.SaveCtx` when `linkOnly=true` so hard links point to the underlying blob files rather than copying relative snapshot symlinks.
 
