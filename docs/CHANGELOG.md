@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- 2026/10/31:
+  - `models/timestral`: Added architectural and API design document (`models/timestral/README.md`) for native GoMLX Timestral time-series foundation models.
+
 - 2026/10/30:
   - `hub`: Resolve symlinks via `filepath.EvalSymlinks` in `Repo.Save` / `Repo.SaveCtx` when `linkOnly=true` so hard links point to the underlying blob files rather than copying relative snapshot symlinks.
 
