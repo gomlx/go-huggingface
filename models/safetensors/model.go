@@ -1,6 +1,8 @@
 package safetensors
 
 import (
+	"runtime"
+
 	"github.com/gomlx/compute/shapes"
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/gomlx/core/tensors"
@@ -14,6 +16,48 @@ type Model struct {
 	IndexFile string
 	Index     *ShardedModelIndex
 	Headers   map[string]*Header // ".safetensor" filename -> parsed header
+
+	useMMapSet bool
+	useMMap    bool
+}
+
+// DefaultUseMMap returns whether memory-mapped file reading (mmap) is supported and enabled by default
+// on the current platform. It returns true on platforms that support mmap (Linux, macOS, Windows, BSDs, Solaris)
+// and false on platforms that do not (such as js/wasm, wasip1, and plan9).
+func DefaultUseMMap() bool {
+	switch runtime.GOOS {
+	case "js", "wasip1", "plan9":
+		return false
+	default:
+		return true
+	}
+}
+
+// WithMMap configures whether to use memory-mapped files (mmap) when reading tensors,
+// as opposed to standard file I/O.
+//
+// It defaults to true in platforms that support it (e.g., Linux, macOS, Windows),
+// and false on platforms that do not (e.g., WebAssembly, Plan 9).
+//
+// When useMMap is false, tensors are read using standard file I/O (ReadAt), which uses the OS kernel's
+// page cache for buffering rather than mapping the weights file into the process's address space
+// (avoiding adding the file size to the process's Resident Set Size / RSS).
+func (m *Model) WithMMap(useMMap bool) *Model {
+	if !DefaultUseMMap() {
+		useMMap = false
+	}
+	m.useMMapSet = true
+	m.useMMap = useMMap
+	return m
+}
+
+// UseMMap returns whether memory-mapped file reading is enabled for this model.
+// It defaults to true in platforms that support it.
+func (m *Model) UseMMap() bool {
+	if m.useMMapSet {
+		return m.useMMap
+	}
+	return DefaultUseMMap()
 }
 
 // ShardedModelIndex represents a model.safetensors.index.json file for sharded models.
@@ -38,7 +82,9 @@ func New(repo *hub.Repo) (*Model, error) {
 // Call Model.Load() to load the model header(s).
 func NewEmpty(repo *hub.Repo) *Model {
 	return &Model{
-		Repo: repo,
+		Repo:       repo,
+		useMMapSet: true,
+		useMMap:    DefaultUseMMap(),
 	}
 }
 

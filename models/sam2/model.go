@@ -22,14 +22,45 @@ type Model struct {
 	Repo   *hub.Repo
 	Config *Config
 
+	useMMapSet      bool
+	useMMap         bool
 	totalParameters *int64
 	totalBytes      *int64
+}
+
+// WithMMap configures whether to use memory-mapped files (mmap) when reading tensors,
+// as opposed to standard file I/O.
+//
+// It defaults to true in platforms that support it (e.g., Linux, macOS, Windows),
+// and false on platforms that do not (e.g., WebAssembly, Plan 9).
+//
+// When useMMap is false, tensors are read using standard file I/O (ReadAt), which uses the OS kernel's
+// page cache for buffering rather than mapping the weights file into the process's address space
+// (avoiding adding the file size to the process's Resident Set Size / RSS).
+func (m *Model) WithMMap(useMMap bool) *Model {
+	if !safetensors.DefaultUseMMap() {
+		useMMap = false
+	}
+	m.useMMapSet = true
+	m.useMMap = useMMap
+	return m
+}
+
+// UseMMap returns whether memory-mapped file reading is enabled for this model.
+// It defaults to true in platforms that support it.
+func (m *Model) UseMMap() bool {
+	if m.useMMapSet {
+		return m.useMMap
+	}
+	return safetensors.DefaultUseMMap()
 }
 
 // LoadModel loads the config.json and returns a Model.
 func LoadModel(repo *hub.Repo) (*Model, error) {
 	m := &Model{
-		Repo: repo,
+		Repo:       repo,
+		useMMapSet: true,
+		useMMap:    safetensors.DefaultUseMMap(),
 	}
 
 	path, err := repo.DownloadFile("config.json")
@@ -158,7 +189,7 @@ func (m *Model) LoadStore(backend compute.Backend, store *model.Store) error {
 	var totalParams int64
 	var totalBytes int64
 
-	for tensorAndName, err := range safetensors.IterTensorsFromRepo(backend, m.Repo) {
+	for tensorAndName, err := range safetensors.IterTensorsFromRepoWithMMap(backend, m.Repo, m.UseMMap()) {
 		if err != nil {
 			return errors.WithMessagef(err, "failed loading variables of model %q", m.Repo.ID)
 		}

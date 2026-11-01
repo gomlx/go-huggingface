@@ -19,6 +19,7 @@ import (
 
 type fileRef struct {
 	f        *os.File
+	fileSize int64
 	mmap     mmap.MMap
 	refCount atomic.Int32
 	mu       sync.Mutex
@@ -48,11 +49,13 @@ type iterTensorData struct {
 	tensor     *tensors.Tensor
 	shape      shapes.Shape
 	readBuffer []byte
+	offset     int64
 	err        error
 	fileRef    *fileRef
 }
 
-// IterTensorsFromRepo iterates over all tensors in the repository.
+// IterTensorsFromRepo iterates over all tensors in the repository using the platform's default mmap setting
+// (see [DefaultUseMMap]).
 //
 // Tensors are loaded into the backend directly (e.g.: GPU, or a shared memory tensor on CPU, etc).
 // If the backend is nil, it instead loads them in host memory.
@@ -60,6 +63,18 @@ type iterTensorData struct {
 // This is a more performant version of `Model.IterTensors` that avoids the overhead of creating a `Model` struct and
 // parallelizes allocations and copying around.
 func IterTensorsFromRepo(backend compute.Backend, repo *hub.Repo) func(yield func(TensorAndName, error) bool) {
+	return IterTensorsFromRepoWithMMap(backend, repo, DefaultUseMMap())
+}
+
+// IterTensorsFromRepoWithMMap iterates over all tensors in the repository, optionally using memory-mapped files (mmap)
+// or standard file I/O (ReadAt) when useMMap is false.
+//
+// Tensors are loaded into the backend directly (e.g.: GPU, or a shared memory tensor on CPU, etc).
+// If the backend is nil, it instead loads them in host memory.
+func IterTensorsFromRepoWithMMap(backend compute.Backend, repo *hub.Repo, useMMap bool) func(yield func(TensorAndName, error) bool) {
+	if !DefaultUseMMap() {
+		useMMap = false
+	}
 	return func(yield func(TensorAndName, error) bool) {
 		done := make(chan struct{})
 		var wg sync.WaitGroup
@@ -78,7 +93,7 @@ func IterTensorsFromRepo(backend compute.Backend, repo *hub.Repo) func(yield fun
 		defer close(done)
 
 		chDevice := make(chan iterTensorData, 10)
-		wg.Go(func() { iterFromRepoDownload(backend, repo, done, chDevice, &openFiles, &filesMu) })
+		wg.Go(func() { iterFromRepoDownload(backend, repo, useMMap, done, chDevice, &openFiles, &filesMu) })
 
 		chOut := make(chan iterTensorData, 100)
 		wg.Go(func() { iterFromRepoToDevice(backend, done, chDevice, chOut) })
@@ -95,12 +110,12 @@ func IterTensorsFromRepo(backend compute.Backend, repo *hub.Repo) func(yield fun
 	}
 }
 
-func iterFromRepoDownload(backend compute.Backend, repo *hub.Repo, done <-chan struct{}, chDevice chan<- iterTensorData, openFiles *[]*fileRef, filesMu *sync.Mutex) {
+func iterFromRepoDownload(backend compute.Backend, repo *hub.Repo, useMMap bool, done <-chan struct{}, chDevice chan<- iterTensorData, openFiles *[]*fileRef, filesMu *sync.Mutex) {
 	start := time.Now()
 	var waitTime time.Duration
 	if klog.V(1).Enabled() {
 		defer func() {
-			klog.Infof(" - Repo download / Mmap open time: %s (of which %s is waiting)", time.Since(start), waitTime)
+			klog.Infof(" - Repo download / File open time (mmap=%v): %s (of which %s is waiting)", useMMap, time.Since(start), waitTime)
 		}()
 	}
 	defer close(chDevice)
@@ -156,14 +171,25 @@ func iterFromRepoDownload(backend compute.Backend, repo *hub.Repo, done <-chan s
 			return
 		}
 
-		mmapBuf, err := mmap.Map(openFile, mmap.RDONLY, 0)
+		fi, err := openFile.Stat()
 		if err != nil {
 			openFile.Close()
-			reportErrFn(errors.Wrapf(err, "failed to mmap %s", localPath))
+			reportErrFn(errors.Wrapf(err, "failed to stat %s", localPath))
 			return
 		}
+		fileSize := fi.Size()
 
-		fr := &fileRef{f: openFile, mmap: mmapBuf}
+		var mmapBuf mmap.MMap
+		if useMMap && fileSize > 0 {
+			mmapBuf, err = mmap.Map(openFile, mmap.RDONLY, 0)
+			if err != nil {
+				openFile.Close()
+				reportErrFn(errors.Wrapf(err, "failed to mmap %s", localPath))
+				return
+			}
+		}
+
+		fr := &fileRef{f: openFile, fileSize: fileSize, mmap: mmapBuf}
 		fr.refCount.Store(int32(len(tensorNames)))
 
 		filesMu.Lock()
@@ -173,6 +199,11 @@ func iterFromRepoDownload(backend compute.Backend, repo *hub.Repo, done <-chan s
 		if len(tensorNames) == 0 {
 			fr.Close()
 			continue
+		}
+
+		dataSize := fr.fileSize
+		if fr.mmap != nil {
+			dataSize = int64(len(fr.mmap))
 		}
 
 		for _, name := range tensorNames {
@@ -190,16 +221,24 @@ func iterFromRepoDownload(backend compute.Backend, repo *hub.Repo, done <-chan s
 			}
 
 			// data_offsets are from the untrusted file header; validate they
-			// fall within the mapped data before slicing to avoid a
+			// fall within the file/mapped data before slicing or reading to avoid a
 			// slice-out-of-range panic on a crafted header.
 			tensorOffset := dataOffset + meta.DataOffsets[0]
 			tensorEnd := dataOffset + meta.DataOffsets[1]
-			if tensorOffset < 0 || tensorEnd < tensorOffset || tensorEnd > int64(len(fr.mmap)) {
-				reportErrFn(errors.Errorf("tensor %q data offsets [%d:%d] out of range for %d-byte data section", name, tensorOffset, tensorEnd, int64(len(fr.mmap))))
+			expectedBytes := int64(shape.ByteSize())
+			if tensorEnd-tensorOffset != expectedBytes {
+				reportErrFn(errors.Errorf("tensor %q shape %s expected %d bytes, but got %d bytes in file", name, shape, expectedBytes, tensorEnd-tensorOffset))
+				return
+			}
+			if tensorOffset < 0 || tensorEnd < tensorOffset || tensorEnd > dataSize {
+				reportErrFn(errors.Errorf("tensor %q data offsets [%d:%d] out of range for %d-byte data section", name, tensorOffset, tensorEnd, dataSize))
 				return
 			}
 
-			readBuffer := fr.mmap[tensorOffset:tensorEnd]
+			var readBuffer []byte
+			if fr.mmap != nil {
+				readBuffer = fr.mmap[tensorOffset:tensorEnd]
+			}
 
 			waitStart = time.Now()
 			select {
@@ -211,6 +250,7 @@ func iterFromRepoDownload(backend compute.Backend, repo *hub.Repo, done <-chan s
 				tensor:     nil,
 				shape:      shape,
 				readBuffer: readBuffer,
+				offset:     tensorOffset,
 				fileRef:    fr,
 			}:
 				waitTime += time.Since(waitStart)
@@ -240,6 +280,7 @@ func iterFromRepoToDevice(backend compute.Backend, done <-chan struct{}, chDevic
 			}()
 
 			var waitStart time.Time
+			var scratchBuf []byte
 
 			for {
 				waitStart = time.Now()
@@ -265,11 +306,17 @@ func iterFromRepoToDevice(backend compute.Backend, done <-chan struct{}, chDevic
 						return
 					}
 
-					data.tensor, data.err = tensors.FromRaw(backend, 0, data.shape, data.readBuffer)
-					if data.err != nil {
-						data.err = errors.WithMessagef(data.err,
-							"failed to create tensor %q (%s) from bytes",
-							data.name, data.shape)
+					if data.fileRef != nil && data.fileRef.mmap != nil {
+						data.tensor, data.err = tensors.FromRaw(backend, 0, data.shape, data.readBuffer)
+						if data.err != nil {
+							data.err = errors.WithMessagef(data.err,
+								"failed to create tensor %q (%s) from bytes",
+								data.name, data.shape)
+						}
+					} else if data.fileRef != nil && data.fileRef.f != nil {
+						data.tensor, data.err = readTensorFromFileAt(backend, data.fileRef.f, data.name, data.shape, data.offset, &scratchBuf)
+					} else {
+						data.err = errors.New("file is not open or mmaped")
 					}
 
 					if data.fileRef != nil {
