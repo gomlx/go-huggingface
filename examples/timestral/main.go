@@ -28,6 +28,7 @@ import (
 	_ "github.com/gomlx/compute/gobackend" // registers the pure Go backend "go"
 	"github.com/gomlx/compute/shapes"
 	"github.com/gomlx/go-huggingface/hub"
+	"github.com/gomlx/go-huggingface/models/safetensors"
 	"github.com/gomlx/go-huggingface/models/timestral"
 	_ "github.com/gomlx/gomlx/backends/default"
 	"github.com/gomlx/gomlx/core/graph"
@@ -45,6 +46,7 @@ func main() {
 	contextSteps := flag.Int("context-steps", 12096, "Number of context steps (default: 42 days at 5-min intervals)")
 	horizonSteps := flag.Int("horizon-steps", 864, "Number of horizon steps (default: 72 hours at 5-min intervals)")
 	backendConfig := flag.String("backend", "go", "GoMLX backend config")
+	useMMap := flag.Bool("mmap", safetensors.DefaultUseMMap(), "Use memory-mapped files (mmap) when loading weights")
 	runs := flag.Int("runs", 5, "Timed runs after the first (warm-up) one")
 	flag.Parse()
 
@@ -64,38 +66,42 @@ func main() {
 	t0 := time.Now()
 	backend := must1(compute.NewWithConfig(*backendConfig))
 	repo := openRepo(*modelID)
-	tmModel := must1(timestral.LoadModel(repo))
+	tmModel := must1(timestral.LoadModel(repo)).WithMMap(*useMMap)
 	numQuantiles := tmModel.Config.NumQuantiles()
 
-	fmt.Printf("%s: context %d, horizon %d, %d quantiles, batch %d, backend %q, GOMAXPROCS %d\n",
-		*modelID, *contextSteps, *horizonSteps, numQuantiles, batch, *backendConfig, runtime.GOMAXPROCS(0))
+	fmt.Printf("%s: context %d, horizon %d, %d quantiles, batch %d, backend %q, mmap %v, GOMAXPROCS %d\n",
+		*modelID, *contextSteps, *horizonSteps, numQuantiles, batch, *backendConfig, tmModel.UseMMap(), runtime.GOMAXPROCS(0))
 
-	// Load weights into store with WithVariableAsConst(true) so weights are baked into the compiled graph.
-	store := mlmodel.NewStore().WithVariableAsConst(true)
+	// Load weights into store and donate it to exec so weights are converted to shared backend
+	// constants and released from the Store automatically.
+	store := mlmodel.NewStore()
 	must(tmModel.LoadStore(backend, store))
+	for range 3 {
+		runtime.GC()
+	}
 
 	exec := must1(mlmodel.NewExec(backend, store, func(scope *mlmodel.Scope, x *graph.Node) *graph.Node {
 		return tmModel.BuildGraph(scope, x, *horizonSteps).
 			SymmetricAveraging(false).
 			ClipNonNegative(false).
 			Done()
-	}))
+	})).DonateStore()
 
-	// Compile only the (batch, contextSteps) shape, then release the variable store.
+	// Compile the (batch, contextSteps) shape.
 	must1(exec.Compile(shapes.Make(dtypes.Float32, batch, *contextSteps)))
-	store.Finalize()
 	debug.FreeOSMemory()
-	fmt.Printf("load + compile: %.2fs, max RSS %.2f GB\n", time.Since(t0).Seconds(), maxRSS())
+	fmt.Printf("load + compile: %.2fs, live %.2f GB, max RSS %.2f GB\n", time.Since(t0).Seconds(), liveMem(), maxRSS())
 
 	labelName := filepath.Base(*modelID)
 
 	fmt.Println()
-	fmt.Println("| Obs | Model | Run | Wall | CPU Time | Cores | Max Abs Diff vs PyTorch | Max RSS |")
-	fmt.Println("| --- | --- | :--- | ---: | ---: | ---: | ---: | ---: |")
+	fmt.Println("| Obs | Model | Run | Wall | CPU Time | Cores | Max Abs Diff vs PyTorch | Live Mem | Max RSS |")
+	fmt.Println("| --- | --- | :--- | ---: | ---: | ---: | ---: | ---: | ---: |")
 	var (
 		bestDt    time.Duration
 		bestDc    time.Duration
 		bestCheck string
+		bestLive  float64
 		bestRSS   float64
 	)
 	for r := range *runs + 1 {
@@ -115,23 +121,28 @@ func main() {
 			}
 			check = fmt.Sprintf("%.2g", diff)
 		}
+		for range 3 {
+			runtime.GC()
+		}
+		live := liveMem()
 		rss := maxRSS()
 		if r >= 1 && (bestDt == 0 || dt < bestDt) {
 			bestDt = dt
 			bestDc = dc
 			bestCheck = check
+			bestLive = live
 			bestRSS = rss
 		}
 		label := fmt.Sprintf("run %d", r)
 		if r == 0 {
 			label = "warm-up"
 		}
-		fmt.Printf("| %s | %s | %-7s | %.3fs | %.3fs | %.1f | %s | %.2f GB |\n",
-			*obs, labelName, label, dt.Seconds(), dc.Seconds(), dc.Seconds()/dt.Seconds(), check, rss)
+		fmt.Printf("| %s | %s | %-7s | %.3fs | %.3fs | %.1f | %s | %.2f GB | %.2f GB |\n",
+			*obs, labelName, label, dt.Seconds(), dc.Seconds(), dc.Seconds()/dt.Seconds(), check, live, rss)
 	}
 	if *runs >= 1 {
-		fmt.Printf("| %s | %s | %-7s | %.3fs | %.3fs | %.1f | %s | %.2f GB |\n",
-			*obs, labelName, "best", bestDt.Seconds(), bestDc.Seconds(), bestDc.Seconds()/bestDt.Seconds(), bestCheck, bestRSS)
+		fmt.Printf("| %s | %s | %-7s | %.3fs | %.3fs | %.1f | %s | %.2f GB | %.2f GB |\n",
+			*obs, labelName, "best", bestDt.Seconds(), bestDc.Seconds(), bestDc.Seconds()/bestDt.Seconds(), bestCheck, bestLive, bestRSS)
 	}
 }
 
@@ -177,6 +188,12 @@ func decodeF32Bytes(b []byte) []float32 {
 		out[i] = math.Float32frombits(binary.LittleEndian.Uint32(b[4*i:]))
 	}
 	return out
+}
+
+func liveMem() float64 {
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	return float64(ms.HeapAlloc) / 1e9
 }
 
 func maxRSS() float64 {
