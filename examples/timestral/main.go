@@ -76,9 +76,6 @@ func main() {
 	// constants and released from the Store automatically.
 	store := mlmodel.NewStore()
 	must(tmModel.LoadStore(backend, store))
-	for range 3 {
-		runtime.GC()
-	}
 
 	exec := must1(mlmodel.NewExec(backend, store, func(scope *mlmodel.Scope, x *graph.Node) *graph.Node {
 		return tmModel.BuildGraph(scope, x, *horizonSteps).
@@ -120,9 +117,6 @@ func main() {
 				diff = max(diff, math.Abs(float64(v)-float64(reference[i])))
 			}
 			check = fmt.Sprintf("%.2g", diff)
-		}
-		for range 3 {
-			runtime.GC()
 		}
 		live := liveMem()
 		rss := maxRSS()
