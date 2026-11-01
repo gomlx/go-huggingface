@@ -33,6 +33,10 @@ type Model struct {
 	// and can be overridden via WithCausalMask.
 	useCausalMask bool
 
+	// useMMapSet and useMMap control whether safetensors weights are loaded via mmap or standard file I/O.
+	useMMapSet bool
+	useMMap    bool
+
 	// Cached parameter count and bytes for Description
 	totalParameters *int64
 	totalBytes      *int64
@@ -41,13 +45,42 @@ type Model struct {
 	KVCache   *mltransformer.KVCache
 }
 
+// WithMMap configures whether to use memory-mapped files (mmap) when reading tensors,
+// as opposed to standard file I/O.
+//
+// It defaults to true in platforms that support it (e.g., Linux, macOS, Windows),
+// and false on platforms that do not (e.g., WebAssembly, Plan 9).
+//
+// When useMMap is false, tensors are read using standard file I/O (ReadAt), which uses the OS kernel's
+// page cache for buffering rather than mapping the weights file into the process's address space
+// (avoiding adding the file size to the process's Resident Set Size / RSS).
+func (m *Model) WithMMap(useMMap bool) *Model {
+	if !safetensors.DefaultUseMMap() {
+		useMMap = false
+	}
+	m.useMMapSet = true
+	m.useMMap = useMMap
+	return m
+}
+
+// UseMMap returns whether memory-mapped file reading is enabled for this model.
+// It defaults to true in platforms that support it.
+func (m *Model) UseMMap() bool {
+	if m.useMMapSet {
+		return m.useMMap
+	}
+	return safetensors.DefaultUseMMap()
+}
+
 // LoadModel loads the configurations into the Model struct.
 // It loads config.json as mandatory, and gracefully handles the optional presence
 // of sentence_transformer and pooling configurations.
 func LoadModel(repo *hub.Repo) (*Model, error) {
 	m := &Model{
-		Repo:    repo,
-		KVCache: mltransformer.NewKVCache(),
+		Repo:       repo,
+		KVCache:    mltransformer.NewKVCache(),
+		useMMapSet: true,
+		useMMap:    safetensors.DefaultUseMMap(),
 	}
 
 	loadFile := func(filename string, v any) (bool, error) {
@@ -183,7 +216,7 @@ func (m *Model) LoadStoreFiltered(backend compute.Backend, store *model.Store, f
 
 	isBert := m.Config.ModelType == "bert" || (len(m.Config.Architectures) > 0 && m.Config.Architectures[0] == "BertModel")
 
-	for tensorAndName, err := range safetensors.IterTensorsFromRepo(backend, m.Repo) {
+	for tensorAndName, err := range safetensors.IterTensorsFromRepoWithMMap(backend, m.Repo, m.UseMMap()) {
 		if err != nil {
 			return errors.WithMessagef(err, "failed loading variables of models %q", m.Repo.ID)
 		}

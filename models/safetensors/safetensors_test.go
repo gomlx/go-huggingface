@@ -1,10 +1,16 @@
 package safetensors
 
 import (
+	"bytes"
+	"encoding/binary"
+	"fmt"
+	"math"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gomlx/go-huggingface/hub"
+	"github.com/gomlx/gomlx/core/tensors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -288,4 +294,74 @@ func TestIterTensorsFromRepo(t *testing.T) {
 		count++
 	}
 	assert.Equal(t, len(allMiniVariablesToShape), count)
+}
+
+func TestWithMMapLocal(t *testing.T) {
+	dir := t.TempDir()
+	headerJSON := `{"w1":{"dtype":"F32","shape":[2,2],"data_offsets":[0,16]},"b1":{"dtype":"F32","shape":[3],"data_offsets":[16,28]}}`
+
+	var buf bytes.Buffer
+	require.NoError(t, binary.Write(&buf, binary.LittleEndian, uint64(len(headerJSON))))
+	buf.WriteString(headerJSON)
+	wantValues := map[string][]float32{
+		"w1": {1.0, 2.0, 3.0, 4.0},
+		"b1": {-0.5, 0.25, 1.5},
+	}
+	for _, v := range append(wantValues["w1"], wantValues["b1"]...) {
+		require.NoError(t, binary.Write(&buf, binary.LittleEndian, math.Float32bits(v)))
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "model.safetensors"), buf.Bytes(), 0644))
+
+	repo := hub.NewLocal(dir)
+
+	for _, useMMap := range []bool{true, false} {
+		t.Run(fmt.Sprintf("mmap=%v", useMMap), func(t *testing.T) {
+			m := NewEmpty(repo).WithMMap(useMMap)
+			assert.Equal(t, useMMap && DefaultUseMMap(), m.UseMMap())
+			require.NoError(t, m.Load())
+
+			// 1. Check TensorReader directly
+			tr, err := m.NewTensorReader("model.safetensors")
+			require.NoError(t, err)
+			if m.UseMMap() {
+				assert.NotNil(t, tr.mmapBuf)
+			} else {
+				assert.Nil(t, tr.mmapBuf)
+				assert.NotNil(t, tr.file)
+			}
+			tW1, err := tr.ReadTensor(nil, "w1")
+			require.NoError(t, err)
+			gotW1, err := tensors.CopyFlatData[float32](tW1)
+			require.NoError(t, err)
+			assert.Equal(t, wantValues["w1"], gotW1)
+			require.NoError(t, tr.Close())
+
+			// 2. Check Model.GetTensor
+			tanB1, err := m.GetTensor(nil, "b1")
+			require.NoError(t, err)
+			gotB1, err := tensors.CopyFlatData[float32](tanB1.Tensor)
+			require.NoError(t, err)
+			assert.Equal(t, wantValues["b1"], gotB1)
+
+			// 3. Check Model.IterTensors
+			seen := make(map[string][]float32)
+			for tan, err := range m.IterTensors(nil) {
+				require.NoError(t, err)
+				vals, err := tensors.CopyFlatData[float32](tan.Tensor)
+				require.NoError(t, err)
+				seen[tan.Name] = vals
+			}
+			assert.Equal(t, wantValues, seen)
+
+			// 4. Check IterTensorsFromRepoWithMMap
+			seenRepo := make(map[string][]float32)
+			for tan, err := range IterTensorsFromRepoWithMMap(nil, repo, useMMap) {
+				require.NoError(t, err)
+				vals, err := tensors.CopyFlatData[float32](tan.Tensor)
+				require.NoError(t, err)
+				seenRepo[tan.Name] = vals
+			}
+			assert.Equal(t, wantValues, seenRepo)
+		})
+	}
 }

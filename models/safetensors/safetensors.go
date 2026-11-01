@@ -249,6 +249,7 @@ func (m *Model) GetTensorFromFile(backend compute.Backend, fileName, tensorName 
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create TensorReader for %s", fileName)
 	}
+	defer reader.Close()
 	tensor, err := reader.ReadTensor(backend, tensorName)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to read tensor %s from %s", tensorName, fileName)

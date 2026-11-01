@@ -1,6 +1,8 @@
 package safetensors
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -13,9 +15,29 @@ import (
 // reader with a slice-out-of-range. These tests ensure such offsets are
 // rejected with an error instead.
 func TestReadTensorRejectsOutOfRangeOffsets(t *testing.T) {
-	newReader := func(off [2]int64) *TensorReader {
+	tmpFile := filepath.Join(t.TempDir(), "dummy.safetensors")
+	if err := os.WriteFile(tmpFile, make([]byte, 16), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(tmpFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	newMMapReader := func(off [2]int64) *TensorReader {
 		return &TensorReader{
 			mmapBuf:    make([]byte, 16),
+			dataOffset: 0,
+			Header: &Header{Tensors: map[string]*TensorMetadata{
+				"evil": {Name: "evil", Dtype: "F32", Shape: []int{4}, DataOffsets: off},
+			}},
+		}
+	}
+	newFileReader := func(off [2]int64) *TensorReader {
+		return &TensorReader{
+			file:       f,
+			fileSize:   16,
 			dataOffset: 0,
 			Header: &Header{Tensors: map[string]*TensorMetadata{
 				"evil": {Name: "evil", Dtype: "F32", Shape: []int{4}, DataOffsets: off},
@@ -27,8 +49,20 @@ func TestReadTensorRejectsOutOfRangeOffsets(t *testing.T) {
 		"negative":      {-16, 0},
 	}
 	for name, off := range cases {
-		t.Run(name, func(t *testing.T) {
-			tr := newReader(off)
+		t.Run("mmap-"+name, func(t *testing.T) {
+			tr := newMMapReader(off)
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("ReadTensor panicked on %s offsets: %v", name, r)
+				}
+			}()
+			_, err := tr.ReadTensor(nil, "evil")
+			if err == nil || !strings.Contains(err.Error(), "out of range") {
+				t.Fatalf("expected out-of-range error, got %v", err)
+			}
+		})
+		t.Run("file-"+name, func(t *testing.T) {
+			tr := newFileReader(off)
 			defer func() {
 				if r := recover(); r != nil {
 					t.Fatalf("ReadTensor panicked on %s offsets: %v", name, r)
