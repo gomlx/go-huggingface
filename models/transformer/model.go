@@ -117,6 +117,20 @@ func LoadModel(repo *hub.Repo) (*Model, error) {
 	pc := &PoolingConfig{}
 	if ok, _ := loadFile("1_Pooling/config.json", pc); ok {
 		m.PoolingConfig = pc
+	} else {
+		for _, mod := range m.Modules {
+			if mod.Type == "sentence_transformers.models.Pooling" {
+				if mod.Path != "" && mod.Path != "1_Pooling" {
+					if ok, _ := loadFile(mod.Path+"/config.json", pc); ok {
+						m.PoolingConfig = pc
+						break
+					}
+				}
+				// Default sentence_transformers Pooling when 1_Pooling/config.json is omitted is mean pooling.
+				m.PoolingConfig = &PoolingConfig{PoolingModeMeanTokens: true}
+				break
+			}
+		}
 	}
 
 	m.useCausalMask = m.detectCausalMask()

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"path/filepath"
 	"runtime/pprof"
 	"sync"
 	"sync/atomic"
@@ -32,6 +33,8 @@ import (
 	"github.com/gomlx/gomlx/core/graph"
 	"github.com/gomlx/gomlx/core/tensors"
 	"github.com/gomlx/gomlx/ml/model"
+	"github.com/gomlx/onnx-gomlx/onnx"
+	"github.com/gomlx/onnx-gomlx/onnx/parser"
 	"k8s.io/klog/v2"
 )
 
@@ -98,21 +101,74 @@ func main() {
 	})
 	store := model.NewStore()
 
-	mustRunWithElapsedTime("Loading variables into store", func() (any, error) {
-		return nil, hfModel.LoadStore(backend, store)
-	})
-
 	padID := 0
 	if id, err := tokenizer.SpecialTokenID(tapi.TokPad); err == nil {
 		padID = id
 	}
 
-	embedExec, err := model.NewExec(backend, store, func(scope *model.Scope, tokens *graph.Node) *graph.Node {
-		constPadID := graph.Scalar(tokens.Graph(), tokens.DType(), padID)
-		seqLen := graph.ReduceSum(graph.ConvertDType(graph.NotEqual(tokens, constPadID), dtypes.Int32), 1)
-		x := hfModel.SentenceEmbeddingGraph(scope, tokens, seqLen)
-		return graph.ConvertDType(x, dtypes.Float32)
-	})
+	var embedExec *model.Exec
+	var err error
+	if repoHasSafetensors(repo) {
+		mustRunWithElapsedTime("Loading variables into store", func() (any, error) {
+			return nil, hfModel.LoadStore(backend, store)
+		})
+
+		embedExec, err = model.NewExec(backend, store, func(scope *model.Scope, tokens *graph.Node) *graph.Node {
+			constPadID := graph.Scalar(tokens.Graph(), tokens.DType(), padID)
+			seqLen := graph.ReduceSum(graph.ConvertDType(graph.NotEqual(tokens, constPadID), dtypes.Int32), 1)
+			x := hfModel.SentenceEmbeddingGraph(scope, tokens, seqLen)
+			return graph.ConvertDType(x, dtypes.Float32)
+		})
+		if err != nil {
+			klog.Fatalf("Failed to create model executor: %v", err)
+		}
+	} else if onnxFile, ok := findONNXFile(repo); ok {
+		onnxModel := mustRunWithElapsedTime(fmt.Sprintf("Loading ONNX model (%s)", onnxFile), func() (onnx.Model, error) {
+			localPath, err := repo.DownloadFile(onnxFile)
+			if err != nil {
+				return nil, err
+			}
+			return parser.ParseFile(localPath)
+		})
+		mustRunWithElapsedTime("Loading ONNX variables into store", func() (any, error) {
+			return nil, onnxModel.VariablesToScope(store.RootScope())
+		})
+
+		embedExec, err = model.NewExec(backend, store, func(scope *model.Scope, tokens *graph.Node) *graph.Node {
+			g := tokens.Graph()
+			scope.SetTraining(g, false)
+			constPadID := graph.Scalar(g, tokens.DType(), padID)
+			notPad := graph.NotEqual(tokens, constPadID)
+			seqLen := graph.ReduceSum(graph.ConvertDType(notPad, dtypes.Int32), 1)
+
+			inputNames, inputShapes := onnxModel.Inputs()
+			onnxInputs := make(map[string]*graph.Node, len(inputNames))
+			for i, name := range inputNames {
+				dtype := inputShapes[i].DType
+				switch name {
+				case "input_ids":
+					onnxInputs[name] = graph.ConvertDType(tokens, dtype)
+				case "attention_mask":
+					onnxInputs[name] = graph.ConvertDType(notPad, dtype)
+				case "token_type_ids":
+					onnxInputs[name] = graph.ZerosLike(graph.ConvertDType(tokens, dtype))
+				case "position_ids":
+					onnxInputs[name] = graph.DynamicIota(g, dtype, 1, graph.DimensionSpecFor(tokens, 0), graph.DimensionSpecFor(tokens, 1))
+				}
+			}
+			outputs := onnxModel.CallGraph(scope, g, onnxInputs)
+			x := outputs[0]
+			if x.Rank() == 3 {
+				x = hfModel.SentenceEmbeddingFromLastHiddenState(x, seqLen)
+			}
+			return graph.ConvertDType(x, dtypes.Float32)
+		})
+		if err != nil {
+			klog.Fatalf("Failed to create ONNX model executor: %v", err)
+		}
+	} else {
+		klog.Fatalf("No safetensors or ONNX model files found in repository %q", *flagModel)
+	}
 	if *flagDynamic && backend.Capabilities().HasDynamicShapes() {
 		embedExec.WithDynamicAxes([]string{"batch", "seq_len"})
 	}
@@ -407,4 +463,37 @@ func mapLen(m *sync.Map) int {
 		return true
 	})
 	return length
+}
+
+func repoHasSafetensors(repo *hub.Repo) bool {
+	for filename, err := range repo.IterFileNames() {
+		if err != nil {
+			return false
+		}
+		if filepath.Ext(filename) == ".safetensors" ||
+			filename == "model.safetensors.index.json" ||
+			filename == "pytorch_model.safetensors.index.json" ||
+			filepath.Base(filename) == "model.safetensors.index.json" ||
+			filepath.Base(filename) == "pytorch_model.safetensors.index.json" {
+			return true
+		}
+	}
+	return false
+}
+
+func findONNXFile(repo *hub.Repo) (string, bool) {
+	for _, preferred := range []string{"model.onnx", "onnx/model.onnx"} {
+		if repo.HasFile(preferred) {
+			return preferred, true
+		}
+	}
+	for filename, err := range repo.IterFileNames() {
+		if err != nil {
+			return "", false
+		}
+		if filepath.Ext(filename) == ".onnx" {
+			return filename, true
+		}
+	}
+	return "", false
 }

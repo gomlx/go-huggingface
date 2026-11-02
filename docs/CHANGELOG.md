@@ -3,6 +3,10 @@
 ## Unreleased
 
 - 2026/11/02:
+  - `examples/msmarco/benchmark_embed`: Added support for ONNX models via `github.com/gomlx/onnx-gomlx` when `.safetensors` files are not available in the model repository (e.g. `KnightsAnalytics/all-MiniLM-L6-v2`).
+  - `models/transformer`:
+    - Added `Model.SentenceEmbeddingFromLastHiddenState(lastHiddenState, seqLen)` to apply post-Transformer sentence embedding modules (pooling and L2 normalization) to an existing hidden-state tensor.
+    - Default `PoolingConfig` to mean pooling when `sentence_transformers.models.Pooling` is declared in `modules.json` without a `1_Pooling/config.json` file.
   - `models/timestral`:
     - Fused attention `_gate` projection (`Dense` + `Sigmoid`) into a single `nn.Dense(..., activation.TypeSigmoid)` (`FusedDense` with `ActivationSigmoid`).
     - Swapped `w12` `[gate; up]` halves to `[up; gate]` at weight-load time and replaced manual `Slice` + `Silu` + `Mul` in `FusedSwiGLU` with `activation.SwiGLU(w12)`.

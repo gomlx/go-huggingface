@@ -49,15 +49,7 @@ func (m *Model) SentenceEmbeddingGraph(scope *model.Scope, tokens, seqLen *graph
 			if x == nil {
 				exceptions.Panicf("normalize module found before transformer module")
 			}
-			// Apply L2 normalization: x = x / max(norm(x), eps)
-			// Compute norm along the final dimension (hidden_size)
-			norm := graph.Sqrt(graph.ReduceSum(graph.Square(x), -1))
-			eps := graph.Scalar(x.Graph(), norm.DType(), 1e-12)
-			norm = graph.Max(norm, eps)
-
-			// Expand norm back to [batch, 1] for broadcasting against [batch, hidden_size]
-			norm = graph.ExpandAxes(norm, -1)
-			x = graph.Div(x, norm)
+			x = normalizeEmbeddings(x)
 
 		default:
 			fmt.Printf("Warning: unknown module type %q in sentence transformer pipeline. Ignoring.\n", mod.Type)
@@ -75,6 +67,49 @@ func (m *Model) SentenceEmbeddingGraph(scope *model.Scope, tokens, seqLen *graph
 	}
 
 	return x
+}
+
+// SentenceEmbeddingFromLastHiddenState applies the post-Transformer sentence_transformers
+// pipeline modules (such as Pooling and Normalize) to the final hidden state [batchSize, seqLen, hiddenSize].
+//
+//   - lastHiddenState: shaped [batchSize, seqLen, hiddenSize].
+//   - seqLen: shaped [batchSize] or scalar, with the number of non-padding tokens. It can be nil.
+//
+// It returns the final pooled embedding (usually [batchSize, embedSize]) for the sentence.
+func (m *Model) SentenceEmbeddingFromLastHiddenState(lastHiddenState, seqLen *graph.Node) *graph.Node {
+	x := lastHiddenState
+	appliedModules := false
+	for _, mod := range m.Modules {
+		switch mod.Type {
+		case "sentence_transformers.models.Transformer":
+			appliedModules = true
+		case "sentence_transformers.models.Pooling":
+			x = m.ApplySentencePooling(x, seqLen)
+			appliedModules = true
+		case "sentence_transformers.models.Normalize":
+			x = normalizeEmbeddings(x)
+			appliedModules = true
+		default:
+			fmt.Printf("Warning: unknown module type %q in sentence transformer pipeline. Ignoring.\n", mod.Type)
+		}
+	}
+
+	if !appliedModules && m.PoolingConfig != nil {
+		x = m.ApplySentencePooling(x, seqLen)
+	}
+	return x
+}
+
+func normalizeEmbeddings(x *graph.Node) *graph.Node {
+	// Apply L2 normalization: x = x / max(norm(x), eps)
+	// Compute norm along the final dimension (hidden_size)
+	norm := graph.Sqrt(graph.ReduceSum(graph.Square(x), -1))
+	eps := graph.Scalar(x.Graph(), norm.DType(), 1e-12)
+	norm = graph.Max(norm, eps)
+
+	// Expand norm back to [batch, 1] for broadcasting against [batch, hidden_size]
+	norm = graph.ExpandAxes(norm, -1)
+	return graph.Div(x, norm)
 }
 
 // SingleSentenceEmbeddingExec returns a model.Exec that can be used to compute sentence embeddings.
