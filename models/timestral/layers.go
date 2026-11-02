@@ -3,14 +3,17 @@
 package timestral
 
 import (
+	"github.com/gomlx/compute"
 	"github.com/gomlx/compute/dtypes"
 	"github.com/gomlx/compute/shapes"
 	. "github.com/gomlx/gomlx/core/graph"
 	"github.com/gomlx/gomlx/ml/layers"
 	"github.com/gomlx/gomlx/ml/layers/activation"
 	"github.com/gomlx/gomlx/ml/layers/attention"
+	"github.com/gomlx/gomlx/ml/layers/regularizer"
 	"github.com/gomlx/gomlx/ml/model"
 	"github.com/gomlx/gomlx/ml/model/initializer"
+	"github.com/gomlx/gomlx/ml/nn"
 	"github.com/gomlx/gomlx/support/exceptions"
 )
 
@@ -51,13 +54,33 @@ func ResidualBlock(scope *model.Scope, x *Node, hiddenDims, outputDims int, useB
 	return Add(out, res)
 }
 
-// FusedSwiGLU computes the SwiGLU MLP with one fused input projection w12: w3(gate * silu(up)).
+// denseWithActivation executes a single dense linear layer fused with an activation function.
+func denseWithActivation(scope *model.Scope, input *Node, useBias bool, act activation.Type, outDim int) *Node {
+	scope = scope.In("dense")
+	g := input.Graph()
+	reg := regularizer.FromScope(scope)
+	inputShape := input.Shape()
+	inDim := inputShape.Dimensions[inputShape.Rank()-1]
+	weightsVar := scope.VariableWithShape("weights", shapes.Make(inputShape.DType, inDim, outDim))
+	if reg != nil {
+		reg(g, weightsVar)
+	}
+	var biasNode *Node
+	if useBias {
+		biasVar := scope.VariableWithShape("biases", shapes.Make(inputShape.DType, outDim))
+		biasNode = biasVar.NodeValue(g)
+	}
+	res := nn.Dense(input, weightsVar.NodeValue(g), biasNode, compute.DenseLayoutInputOutputs, act)
+	return layers.ApplyPostLinearHooks(scope, input, res)
+}
+
+// FusedSwiGLU computes the SwiGLU MLP with one fused input projection w12: w3(silu(up) * gate).
+// Note: w12 weights are permuted from [gate; up] to [up; gate] at LoadStore time so that
+// GoMLX's fused activation.SwiGLU(w12) can be applied directly without intermediate slices.
 func FusedSwiGLU(scope *model.Scope, x *Node, hiddenDim int, useBias bool) *Node {
 	embedDim := x.Shape().Dimensions[x.Rank()-1]
 	w12 := layers.Dense(scope.In("w12"), x, useBias, 2*hiddenDim)
-	gate := SliceAxis(w12, -1, AxisRange(0, hiddenDim))
-	up := SliceAxis(w12, -1, AxisRange(hiddenDim, 2*hiddenDim))
-	return layers.Dense(scope.In("w3"), Mul(gate, activation.Swish(up)), useBias, embedDim)
+	return layers.Dense(scope.In("w3"), activation.SwiGLU(w12), useBias, embedDim)
 }
 
 // SinCosRoPE computes the rotary position embedding (cos, sin) tables of shape [R, N, headDim]
@@ -182,7 +205,7 @@ func Attention(
 	}
 
 	if gate == GateSDPASigmoid {
-		gVal := Logistic(layers.Dense(scope.In("_gate"), inputs, useBias, embedDim))
+		gVal := denseWithActivation(scope.In("_gate"), inputs, useBias, activation.TypeSigmoid, embedDim)
 		out = Mul(out, gVal)
 	}
 

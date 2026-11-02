@@ -27,6 +27,7 @@ import (
 	"github.com/gomlx/compute/dtypes"
 	_ "github.com/gomlx/compute/gobackend" // registers the pure Go backend "go"
 	"github.com/gomlx/compute/shapes"
+	"github.com/gomlx/compute/support/humanize"
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/models/safetensors"
 	"github.com/gomlx/go-huggingface/models/timestral"
@@ -87,7 +88,7 @@ func main() {
 	// Compile the (batch, contextSteps) shape.
 	must1(exec.Compile(shapes.Make(dtypes.Float32, batch, *contextSteps)))
 	debug.FreeOSMemory()
-	fmt.Printf("load + compile: %.2fs, live %.2f GB, max RSS %.2f GB\n", time.Since(t0).Seconds(), liveMem(), maxRSS())
+	fmt.Printf("load + compile: %s, live %.2f GB, max RSS %.2f GB\n", humanize.Duration(time.Since(t0)), liveMem(), maxRSS())
 
 	labelName := filepath.Base(*modelID)
 
@@ -131,12 +132,12 @@ func main() {
 		if r == 0 {
 			label = "warm-up"
 		}
-		fmt.Printf("| %s | %s | %-7s | %.3fs | %.3fs | %.1f | %s | %.2f GB | %.2f GB |\n",
-			*obs, labelName, label, dt.Seconds(), dc.Seconds(), dc.Seconds()/dt.Seconds(), check, live, rss)
+		fmt.Printf("| %s | %s | %-7s | %s | %s | %.1f | %s | %.2f GB | %.2f GB |\n",
+			*obs, labelName, label, humanize.Duration(dt), humanize.Duration(dc), dc.Seconds()/dt.Seconds(), check, live, rss)
 	}
 	if *runs >= 1 {
-		fmt.Printf("| %s | %s | %-7s | %.3fs | %.3fs | %.1f | %s | %.2f GB | %.2f GB |\n",
-			*obs, labelName, "best", bestDt.Seconds(), bestDc.Seconds(), bestDc.Seconds()/bestDt.Seconds(), bestCheck, bestLive, bestRSS)
+		fmt.Printf("| %s | %s | %-7s | %s | %s | %.1f | %s | %.2f GB | %.2f GB |\n",
+			*obs, labelName, "best", humanize.Duration(bestDt), humanize.Duration(bestDc), bestDc.Seconds()/bestDt.Seconds(), bestCheck, bestLive, bestRSS)
 	}
 }
 

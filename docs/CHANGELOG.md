@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- 2026/11/02:
+  - `models/timestral`:
+    - Fused attention `_gate` projection (`Dense` + `Sigmoid`) into a single `nn.Dense(..., activation.TypeSigmoid)` (`FusedDense` with `ActivationSigmoid`).
+    - Swapped `w12` `[gate; up]` halves to `[up; gate]` at weight-load time and replaced manual `Slice` + `Silu` + `Mul` in `FusedSwiGLU` with `activation.SwiGLU(w12)`.
+  - `examples/timestral`: Format elapsed durations using `humanize.Duration()`.
+
 - 2026/11/01:
   - `models/safetensors`, `models/timestral`, `models/transformer`, `models/sam2`: Added `Model.WithMMap(useMMap bool) *Model`, `Model.UseMMap() bool`, `safetensors.DefaultUseMMap()`, and `safetensors.IterTensorsFromRepoWithMMap(...)` to optionally read tensors via standard file I/O (`os.File.ReadAt`) instead of `mmap`. When `useMMap` is `false`, tensor bytes are read directly from the OS page cache into the destination tensor buffer (for host and shared-buffer backends), avoiding mapping weight files into the process's virtual address space and inflating Resident Set Size (RSS). Also fixed a missing `reader.Close()` in `safetensors.Model.GetTensorFromFile`.
   - `examples/timestral`: Added `-mmap` boolean flag to toggle `mmap` vs. standard file I/O when loading safetensors weights.
