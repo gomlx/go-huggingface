@@ -145,7 +145,7 @@ func (m *Model) LoadStore(backend compute.Backend, store *model.Store) error {
 
 // loadSingleTensor maps a single PyTorch safetensors parameter into the GoMLX store.
 func (m *Model) loadSingleTensor(backend compute.Backend, store *model.Store, name string, t *tensors.Tensor) error {
-	scopePath, varName, isWQKV, ok := mapTimestralTensorName(name)
+	scopePath, varName, isWQKV, isW12, ok := mapTimestralTensorName(name)
 	if !ok {
 		klog.V(1).Infof("Skipping unmapped Timestral tensor: %s", name)
 		t.FinalizeAll()
@@ -189,6 +189,32 @@ func (m *Model) loadSingleTensor(backend compute.Backend, store *model.Store, na
 		if err != nil {
 			return errors.Wrapf(err, "failed to permute wQKV bias %q", name)
 		}
+	} else if isW12 && varName == "weights" && t.Rank() == 2 {
+		// PyTorch w12.weight is [2 * hiddenDim, D] with [gate; up] along axis 0, where
+		// FusedSwiGLU computes gate * silu(up). GoMLX's fused activation.SwiGLU computes
+		// silu(firstHalf) * secondHalf, so swap [gate; up] -> [up; gate] and transpose to [D, 2 * hiddenDim].
+		finalTensor, err = transformTensor(backend, t, func(x *Node) *Node {
+			h := x.Shape().Dimensions[0] / 2
+			gate := SliceAxis(x, 0, AxisRange(0, h))
+			up := SliceAxis(x, 0, AxisRange(h, 2*h))
+			return TransposeAllAxes(Concatenate([]*Node{up, gate}, 0), 1, 0)
+		})
+		t.FinalizeAll()
+		if err != nil {
+			return errors.Wrapf(err, "failed to permute and transpose w12 weight %q", name)
+		}
+	} else if isW12 && varName == "biases" && t.Rank() == 1 {
+		// Swap [gate; up] -> [up; gate] in w12.bias to match activation.SwiGLU.
+		finalTensor, err = transformTensor(backend, t, func(x *Node) *Node {
+			h := x.Shape().Dimensions[0] / 2
+			gate := SliceAxis(x, 0, AxisRange(0, h))
+			up := SliceAxis(x, 0, AxisRange(h, 2*h))
+			return Concatenate([]*Node{up, gate}, 0)
+		})
+		t.FinalizeAll()
+		if err != nil {
+			return errors.Wrapf(err, "failed to permute w12 bias %q", name)
+		}
 	} else if varName == "weights" && t.Rank() == 2 {
 		// Standard 2D Linear weight: transpose [out, in] -> [in, out].
 		finalTensor, err = transformTensor(backend, t, func(x *Node) *Node {
@@ -220,10 +246,10 @@ func transformTensor(backend compute.Backend, t *tensors.Tensor, fn func(x *Node
 }
 
 // mapTimestralTensorName converts a safetensors parameter name to a GoMLX scope path and variable name.
-func mapTimestralTensorName(safetensorsName string) (scopePath []string, varName string, isWQKV bool, ok bool) {
+func mapTimestralTensorName(safetensorsName string) (scopePath []string, varName string, isWQKV, isW12, ok bool) {
 	parts := strings.Split(safetensorsName, ".")
 	if len(parts) < 2 {
-		return nil, "", false, false
+		return nil, "", false, false, false
 	}
 
 	last := parts[len(parts)-1]
@@ -231,21 +257,21 @@ func mapTimestralTensorName(safetensorsName string) (scopePath []string, varName
 	prefix := slices.Clone(parts[:len(parts)-1])
 
 	if safetensorsName == "representation.forecast_query" {
-		return []string{"representation"}, "forecast_query", false, true
+		return []string{"representation"}, "forecast_query", false, false, true
 	}
 
 	if last == "scale" && (strings.Contains(parent, "norm") || (len(parts) >= 3 && strings.Contains(parts[len(parts)-3], "norm"))) {
-		return append(prefix, "rms_norm"), "scale", false, true
+		return append(prefix, "rms_norm"), "scale", false, false, true
 	}
 
 	if last == "weight" {
-		return append(prefix, "dense"), "weights", parent == "wQKV", true
+		return append(prefix, "dense"), "weights", parent == "wQKV", parent == "w12", true
 	}
 	if last == "bias" {
-		return append(prefix, "dense"), "biases", parent == "wQKV", true
+		return append(prefix, "dense"), "biases", parent == "wQKV", parent == "w12", true
 	}
 
-	return prefix, last, false, true
+	return prefix, last, false, false, true
 }
 
 // Scale performs causal per-patch normalization of packed [R, T] rows.
