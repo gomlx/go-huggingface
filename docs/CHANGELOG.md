@@ -3,7 +3,9 @@
 ## Unreleased
 
 - 2026/11/02:
-  - `examples/msmarco/benchmark_embed`: Added support for ONNX models via `github.com/gomlx/onnx-gomlx` when `.safetensors` files are not available in the model repository (e.g. `KnightsAnalytics/all-MiniLM-L6-v2`).
+  - `examples/msmarco/benchmark_embed`:
+    - Added support for ONNX models via `github.com/gomlx/onnx-gomlx` when `.safetensors` files are not available in the model repository (e.g. `KnightsAnalytics/all-MiniLM-L6-v2`).
+    - Added `CPU Time` and `~Cores` rows to the benchmark report table showing total CPU time (user + system), CPU time per passage (`cpu_time / passages`), and average core utilization (`cpu_time / wall_time`).
   - `models/transformer`:
     - Added `Model.SentenceEmbeddingFromLastHiddenState(lastHiddenState, seqLen)` to apply post-Transformer sentence embedding modules (pooling and L2 normalization) to an existing hidden-state tensor.
     - Default `PoolingConfig` to mean pooling when `sentence_transformers.models.Pooling` is declared in `modules.json` without a `1_Pooling/config.json` file.

@@ -11,6 +11,7 @@ import (
 	"runtime/pprof"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
@@ -64,6 +65,9 @@ func main() {
 	klog.InitFlags(nil)
 	flag.Parse()
 
+	fmt.Printf("- Model %q, bucket %d, parallel embedders %d, dynamic shapes %t, warmup %t, shapes %t\n",
+		*flagModel, *flagBucketBudget, *flagParallelEmbedders, *flagDynamic, *flagWarmup, *flagShapes)
+
 	if *flagCPUProf != "" {
 		f, err := os.Create(*flagCPUProf)
 		if err != nil {
@@ -99,6 +103,7 @@ func main() {
 	backend := mustRunWithElapsedTime("Initializing backend", func() (compute.Backend, error) {
 		return compute.New()
 	})
+	fmt.Printf("- Backend: %q\n", backend)
 	store := model.NewStore()
 
 	padID := 0
@@ -255,7 +260,7 @@ func runBenchmark(backend compute.Backend, tokenizer tokenizers.Tokenizer, embed
 	})
 
 	// Process batches and observe performance.
-	startTime := time.Now()
+	startTime, startCPUTime := time.Now(), cpuTime()
 	var numTokensProcessed, numNonPadTokensProcessed int64
 	var numSentencesProcessed int
 	expectedNumQueries := limit
@@ -404,16 +409,28 @@ func runBenchmark(backend compute.Backend, tokenizer tokenizers.Tokenizer, embed
 	})
 
 	wg.Wait()
-	elapsed := time.Since(startTime)
+	elapsed, cpuElapsed := time.Since(startTime), cpuTime()-startCPUTime
 	fmt.Printf("Total duration: %v\n", humanize.Duration(elapsed))
 
 	// Print nice report table with counts and speeds.
-	names := []string{"Passages", "Tokens", "Non-Pad Tokens"}
-	totals := []string{humanize.Count(int64(numSentencesProcessed)), humanize.Count(numTokensProcessed), humanize.Count(numNonPadTokensProcessed)}
+	cpuTimePerPassage := "N/A"
+	if numSentencesProcessed > 0 {
+		cpuTimePerPassage = fmt.Sprintf("%s/passage", humanize.Duration(cpuElapsed/time.Duration(numSentencesProcessed)))
+	}
+	names := []string{"Passages", "Tokens", "Non-Pad Tokens", "CPU Time", "~Cores"}
+	totals := []string{
+		humanize.Count(int64(numSentencesProcessed)),
+		humanize.Count(numTokensProcessed),
+		humanize.Count(numNonPadTokensProcessed),
+		humanize.Duration(cpuElapsed),
+		fmt.Sprintf("%.1f", cpuElapsed.Seconds()/elapsed.Seconds()),
+	}
 	speeds := []string{
 		humanize.Speed(float64(numSentencesProcessed)/elapsed.Seconds(), " items"),
 		humanize.Speed(float64(numTokensProcessed)/elapsed.Seconds(), "tokens"),
 		humanize.Speed(float64(numNonPadTokensProcessed)/elapsed.Seconds(), "tokens"),
+		cpuTimePerPassage,
+		"N/A",
 	}
 	if isWarmup {
 		names = append(names, "Unique Shapes")
@@ -443,6 +460,12 @@ func runBenchmark(backend compute.Backend, tokenizer tokenizers.Tokenizer, embed
 		t.Row(names[i], totals[i], speeds[i])
 	}
 	fmt.Println(t)
+}
+
+func cpuTime() time.Duration {
+	var ru syscall.Rusage
+	_ = syscall.Getrusage(syscall.RUSAGE_SELF, &ru)
+	return time.Duration(ru.Utime.Nano() + ru.Stime.Nano())
 }
 
 func mustRunWithElapsedTime[T any](name string, f func() (T, error)) T {
