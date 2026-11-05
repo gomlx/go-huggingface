@@ -8,7 +8,7 @@ require (
 	github.com/eliben/go-sentencepiece v0.7.0
 	github.com/gofrs/flock v0.13.0
 	github.com/gomlx/compute v0.1.23
-	github.com/gomlx/gomlx v0.28.26
+	github.com/gomlx/gomlx v0.28.27
 	github.com/gomlx/onnx-gomlx v0.5.21
 	github.com/google/uuid v1.6.0
 	github.com/parquet-go/parquet-go v0.29.0
@@ -32,6 +32,7 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/gomlx/compute-onnx v0.1.22 // indirect
 	github.com/gomlx/exceptions v0.0.3 // indirect
+	github.com/gomlx/go-darwinml v0.1.0 // indirect
 	github.com/gomlx/go-xla v0.4.23 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/klauspost/compress v1.18.5 // indirect
