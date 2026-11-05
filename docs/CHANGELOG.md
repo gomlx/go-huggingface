@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- 2026/11/05:
+  - `models/gguf` (#18):
+    - Added `TensorType.ToGGMLQuantType()` to map GGUF quantization formats (`Q4_0`, `Q8_0`, `IQ4_NL`, `Q2_K`–`Q6_K`) to `compute.GGMLQuantType`.
+    - Added `TensorInfo.GoMLXRawShape()`, `Reader.ReadTensorRaw(backend, name)`, and `Model.ReadTensorRaw(backend, name)` to load un-dequantized tensors as `dtypes.Uint8` GoMLX tensors in native GGML block layout (`[..., bytesPerRow]`), plus `Reader.ReadTensorBytes(name)` and `Model.ReadTensorBytes(name)` to read raw `[]byte` slices.
+    - Renamed `Model.GetTensor` to `Model.ReadTensor` (keeping `GetTensor` as a deprecated alias).
+    - Added multi-file GGUF support (`Model.LoadAll()`, `Model.LoadFiles()`, `Model.ListGGUFFiles()`, `Model.ExtraFiles()`, `Model.GetTensorInfo()`) for multimodal repositories (such as LLaVA) that split weights across multiple `.gguf` files.
+  - `tokenizers/api`, `tokenizers/hftokenizer` (#18):
+    - Updated `api.TokensDecoder` (with `.String() string` and custom `UnmarshalJSON`) to unmarshal special token fields in `tokenizer_config.json` that may be either plain strings or `AddedToken` JSON objects (`{"content": "...", "lstrip": ..., ...}`), preserving the extra token attributes. **Note (minor API change)**: `Config.ClsToken`, `UnkToken`, `SepToken`, `MaskToken`, `BosToken`, `EosToken`, and `PadToken` are now `api.TokensDecoder` instead of `string` (use `.String()` or `.Content` to get the token string).
+
 - 2026/11/02:
   - `examples/msmarco/benchmark_embed`:
     - Added support for ONNX models via `github.com/gomlx/onnx-gomlx` when `.safetensors` files are not available in the model repository (e.g. `KnightsAnalytics/all-MiniLM-L6-v2`).

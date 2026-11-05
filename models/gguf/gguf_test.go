@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gomlx/compute"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -275,4 +276,30 @@ func TestTensorTypeProperties(t *testing.T) {
 			assert.Equal(t, tt.name, tt.tt.String(), "String")
 		})
 	}
+}
+
+func TestToGGMLQuantType(t *testing.T) {
+	supported := []struct {
+		tt   TensorType
+		want compute.GGMLQuantType
+	}{
+		{TensorTypeQ4_0, compute.GGMLQ4_0},
+		{TensorTypeQ8_0, compute.GGMLQ8_0},
+		{TensorTypeIQ4_NL, compute.GGMLIQ4NL},
+		{TensorTypeQ2_K, compute.GGMLQ2_K},
+		{TensorTypeQ3_K, compute.GGMLQ3_K},
+		{TensorTypeQ4_K, compute.GGMLQ4_K},
+		{TensorTypeQ5_K, compute.GGMLQ5_K},
+		{TensorTypeQ6_K, compute.GGMLQ6_K},
+	}
+	for _, tc := range supported {
+		got, ok := tc.tt.ToGGMLQuantType()
+		assert.True(t, ok, "expected %s to map to GGMLQuantType", tc.tt)
+		assert.Equal(t, tc.want, got)
+	}
+
+	_, ok := TensorTypeF32.ToGGMLQuantType()
+	assert.False(t, ok)
+	_, ok = TensorTypeQ4_1.ToGGMLQuantType()
+	assert.False(t, ok)
 }
