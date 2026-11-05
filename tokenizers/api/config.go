@@ -2,18 +2,10 @@ package api
 
 import (
 	"encoding/json"
-	"github.com/pkg/errors"
 	"os"
-)
 
-type TokensDecoder struct {
-	Content    string `json:"content"`
-	Lstrip     bool   `json:"lstrip"`
-	Normalized bool   `json:"normalized"`
-	Rstrip     bool   `json:"rstrip"`
-	SingleWord bool   `json:"single_word"`
-	Special    bool   `json:"special"`
-}
+	"github.com/pkg/errors"
+)
 
 // Config struct to hold HuggingFace's tokenizer_config.json contents.
 // There is no formal schema for this file, but these are some common fields that may be of use.
@@ -31,13 +23,13 @@ type Config struct {
 	MaxLength      float64        `json:"max_length"`
 	SpModelKwargs  map[string]any `json:"sp_model_kwargs"`
 
-	ClsToken  string `json:"cls_token"`
-	UnkToken  string `json:"unk_token"`
-	SepToken  string `json:"sep_token"`
-	MaskToken string `json:"mask_token"`
-	BosToken  string `json:"bos_token"`
-	EosToken  string `json:"eos_token"`
-	PadToken  string `json:"pad_token"`
+	ClsToken  TokensDecoder `json:"cls_token"`
+	UnkToken  TokensDecoder `json:"unk_token"`
+	SepToken  TokensDecoder `json:"sep_token"`
+	MaskToken TokensDecoder `json:"mask_token"`
+	BosToken  TokensDecoder `json:"bos_token"`
+	EosToken  TokensDecoder `json:"eos_token"`
+	PadToken  TokensDecoder `json:"pad_token"`
 
 	AddBosToken             bool                  `json:"add_bos_token"`
 	AddEosToken             bool                  `json:"add_eos_token"`
@@ -81,4 +73,41 @@ func ParseConfigContent(jsonContent []byte) (*Config, error) {
 		return nil, errors.Wrapf(err, "failed to parse tokenizer_config json content")
 	}
 	return config, nil
+}
+
+// TokensDecoder holds the properties of a special or added token in tokenizer_config.json
+// (such as bos_token, eos_token, or entries in added_tokens_decoder).
+// In JSON, it can be represented either as a plain string (e.g., "<s>") or as an
+// AddedToken object (e.g., {"content": "<s>", "lstrip": false, ...}).
+type TokensDecoder struct {
+	Type       string `json:"__type,omitempty"`
+	Content    string `json:"content"`
+	Lstrip     bool   `json:"lstrip"`
+	Normalized bool   `json:"normalized"`
+	Rstrip     bool   `json:"rstrip"`
+	SingleWord bool   `json:"single_word"`
+	Special    bool   `json:"special"`
+}
+
+// String returns the token's string content.
+func (t TokensDecoder) String() string {
+	return t.Content
+}
+
+// UnmarshalJSON unmarshals a TokensDecoder from either a JSON string or a JSON object with a "content" field.
+func (t *TokensDecoder) UnmarshalJSON(data []byte) error {
+	// Try plain string first (also handles JSON null as "").
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		*t = TokensDecoder{Content: s}
+		return nil
+	}
+	// Try object with "content" and optional AddedToken fields.
+	type tokensDecoderObj TokensDecoder
+	var obj tokensDecoderObj
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return err
+	}
+	*t = TokensDecoder(obj)
+	return nil
 }

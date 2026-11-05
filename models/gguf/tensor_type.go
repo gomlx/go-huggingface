@@ -31,6 +31,7 @@ import (
 	"math"
 	"slices"
 
+	"github.com/gomlx/compute"
 	"github.com/gomlx/compute/dtypes"
 )
 
@@ -238,6 +239,32 @@ func (t TensorType) IsQuantized() bool {
 	}
 }
 
+// ToGGMLQuantType maps a quantized TensorType to the corresponding GoMLX compute.GGMLQuantType.
+// Returns the GGMLQuantType and true if the type is a supported GGML quantization format,
+// or (0, false) for non-quantized or unsupported types.
+func (t TensorType) ToGGMLQuantType() (compute.GGMLQuantType, bool) {
+	switch t {
+	case TensorTypeQ4_0:
+		return compute.GGMLQ4_0, true
+	case TensorTypeQ8_0:
+		return compute.GGMLQ8_0, true
+	case TensorTypeIQ4_NL:
+		return compute.GGMLIQ4NL, true
+	case TensorTypeQ2_K:
+		return compute.GGMLQ2_K, true
+	case TensorTypeQ3_K:
+		return compute.GGMLQ3_K, true
+	case TensorTypeQ4_K:
+		return compute.GGMLQ4_K, true
+	case TensorTypeQ5_K:
+		return compute.GGMLQ5_K, true
+	case TensorTypeQ6_K:
+		return compute.GGMLQ6_K, true
+	default:
+		return 0, false
+	}
+}
+
 // GoMLXDType returns the GoMLX dtype for native (non-quantized) tensor types.
 // For quantized types, returns dtypes.Float32 (the dequantization output type).
 func (t TensorType) GoMLXDType() dtypes.DType {
@@ -313,4 +340,30 @@ func (ti *TensorInfo) GoMLXShape() (dtypes.DType, []int) {
 	}
 	slices.Reverse(dims)
 	return dtype, dims
+}
+
+// GoMLXRawShape returns dtypes.Uint8 and the byte-level dimensions for this tensor
+// in its raw (un-dequantized) GGUF block layout.
+// GGUF stores dimensions innermost-first; this reverses them to outermost-first
+// and converts the innermost dimension from logical elements (K) to raw bytes:
+// bytesPerRow = (K / BlockSize) * TypeSize.
+// For example, a 2D quantized weight matrix with logical shape [N, K] has
+// raw shape [N, bytesPerRow] with dtype Uint8, matching GoMLX's QuantGGML layout.
+func (ti *TensorInfo) GoMLXRawShape() (dtypes.DType, []int) {
+	if len(ti.Shape) == 0 {
+		return dtypes.Uint8, nil
+	}
+	bs := ti.Type.BlockSize()
+	ts := ti.Type.TypeSize()
+	if bs == 0 || ts == 0 {
+		return dtypes.Uint8, nil
+	}
+	dims := make([]int, len(ti.Shape))
+	for i, d := range ti.Shape {
+		dims[i] = int(d)
+	}
+	slices.Reverse(dims)
+	lastIdx := len(dims) - 1
+	dims[lastIdx] = (dims[lastIdx] / bs) * ts
+	return dtypes.Uint8, dims
 }

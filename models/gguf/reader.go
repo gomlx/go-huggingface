@@ -131,8 +131,50 @@ func (r *Reader) readQuantizedTensor(info TensorInfo, tensorOffset int64, output
 	return nil
 }
 
-// ReadTensorRaw reads the raw bytes for a tensor without dequantization.
-func (r *Reader) ReadTensorRaw(tensorName string) ([]byte, *TensorInfo, error) {
+// ReadTensorRaw reads a tensor by name into a dtypes.Uint8 GoMLX tensor with shape
+// info.GoMLXRawShape() (e.g., [N, bytesPerRow] for 2D GGML weights) without dequantization.
+// If backend is non-nil, the tensor is transferred to the backend's device #0.
+func (r *Reader) ReadTensorRaw(backend compute.Backend, tensorName string) (*tensors.Tensor, error) {
+	info, ok := r.gguf.GetTensorInfo(tensorName)
+	if !ok {
+		return nil, errors.Errorf("gguf: tensor %q not found", tensorName)
+	}
+	dtype, dims := info.GoMLXRawShape()
+	if len(dims) == 0 {
+		return nil, errors.Errorf("gguf: invalid raw shape for tensor %q (type %s, shape %v)", tensorName, info.Type, info.Shape)
+	}
+	shape := shapes.Make(dtype, dims...)
+	t, err := tensors.FromShapeForBackend(backend, 0, shape)
+	if err != nil {
+		return nil, errors.Wrapf(err, "gguf: failed to create raw tensor %q with shape %s", tensorName, shape)
+	}
+	tensorOffset := r.gguf.DataOffset() + int64(info.Offset)
+
+	var readErr error
+	t.MutableBytes(func(data []byte) {
+		n, err := r.file.ReadAt(data, tensorOffset)
+		if err != nil && err != io.EOF {
+			readErr = errors.WithStack(err)
+		} else if n != len(data) {
+			readErr = errors.Errorf("short read: got %d bytes, expected %d", n, len(data))
+		}
+	})
+	if readErr != nil {
+		return nil, errors.WithMessagef(readErr, "gguf: read raw tensor %q", tensorName)
+	}
+
+	if backend != nil {
+		err := t.ToDevice(backend, 0)
+		if err != nil {
+			return nil, errors.WithMessagef(err, "failed to move raw tensor %q (%s) to backend's device #0", tensorName, t.Shape())
+		}
+	}
+
+	return t, nil
+}
+
+// ReadTensorBytes reads the raw bytes for a tensor without dequantization.
+func (r *Reader) ReadTensorBytes(tensorName string) ([]byte, *TensorInfo, error) {
 	info, ok := r.gguf.GetTensorInfo(tensorName)
 	if !ok {
 		return nil, nil, errors.Errorf("gguf: tensor %q not found", tensorName)

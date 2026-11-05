@@ -3,8 +3,12 @@ package gguf
 import (
 	"encoding/binary"
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/gomlx/compute/dtypes"
+	"github.com/gomlx/go-huggingface/hub"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -98,10 +102,10 @@ func TestReadTensorNotFound(t *testing.T) {
 	assert.ErrorContains(t, err, "not found")
 }
 
-func TestReadTensorRaw(t *testing.T) {
-	// Create tensor data with known bytes.
-	tensorData := make([]byte, 16)
-	for i := range 16 {
+func TestReadTensorRawAndBytes(t *testing.T) {
+	// Create a 2D Q8_0 tensor with GGUF shape [32, 2] (GoMLX logical [2, 32], raw [2, 34] Uint8).
+	tensorData := make([]byte, 2*34)
+	for i := range tensorData {
 		tensorData[i] = byte(i)
 	}
 
@@ -110,7 +114,7 @@ func TestReadTensorRaw(t *testing.T) {
 			b.writeKVString("general.architecture", "test")
 		},
 		func(b *ggufBuilder) {
-			b.writeTensorInfo("raw", []uint64{4}, TensorTypeF32, 0)
+			b.writeTensorInfo("raw", []uint64{32, 2}, TensorTypeQ8_0, 0)
 		},
 		tensorData)
 
@@ -121,10 +125,101 @@ func TestReadTensorRaw(t *testing.T) {
 	require.NoError(t, err)
 	defer reader.Close()
 
-	raw, info, err := reader.ReadTensorRaw("raw")
+	// Test ReadTensorBytes: returns []byte and *TensorInfo.
+	raw, info, err := reader.ReadTensorBytes("raw")
 	require.NoError(t, err)
 	assert.Equal(t, "raw", info.Name)
 	assert.Equal(t, tensorData, raw)
+
+	// Test ReadTensorRaw: returns a dtypes.Uint8 GoMLX tensor with shape [2, 34].
+	rawTensor, err := reader.ReadTensorRaw(nil, "raw")
+	require.NoError(t, err)
+	assert.Equal(t, dtypes.Uint8, rawTensor.Shape().DType)
+	assert.Equal(t, []int{2, 34}, rawTensor.Shape().Dimensions)
+	rawTensor.ConstBytes(func(data []byte) {
+		assert.Equal(t, tensorData, data)
+	})
+}
+
+func TestModelMultiFileAndRaw(t *testing.T) {
+	dir := t.TempDir()
+
+	// Primary GGUF file: 1 Q4_0 tensor [32, 2] (2 blocks = 36 bytes).
+	primaryData := make([]byte, 36)
+	for i := range primaryData {
+		primaryData[i] = byte(i + 1)
+	}
+	primaryPath := buildMinimalGGUF(t, 1, 1,
+		func(b *ggufBuilder) {
+			b.writeKVString("general.architecture", "llama")
+		},
+		func(b *ggufBuilder) {
+			b.writeTensorInfo("blk.0.attn_q.weight", []uint64{32, 2}, TensorTypeQ4_0, 0)
+		},
+		primaryData)
+	primaryBytes, err := os.ReadFile(primaryPath)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "01_model.gguf"), primaryBytes, 0644))
+
+	// Extra GGUF file (mmproj): 1 F32 tensor [4] (16 bytes).
+	extraData := make([]byte, 16)
+	for i := range 4 {
+		binary.LittleEndian.PutUint32(extraData[i*4:i*4+4], math.Float32bits(float32(i+10)))
+	}
+	extraPath := buildMinimalGGUF(t, 1, 1,
+		func(b *ggufBuilder) {
+			b.writeKVString("general.architecture", "clip")
+		},
+		func(b *ggufBuilder) {
+			b.writeTensorInfo("v.blk.0.weight", []uint64{4}, TensorTypeF32, 0)
+		},
+		extraData)
+	extraBytes, err := os.ReadFile(extraPath)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "02_mmproj.gguf"), extraBytes, 0644))
+
+	repo := hub.NewLocal(dir)
+
+	m := NewEmpty(repo)
+	ggufFiles, err := m.ListGGUFFiles()
+	require.NoError(t, err)
+	assert.Len(t, ggufFiles, 2)
+
+	require.NoError(t, m.LoadAll())
+	defer m.Close()
+
+	assert.Len(t, m.ExtraFiles(), 1)
+	assert.ElementsMatch(t, []string{"blk.0.attn_q.weight", "v.blk.0.weight"}, m.ListTensorNames())
+
+	// Lookup tensor info in both primary and extra files.
+	infoQ, ok := m.GetTensorInfo("blk.0.attn_q.weight")
+	assert.True(t, ok)
+	assert.Equal(t, TensorTypeQ4_0, infoQ.Type)
+
+	infoV, ok := m.GetTensorInfo("v.blk.0.weight")
+	assert.True(t, ok)
+	assert.Equal(t, TensorTypeF32, infoV.Type)
+
+	// ReadTensorBytes across files.
+	gotBytes, gotInfo, err := m.ReadTensorBytes("blk.0.attn_q.weight")
+	require.NoError(t, err)
+	assert.Equal(t, primaryData, gotBytes)
+	assert.Equal(t, "blk.0.attn_q.weight", gotInfo.Name)
+
+	// ReadTensorRaw (Uint8 GoMLX tensor with shape [2, 18]).
+	tnRaw, err := m.ReadTensorRaw(nil, "blk.0.attn_q.weight")
+	require.NoError(t, err)
+	assert.Equal(t, dtypes.Uint8, tnRaw.Tensor.Shape().DType)
+	assert.Equal(t, []int{2, 18}, tnRaw.Tensor.Shape().Dimensions)
+	tnRaw.Tensor.ConstBytes(func(data []byte) {
+		assert.Equal(t, primaryData, data)
+	})
+
+	// ReadTensor from extra file.
+	tnV, err := m.ReadTensor(nil, "v.blk.0.weight")
+	require.NoError(t, err)
+	assert.Equal(t, dtypes.Float32, tnV.Tensor.Shape().DType)
+	assert.Equal(t, []int{4}, tnV.Tensor.Shape().Dimensions)
 }
 
 func TestReadTensorQ8_0(t *testing.T) {
