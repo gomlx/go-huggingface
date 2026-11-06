@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- 2026/11/06:
+  - `internal/downloader`:
+    - Validated downloaded byte count against `resp.ContentLength`. When `downloadedBytes != contentLength` or upon `io.ErrUnexpectedEOF`, `Manager.Download` now aborts with a descriptive error including both the downloaded byte count and expected `Content-Length`, ensuring incomplete `.part` files are removed rather than promoted to final files.
+
 - 2026/11/05:
   - `models/gguf` (#18):
     - Added `TensorType.ToGGMLQuantType()` to map GGUF quantization formats (`Q4_0`, `Q8_0`, `IQ4_NL`, `Q2_K`–`Q6_K`) to `compute.GGMLQuantType`.

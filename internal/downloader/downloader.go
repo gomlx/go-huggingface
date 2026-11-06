@@ -161,12 +161,6 @@ func (m *Manager) Download(ctx context.Context, url string, filePath string, cal
 			return CancellationError
 		}
 		n, readErr := resp.Body.Read(buf[:])
-		if readErr != nil && readErr != io.EOF {
-			if ctx.Err() != nil {
-				return CancellationError
-			}
-			return errors.Wrapf(readErr, "failed downloading %q", url)
-		}
 		if n > 0 {
 			wn, writeErr := file.Write(buf[:n])
 			if writeErr != nil && writeErr != io.EOF {
@@ -176,13 +170,23 @@ func (m *Manager) Download(ctx context.Context, url string, filePath string, cal
 				return errors.Wrapf(io.ErrShortWrite, "failed writing %q to %q: not enough bytes written (wanted %d, wrote only %d)",
 					url, filePathPart, n, wn)
 			}
+			downloadedBytes += int64(wn)
+			if callback != nil {
+				callback(downloadedBytes, contentLength)
+			}
+		}
+		if readErr != nil && readErr != io.EOF {
+			if ctx.Err() != nil {
+				return CancellationError
+			}
+			if errors.Is(readErr, io.ErrUnexpectedEOF) && contentLength >= 0 {
+				return errors.Errorf("download of %q incomplete: downloaded %d bytes, but Content-Length is %d bytes (unexpected EOF)",
+					url, downloadedBytes, contentLength)
+			}
+			return errors.Wrapf(readErr, "failed downloading %q", url)
 		}
 		if readErr == io.EOF {
 			break
-		}
-		downloadedBytes += int64(n)
-		if callback != nil {
-			callback(downloadedBytes, contentLength)
 		}
 	}
 	err = file.Close()
@@ -192,6 +196,10 @@ func (m *Manager) Download(ctx context.Context, url string, filePath string, cal
 	}
 	if err = resp.Body.Close(); err != nil {
 		return errors.Wrapf(err, "failed closing connection to %q", url)
+	}
+	if contentLength >= 0 && downloadedBytes != contentLength {
+		return errors.Errorf("download of %q incomplete: downloaded %d bytes, but Content-Length is %d bytes",
+			url, downloadedBytes, contentLength)
 	}
 	if err = os.Rename(filePathPart, filePath); err != nil {
 		return errors.Wrapf(err, "failed moving %q to %q", filePathPart, filePath)

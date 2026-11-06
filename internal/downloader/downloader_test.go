@@ -75,3 +75,32 @@ func TestDownload_Interrupted(t *testing.T) {
 	// Temporary .part file should NOT exist because it got cleaned up
 	assert.NoFileExists(t, targetFile+"."+Part)
 }
+
+func TestDownload_Truncated(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("short content"))
+	}))
+	defer server.Close()
+
+	tempDir, err := os.MkdirTemp("", "downloader_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	targetFile := filepath.Join(tempDir, "testfile.txt")
+	manager := New()
+
+	err = manager.Download(context.Background(), server.URL, targetFile, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "incomplete")
+	assert.Contains(t, err.Error(), "downloaded 13 bytes")
+	assert.Contains(t, err.Error(), "Content-Length is 100 bytes")
+
+	// Final file should NOT exist
+	assert.NoFileExists(t, targetFile)
+
+	// Temporary .part file should NOT exist because it got cleaned up
+	assert.NoFileExists(t, targetFile+"."+Part)
+}
+
