@@ -103,7 +103,7 @@ func main() {
 	backend := mustRunWithElapsedTime("Initializing backend", func() (compute.Backend, error) {
 		return compute.New()
 	})
-	fmt.Printf("- Backend: %q\n", backend)
+	fmt.Printf("- Backend: %s\n", backend.Description())
 	store := model.NewStore()
 
 	padID := 0
