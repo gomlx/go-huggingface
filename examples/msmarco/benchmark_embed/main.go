@@ -174,6 +174,7 @@ func main() {
 	} else {
 		klog.Fatalf("No safetensors or ONNX model files found in repository %q", *flagModel)
 	}
+	embedExec.DonateStore()
 	if *flagDynamic && backend.Capabilities().HasDynamicShapes() {
 		embedExec.WithDynamicAxes([]string{"batch", "seq_len"})
 	}
