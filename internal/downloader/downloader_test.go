@@ -104,3 +104,26 @@ func TestDownload_Truncated(t *testing.T) {
 	assert.NoFileExists(t, targetFile+"."+Part)
 }
 
+func TestDownload_Unauthorized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"Invalid username or password."}`))
+	}))
+	defer server.Close()
+
+	tempDir, err := os.MkdirTemp("", "downloader_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	targetFile := filepath.Join(tempDir, "testfile.txt")
+	manager := New()
+
+	err = manager.Download(context.Background(), server.URL, targetFile, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Invalid username or password.")
+	assert.Contains(t, err.Error(), "Hugging Face API suggests either an invalid username/password or a non-existent/private repository -- check that the model name is correct, or HF_TOKEN")
+	assert.NoFileExists(t, targetFile)
+}
+
+
