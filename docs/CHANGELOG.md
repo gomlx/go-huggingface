@@ -3,6 +3,10 @@
 ## Unreleased
 
 - 2026/11/08:
+  - `models/timestral`, `examples/timestral`:
+    - Added `Model.WithForceFloat32(forceFloat32 bool) *Model` and `Model.ForceFloat32() bool` to use `dtypes.Float32` instead of `dtypes.Float64` for internal Welford running statistics (`ComputeCausalStatistics` and `AdvancingBlockFrames`).
+    - Automatically detect backends that do not support `dtypes.Float64` (such as Apple Metal / `mps`), force `Float32` statistics, and log a `klog.Warningf` suggesting `WithForceFloat32(true)`.
+    - Added `-force_float32` flag to `./examples/timestral`.
   - `internal/downloader`:
     - Added an explanatory hint on HTTP 401 (`StatusUnauthorized`) responses ("Hugging Face API suggests either an invalid username/password or a non-existent/private repository -- check that the model name is correct, or HF_TOKEN").
   - `hub`:

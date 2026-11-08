@@ -29,8 +29,44 @@ type Model struct {
 
 	useMMapSet      bool
 	useMMap         bool
+	forceFloat32    bool
 	totalParameters *int64
 	totalBytes      *int64
+}
+
+// WithForceFloat32 configures whether to force Float32 instead of Float64 for internal
+// Welford running statistics (ComputeCausalStatistics and AdvancingBlockFrames).
+//
+// If not set and the target backend does not support Float64 (e.g., Apple Metal / "mps"),
+// Model automatically enables ForceFloat32 and logs a warning. Calling WithForceFloat32(true)
+// explicitly silences that warning.
+func (m *Model) WithForceFloat32(forceFloat32 bool) *Model {
+	m.forceFloat32 = forceFloat32
+	return m
+}
+
+// ForceFloat32 returns whether internal Welford running statistics are forced to Float32
+// instead of Float64.
+func (m *Model) ForceFloat32() bool {
+	return m.forceFloat32
+}
+
+func (m *Model) checkBackendFloat64(backend compute.Backend) {
+	if m.forceFloat32 || backend == nil {
+		return
+	}
+	if !backend.Capabilities().DTypes[dtypes.Float64] {
+		klog.Warningf("Backend %q doesn't support Float64, forcing Timestral model to float32. Set WithForceFloat32(true) to disable this warning.", backend.Name())
+		m.forceFloat32 = true
+	}
+}
+
+func (m *Model) statsDType(g *Graph) dtypes.DType {
+	m.checkBackendFloat64(g.Backend())
+	if m.forceFloat32 {
+		return dtypes.Float32
+	}
+	return dtypes.Float64
 }
 
 // WithMMap configures whether to use memory-mapped files (mmap) when reading tensors,
@@ -119,6 +155,7 @@ func (m *Model) LoadStore(backend compute.Backend, store *model.Store) error {
 	if m.Repo == nil {
 		return errors.New("timestral.Model.LoadStore: Model has no Repo")
 	}
+	m.checkBackendFloat64(backend)
 	var totalParams int64
 	var totalBytes int64
 
@@ -277,8 +314,9 @@ func mapTimestralTensorName(safetensorsName string) (scopePath []string, varName
 // Scale performs causal per-patch normalization of packed [R, T] rows.
 // Returns (scaled, loc, scale), each shaped [R, T].
 func (m *Model) Scale(inputs, observed *Node) (scaled, loc, scale *Node) {
+	m.checkBackendFloat64(inputs.Graph().Backend())
 	c := m.Config
-	loc, scale = CausalPatchLocScale(inputs, observed, c.PatchSize, c.MinimumScale, c.StabilizeWithGlobal)
+	loc, scale = causalPatchLocScale(inputs, observed, c.PatchSize, c.MinimumScale, c.StabilizeWithGlobal, m.forceFloat32)
 	scaled = ApplyAffineAsinhMasked(inputs, loc, scale, observed, c.UseAsinh)
 	return scaled, loc, scale
 }
@@ -500,15 +538,16 @@ func (m *Model) refineBlock(quantiles, context, mask, loc, scale, targetRows *No
 	scale0 := SliceAxis(scale, 1, AxisRange(ctxLen-1, ctxLen)) // [R, 1]
 
 	medIdx := c.MedianIndex()
+	statsDType := m.statsDType(g)
 	median := Reshape(SliceAxis(quantiles, -1, AxisRange(medIdx, medIdx+1)), rows, nPred, ps)
-	median64 := ConvertDType(median, dtypes.Float64)
-	loc064 := ConvertDType(InsertAxes(loc0, -1), dtypes.Float64)     // [R, 1, 1]
-	scale064 := ConvertDType(InsertAxes(scale0, -1), dtypes.Float64) // [R, 1, 1]
-	sinhMedian := Div(Sub(median64, loc064), scale064)
+	medianStats := ConvertDType(median, statsDType)
+	loc0Stats := ConvertDType(InsertAxes(loc0, -1), statsDType)     // [R, 1, 1]
+	scale0Stats := ConvertDType(InsertAxes(scale0, -1), statsDType) // [R, 1, 1]
+	sinhMedian := Div(Sub(medianStats, loc0Stats), scale0Stats)
 
-	locJ64, scaleJ64 := AdvancingBlockFrames(context, mask, sinhMedian, c.MinimumScale)
-	locJ := ConvertDType(locJ64, quantiles.DType())     // [R, nPred]
-	scaleJ := ConvertDType(scaleJ64, quantiles.DType()) // [R, nPred]
+	locJStats, scaleJStats := AdvancingBlockFrames(context, mask, sinhMedian, c.MinimumScale)
+	locJ := ConvertDType(locJStats, quantiles.DType())     // [R, nPred]
+	scaleJ := ConvertDType(scaleJStats, quantiles.DType()) // [R, nPred]
 
 	// Replace patch 0 with (loc0, scale0) and repeat_interleave(ps, dim=-1).
 	firstMask := Equal(BroadcastToDims(Iota(g, shapes.Make(dtypes.Int32, 1, nPred), 1), rows, nPred), ScalarZero(g, dtypes.Int32))
@@ -606,7 +645,8 @@ func (m *Model) CapQuantiles(quantiles, inputs, observationMask *Node, quantileR
 	ctxMin = Where(IsFinite(ctxMin), ctxMin, ZerosLike(ctxMin))
 
 	c := m.Config
-	_, scale := CausalPatchLocScale(inputs, observationMask, c.PatchSize, c.MinimumScale, c.StabilizeWithGlobal)
+	m.checkBackendFloat64(g.Backend())
+	_, scale := causalPatchLocScale(inputs, observationMask, c.PatchSize, c.MinimumScale, c.StabilizeWithGlobal, m.forceFloat32)
 	t := scale.Shape().Dimensions[scale.Rank()-1]
 	anchorScale := MulScalar(SliceAxis(scale, -1, AxisRange(t-1, t)), quantileRealCapK)
 
@@ -639,6 +679,9 @@ type GraphBuilder struct {
 //   - context: float32 *graph.Node shaped [T], [B, T], or [B, V, T]. NaN marks missing values.
 //   - horizonSteps: number of future time steps H to forecast (H >= 1).
 func (m *Model) BuildGraph(scope *model.Scope, context *Node, horizonSteps int) *GraphBuilder {
+	if context != nil {
+		m.checkBackendFloat64(context.Graph().Backend())
+	}
 	perShot := min(32, m.Config.BlockSize)
 	return &GraphBuilder{
 		model:                 m,
