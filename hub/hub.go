@@ -31,6 +31,7 @@
 //
 // Environment variables:
 //
+// - HF_TOKEN: HuggingFace authentication token used by default in hub.New (can be overridden with Repo.WithAuth)
 // - HF_ENDPOINT: Where to connect to huggingface, default is https://huggingface.co
 // - XDG_CACHE_HOME: Cache directory, defaults to ${HOME}/.cache
 package hub

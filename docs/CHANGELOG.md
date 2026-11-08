@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- 2026/11/08:
+  - `internal/downloader`:
+    - Added an explanatory hint on HTTP 401 (`StatusUnauthorized`) responses ("Hugging Face API suggests either an invalid username/password or a non-existent/private repository -- check that the model name is correct, or HF_TOKEN").
+  - `hub`:
+    - Default `Repo.authToken` in `hub.New` to the `HF_TOKEN` environment variable when set (can still be overridden or cleared via `Repo.WithAuth`).
+
 - 2026/11/06:
   - `internal/downloader`:
     - Validated downloaded byte count against `resp.ContentLength`. When `downloadedBytes != contentLength` or upon `io.ErrUnexpectedEOF`, `Manager.Download` now aborts with a descriptive error including both the downloaded byte count and expected `Content-Length`, ensuring incomplete `.part` files are removed rather than promoted to final files.

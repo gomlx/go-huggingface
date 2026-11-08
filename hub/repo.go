@@ -79,7 +79,8 @@ type Repo struct {
 //
 // It defaults to being a RepoTypeModel repository. But you can change it with Repo.WithType.
 //
-// If authentication is needed, use Repo.WithAuth.
+// If authentication is needed, it defaults to the HF_TOKEN environment variable (if set),
+// or you can configure it explicitly with Repo.WithAuth.
 func New(id string) *Repo {
 	hfEndpoint := os.Getenv("HF_ENDPOINT")
 	if hfEndpoint == "" {
@@ -92,6 +93,7 @@ func New(id string) *Repo {
 		repoType:            RepoTypeModel,
 		revision:            "main",
 		hfEndpoint:          hfEndpoint,
+		authToken:           os.Getenv("HF_TOKEN"),
 		cacheDir:            DefaultCacheDir(),
 		Verbosity:           1,
 		MaxParallelDownload: 20, // At most 20 parallel downloads.

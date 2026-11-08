@@ -134,19 +134,24 @@ func (m *Manager) Download(ctx context.Context, url string, filePath string, cal
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		var detail string
 		var jsonErr struct {
 			Error string `json:"error"`
 		}
 		if err := json.Unmarshal(bodyBytes, &jsonErr); err == nil && jsonErr.Error != "" {
-			return errors.Errorf("bad status code %d: %s", resp.StatusCode, jsonErr.Error)
+			detail = jsonErr.Error
+		} else if bodyStr := strings.TrimSpace(string(bodyBytes)); bodyStr != "" {
+			detail = bodyStr
+		} else if errMsg := resp.Header.Get("X-Error-Message"); errMsg != "" {
+			detail = errMsg
+		} else {
+			detail = resp.Status
 		}
-		if bodyStr := strings.TrimSpace(string(bodyBytes)); bodyStr != "" {
-			return errors.Errorf("bad status code %d: %s", resp.StatusCode, bodyStr)
+		if resp.StatusCode == http.StatusUnauthorized {
+			return errors.Errorf("bad status code %d (%s): Hugging Face API suggests either an invalid username/password or a non-existent/private repository -- check that the model name is correct, or HF_TOKEN",
+				resp.StatusCode, detail)
 		}
-		if errMsg := resp.Header.Get("X-Error-Message"); errMsg != "" {
-			return errors.Errorf("bad status code %d: %q", resp.StatusCode, errMsg)
-		}
-		return errors.Errorf("bad status code %d: %s", resp.StatusCode, resp.Status)
+		return errors.Errorf("bad status code %d: %s", resp.StatusCode, detail)
 	}
 
 	contentLength := resp.ContentLength
@@ -253,6 +258,11 @@ func (m *Manager) FetchHeader(ctx context.Context, url string) (header http.Head
 
 	// Check status code.
 	if resp.StatusCode != 200 {
+		if resp.StatusCode == http.StatusUnauthorized {
+			err = errors.Errorf("request for metadata from %q failed with %q: Hugging Face API suggests either an invalid username/password or a non-existent/private repository -- check that the model name is correct, or HF_TOKEN",
+				url, resp.Status)
+			return
+		}
 		err = errors.Errorf("request for metadata from %q failed with the following message: %q",
 			url, resp.Status)
 		return
