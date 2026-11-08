@@ -48,6 +48,7 @@ func main() {
 	horizonSteps := flag.Int("horizon-steps", 864, "Number of horizon steps (default: 72 hours at 5-min intervals)")
 	backendConfig := flag.String("backend", "go", "GoMLX backend config")
 	useMMap := flag.Bool("mmap", safetensors.DefaultUseMMap(), "Use memory-mapped files (mmap) when loading weights")
+	forceFloat32 := flag.Bool("force_float32", false, "Force Float32 instead of Float64 for internal running statistics")
 	runs := flag.Int("runs", 5, "Timed runs after the first (warm-up) one")
 	flag.Parse()
 
@@ -67,16 +68,16 @@ func main() {
 	t0 := time.Now()
 	backend := must1(compute.NewWithConfig(*backendConfig))
 	repo := openRepo(*modelID)
-	tmModel := must1(timestral.LoadModel(repo)).WithMMap(*useMMap)
+	tmModel := must1(timestral.LoadModel(repo)).WithMMap(*useMMap).WithForceFloat32(*forceFloat32)
 	numQuantiles := tmModel.Config.NumQuantiles()
-
-	fmt.Printf("%s: context %d, horizon %d, %d quantiles, batch %d, backend %q, mmap %v, GOMAXPROCS %d\n",
-		*modelID, *contextSteps, *horizonSteps, numQuantiles, batch, *backendConfig, tmModel.UseMMap(), runtime.GOMAXPROCS(0))
 
 	// Load weights into store and donate it to exec so weights are converted to shared backend
 	// constants and released from the Store automatically.
 	store := mlmodel.NewStore()
 	must(tmModel.LoadStore(backend, store))
+
+	fmt.Printf("%s: context %d, horizon %d, %d quantiles, batch %d, backend %q, mmap %v, force_float32 %v, GOMAXPROCS %d\n",
+		*modelID, *contextSteps, *horizonSteps, numQuantiles, batch, *backendConfig, tmModel.UseMMap(), tmModel.ForceFloat32(), runtime.GOMAXPROCS(0))
 
 	exec := must1(mlmodel.NewExec(backend, store, func(scope *mlmodel.Scope, x *graph.Node) *graph.Node {
 		return tmModel.BuildGraph(scope, x, *horizonSteps).

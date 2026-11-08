@@ -306,6 +306,41 @@ func TestLoadConfigFromLocalRepo(t *testing.T) {
 	assert.Equal(t, 4, loadedModel.Config.NumHeads)
 }
 
+func TestForceFloat32(t *testing.T) {
+	fc, backend := tinyForecaster(t, 4, 256)
+	defer fc.Close()
+
+	x := makeSeries(2, 1, 120, 42, false)
+
+	res64, err := fc.Forecast(x, 24).Done()
+	require.NoError(t, err)
+	defer res64.Close()
+
+	fc.Model().WithForceFloat32(true)
+	assert.True(t, fc.Model().ForceFloat32())
+
+	// Verify the graph built with ForceFloat32(true) contains no Float64 nodes.
+	exec, err := model.NewExec(backend, fc.Store(), func(scope *model.Scope, ctx *Node) *Node {
+		out := fc.Model().BuildGraph(scope, ctx, 24).Done()
+		for _, node := range ctx.Graph().Nodes() {
+			require.NotEqual(t, dtypes.Float64, node.DType(), "unexpected Float64 node in graph: %s", node)
+		}
+		return out
+	})
+	require.NoError(t, err)
+	defer exec.Finalize()
+
+	res32, err := fc.Forecast(x, 24).Done()
+	require.NoError(t, err)
+	defer res32.Close()
+
+	tensors.ConstFlatData(res64.Quantiles, func(flat64 []float32) {
+		tensors.ConstFlatData(res32.Quantiles, func(flat32 []float32) {
+			require.InDeltaSlice(t, flat64, flat32, 1e-4)
+		})
+	})
+}
+
 func f32SliceToF64(in []float32) []float64 {
 	out := make([]float64, len(in))
 	for i, v := range in {

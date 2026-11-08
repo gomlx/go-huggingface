@@ -39,6 +39,7 @@ type execCacheKey struct {
 	extremeValueThreshold float64
 	symmetricAveraging    bool
 	clipNonNegative       bool
+	forceFloat32          bool
 	hasObsMask            bool
 	hasPastCov            bool
 	hasKnownCov           bool
@@ -50,6 +51,7 @@ func NewForecaster(backend compute.Backend, modelObj *Model) (*Forecaster, error
 	if modelObj == nil {
 		return nil, errors.New("timestral.NewForecaster: modelObj cannot be nil")
 	}
+	modelObj.checkBackendFloat64(backend)
 	store := model.NewStore().WithVariableAsConst(true)
 	if modelObj.Repo != nil {
 		if err := modelObj.LoadStore(backend, store); err != nil {
@@ -62,6 +64,7 @@ func NewForecaster(backend compute.Backend, modelObj *Model) (*Forecaster, error
 // NewForecasterWithStore creates a Forecaster using an existing GoMLX model.Store.
 // Useful when variables are already loaded or initialized in store.
 func NewForecasterWithStore(backend compute.Backend, modelObj *Model, store *model.Store) *Forecaster {
+	modelObj.checkBackendFloat64(backend)
 	perShot := min(32, modelObj.Config.BlockSize)
 	return &Forecaster{
 		backend:               backend,
@@ -300,6 +303,7 @@ func (c *ForecastCall) Done() (*ForecastResult, error) {
 		return nil, errors.Errorf("symmetric averaging needs quantile levels symmetric about 0.5, got %v", f.model.Config.QuantileKnots)
 	}
 
+	f.model.checkBackendFloat64(f.backend)
 	key := execCacheKey{
 		horizonSteps:          c.predictionLength,
 		maxContext:            f.maxContext,
@@ -308,6 +312,7 @@ func (c *ForecastCall) Done() (*ForecastResult, error) {
 		extremeValueThreshold: f.extremeValueThreshold,
 		symmetricAveraging:    c.symmetricAveraging,
 		clipNonNegative:       c.clipNonNegative,
+		forceFloat32:          f.model.ForceFloat32(),
 		hasObsMask:            maskTensor != nil,
 		hasPastCov:            pastTensor != nil,
 		hasKnownCov:           knownTensor != nil,

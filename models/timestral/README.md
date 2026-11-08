@@ -494,7 +494,7 @@ With `graph.CumMax` added (Section 3):
 
 ### 7.2. Float64 vs Float32 in Welford Causal Statistics (`scaler.go`)
 - In Python's `compute_causal_statistics` and `advancing_block_frames`, Welford running sums (`cum_w`, `cum_x`, `m2`) are accumulated in `float64` (`dtypes.Float64`) to prevent catastrophic cancellation when a time series has a large constant offset (e.g. $10^6 \pm 1$) over $32,768$ steps, and then cast back to `dtypes.Float32`.
-- All GoMLX backends (`go` and `xla`) support `dtypes.Float64` for `ConvertDType`, `CumSum`, `Add`, `Sub`, `Mul`, `Div`, `Sqrt`, `Max`, `Min`, and `Where`.
+- Backends that do not support `dtypes.Float64` (such as Apple Metal / `mps`) are automatically detected by `Model`, which logs a warning and falls back to `dtypes.Float32` (with `float32Tiny = 2^-126` in `welfordCombine`). Callers can also explicitly set `tmModel.WithForceFloat32(true)` (or pass `-force_float32` in `./examples/timestral`) to force `Float32` statistics and silence the warning.
 - In `advancing_block_frames`, the context patch moments are reduced per patch (`[R, L, P] -> [R, L]`), combined via `cumulativeWelford` ($\lceil \log_2 L \rceil$ steps over patch count $L$, e.g. 9 steps for $L = 378$), and then unrolled `for h := range nPred` (at most 32 iterations) to fold each predicted median patch into the Welford state.
 
 ### 7.3. Partial RoPE with Per-Row Anchored Positions (`layers.go`)
