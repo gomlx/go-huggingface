@@ -7,6 +7,10 @@
     - Added an explanatory hint on HTTP 401 (`StatusUnauthorized`) responses ("Hugging Face API suggests either an invalid username/password or a non-existent/private repository -- check that the model name is correct, or HF_TOKEN").
   - `hub`:
     - Default `Repo.authToken` in `hub.New` to the `HF_TOKEN` environment variable when set (can still be overridden or cleared via `Repo.WithAuth`).
+  - `examples/msmarco/benchmark_embed`:
+    - Added `-test_backend` flag to compare embeddings between the default backend (`GOMLX_BACKEND`) and a secondary backend under test.
+    - Refactored reporting into `SpeedStats` / `ReportSpeed` and `DiffStats` / `ReportDifferences`, displaying a `Metric | Mean | Max` comparison table covering element-wise absolute difference (MAE), element-wise root mean square error (RMSE), passage Euclidean distance ($L_2$), passage relative $L_2$, and passage cosine distance ($1 - \cos(u, v)$) across non-padded sentences.
+    - Increased `model.Exec` compilation cache limit to 64 (`SetMaxCache(64)`).
 
 - 2026/11/06:
   - `internal/downloader`:
