@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- 2026/11/08:
+  - `examples/msmarco/benchmark_embed`:
+    - Added `-test_backend` flag to compare embeddings between the default backend (`GOMLX_BACKEND`) and a secondary backend under test.
+    - Refactored reporting into `SpeedStats` / `ReportSpeed` and `DiffStats` / `ReportDifferences`, displaying a `Metric | Mean | Max` comparison table covering element-wise absolute difference (MAE), element-wise root mean square error (RMSE), passage Euclidean distance ($L_2$), passage relative $L_2$, and passage cosine distance ($1 - \cos(u, v)$) across non-padded sentences.
+    - Increased `model.Exec` compilation cache limit to 64 (`SetMaxCache(64)`).
+
 - 2026/11/06:
   - `internal/downloader`:
     - Validated downloaded byte count against `resp.ContentLength`. When `downloadedBytes != contentLength` or upon `io.ErrUnexpectedEOF`, `Manager.Download` now aborts with a descriptive error including both the downloaded byte count and expected `Content-Length`, ensuring incomplete `.part` files are removed rather than promoted to final files.

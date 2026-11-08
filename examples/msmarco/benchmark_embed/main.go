@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"math"
 	"math/bits"
 	"net/http"
 	_ "net/http/pprof"
@@ -51,10 +52,13 @@ var (
 		"The optimal value depends on the backend and the bucket size (-bucket), for GPUs usually 1 or 2 is enough.")
 	flagProfile = flag.Bool("profile", false, "Enable profiling.")
 	flagCPUProf = flag.String("cpuprof", "", "Write CPU profile to file.")
-	flagWarmup  = flag.Bool("warmup", false, "Do a warmup run over the dataset first, compiling the execution graph for each new batch shape encountered.")
-	flagShapes  = flag.Bool("shapes", false, "Report the shapes of the batches encountered during the warmup run.")
-	flagDynamic = flag.Bool("dynamic", true, "Use dynamic shapes if supported by the backend.")
+	flagWarmup      = flag.Bool("warmup", false, "Do a warmup run over the dataset first, compiling the execution graph for each new batch shape encountered.")
+	flagShapes      = flag.Bool("shapes", false, "Report the shapes of the batches encountered during the warmup run.")
+	flagDynamic     = flag.Bool("dynamic", true, "Use dynamic shapes if supported by the backend.")
+	flagTestBackend = flag.String("test_backend", "", "Optional secondary backend config (e.g. 'go' or 'xla:cpu') to compare embeddings against the default backend.")
 )
+
+const execMaxCacheSize = 64
 
 func MapHas[K comparable, V any](m map[K]V, k K) bool {
 	_, ok := m[k]
@@ -104,17 +108,56 @@ func main() {
 		return compute.New()
 	})
 	fmt.Printf("- Backend: %s\n", backend.Description())
-	store := model.NewStore()
 
 	padID := 0
 	if id, err := tokenizer.SpecialTokenID(tapi.TokPad); err == nil {
 		padID = id
 	}
 
+	embedExec := createEmbedExec(backend, repo, hfModel, padID)
+
+	var testBackend compute.Backend
+	var testEmbedExec *model.Exec
+	if *flagTestBackend != "" {
+		testBackend = mustRunWithElapsedTime(fmt.Sprintf("Initializing test backend (%s)", *flagTestBackend), func() (compute.Backend, error) {
+			return compute.NewWithConfig(*flagTestBackend)
+		})
+		fmt.Printf("- Test Backend: %s\n", testBackend.Description())
+		testEmbedExec = createEmbedExec(testBackend, repo, hfModel, padID)
+	}
+
+	// Dataset preparation and stats.
+	ds := datasets.New(msmarco.ID)
+	limit := *flagLimit
+	dsInfo, err := ds.Info()
+	if err != nil {
+		klog.Fatalf("Failed to get dataset info: %v", err)
+	}
+	if !MapHas(dsInfo.DatasetInfo, msmarco.Config) || !MapHas(dsInfo.DatasetInfo[msmarco.Config].Splits, *flagMSMarcoSplit) {
+		klog.Fatalf("Dataset %q doesn't contents for config=%q / split=%q", ds.ID, msmarco.Config, *flagMSMarcoSplit)
+	}
+	splitInfo := dsInfo.DatasetInfo[msmarco.Config].Splits[*flagMSMarcoSplit]
+	totalQueries := splitInfo.NumExamples
+	fmt.Printf("- Dataset %q, split %q: %d queries in total\n", ds.ID, *flagMSMarcoSplit, totalQueries)
+	if limit > 0 {
+		limit = min(limit, int(totalQueries))
+	}
+
+	if *flagWarmup {
+		fmt.Printf("\n--- Warmup Run ---\n")
+		runBenchmark(backend, embedExec, testBackend, testEmbedExec, tokenizer, ds, limit, int(totalQueries), true)
+	}
+
+	fmt.Printf("\n--- Benchmark Run ---\n")
+	runBenchmark(backend, embedExec, testBackend, testEmbedExec, tokenizer, ds, limit, int(totalQueries), false)
+}
+
+func createEmbedExec(backend compute.Backend, repo *hub.Repo, hfModel *transformer.Model, padID int) *model.Exec {
+	store := model.NewStore()
 	var embedExec *model.Exec
 	var err error
 	if repoHasSafetensors(repo) {
-		mustRunWithElapsedTime("Loading variables into store", func() (any, error) {
+		mustRunWithElapsedTime(fmt.Sprintf("Loading variables into store (%s)", backend.Name()), func() (any, error) {
 			return nil, hfModel.LoadStore(backend, store)
 		})
 
@@ -125,7 +168,7 @@ func main() {
 			return graph.ConvertDType(x, dtypes.Float32)
 		})
 		if err != nil {
-			klog.Fatalf("Failed to create model executor: %v", err)
+			klog.Fatalf("Failed to create model executor (%s): %v", backend.Name(), err)
 		}
 	} else if onnxFile, ok := findONNXFile(repo); ok {
 		onnxModel := mustRunWithElapsedTime(fmt.Sprintf("Loading ONNX model (%s)", onnxFile), func() (onnx.Model, error) {
@@ -135,7 +178,7 @@ func main() {
 			}
 			return parser.ParseFile(localPath)
 		})
-		mustRunWithElapsedTime("Loading ONNX variables into store", func() (any, error) {
+		mustRunWithElapsedTime(fmt.Sprintf("Loading ONNX variables into store (%s)", backend.Name()), func() (any, error) {
 			return nil, onnxModel.VariablesToScope(store.RootScope())
 		})
 
@@ -169,47 +212,179 @@ func main() {
 			return graph.ConvertDType(x, dtypes.Float32)
 		})
 		if err != nil {
-			klog.Fatalf("Failed to create ONNX model executor: %v", err)
+			klog.Fatalf("Failed to create ONNX model executor (%s): %v", backend.Name(), err)
 		}
 	} else {
 		klog.Fatalf("No safetensors or ONNX model files found in repository %q", *flagModel)
 	}
+	embedExec.SetMaxCache(execMaxCacheSize)
 	embedExec.DonateStore()
 	if *flagDynamic && backend.Capabilities().HasDynamicShapes() {
 		embedExec.WithDynamicAxes([]string{"batch", "seq_len"})
 	}
-
-	// Dataset preparation and stats.
-	ds := datasets.New(msmarco.ID)
-	limit := *flagLimit
-	dsInfo, err := ds.Info()
-	if err != nil {
-		klog.Fatalf("Failed to get dataset info: %v", err)
-	}
-	if !MapHas(dsInfo.DatasetInfo, msmarco.Config) || !MapHas(dsInfo.DatasetInfo[msmarco.Config].Splits, *flagMSMarcoSplit) {
-		klog.Fatalf("Dataset %q doesn't contents for config=%q / split=%q", ds.ID, msmarco.Config, *flagMSMarcoSplit)
-	}
-	splitInfo := dsInfo.DatasetInfo[msmarco.Config].Splits[*flagMSMarcoSplit]
-	totalQueries := splitInfo.NumExamples
-	fmt.Printf("- Dataset %q, split %q: %d queries in total\n", ds.ID, *flagMSMarcoSplit, totalQueries)
-	if limit > 0 {
-		limit = min(limit, int(totalQueries))
-	}
-
-	if *flagWarmup {
-		fmt.Printf("\n--- Warmup Run ---\n")
-		runBenchmark(backend, tokenizer, embedExec, ds, limit, int(totalQueries), true)
-	}
-
-	fmt.Printf("\n--- Benchmark Run ---\n")
-	runBenchmark(backend, tokenizer, embedExec, ds, limit, int(totalQueries), false)
+	return embedExec
 }
 
 type shapeKey struct {
 	batchSize, seqLen int
 }
 
-func runBenchmark(backend compute.Backend, tokenizer tokenizers.Tokenizer, embedExec *model.Exec, ds *datasets.Dataset, limit, totalQueries int, isWarmup bool) {
+// SpeedStats holds counters for the benchmark speed report.
+type SpeedStats struct {
+	NumSentencesProcessed    int
+	NumTokensProcessed       int64
+	NumNonPadTokensProcessed int64
+	Elapsed                  time.Duration
+	CPUElapsed               time.Duration
+	IsWarmup                 bool
+	UniqueShapes             int
+}
+
+// DiffStats holds accumulators for comparing embeddings between two backends.
+type DiffStats struct {
+	mu sync.Mutex
+
+	NumSentences int64
+	NumElements  int64
+
+	// Element-wise differences: |u_i - v_i| and (u_i - v_i)^2
+	SumAbsDiff float64
+	MaxAbsDiff float64
+	SumSqDiff  float64
+	MaxSqDiff  float64
+
+	// Per-passage vector differences
+	SumL2Dist     float64
+	MaxL2Dist     float64
+	SumRelL2Dist  float64
+	MaxRelL2Dist  float64
+	SumCosineDist float64
+	MaxCosineDist float64
+}
+
+func (d *DiffStats) UpdateBatch(refTensor, testTensor *tensors.Tensor, references []bucket.Reference) {
+	var refFlat, testFlat []float32
+	refTensor.MustConstFlatData(func(flat any) {
+		refFlat = flat.([]float32)
+	})
+	testTensor.MustConstFlatData(func(flat any) {
+		testFlat = flat.([]float32)
+	})
+
+	batchSize := len(references)
+	if batchSize == 0 || len(refFlat) == 0 || len(refFlat) != len(testFlat) {
+		klog.Fatalf("Mismatched output tensor sizes: ref=%d floats, test=%d floats (batchSize=%d)",
+			len(refFlat), len(testFlat), batchSize)
+	}
+	embedDim := len(refFlat) / batchSize
+
+	var (
+		localSentences  int64
+		localElements   int64
+		localSumAbsDiff float64
+		localMaxAbsDiff float64
+		localSumSqDiff  float64
+		localMaxSqDiff  float64
+		localSumL2      float64
+		localMaxL2      float64
+		localSumRelL2   float64
+		localMaxRelL2   float64
+		localSumCosDist float64
+		localMaxCosDist float64
+	)
+
+	for rowIdx, ref := range references {
+		if ref == nil {
+			// Padded row in bucket, skip.
+			continue
+		}
+		localSentences++
+		localElements += int64(embedDim)
+
+		offset := rowIdx * embedDim
+		u := refFlat[offset : offset+embedDim]
+		v := testFlat[offset : offset+embedDim]
+
+		var dotUV, normUSq, normVSq, diffSqSum float64
+		for i := range embedDim {
+			ui := float64(u[i])
+			vi := float64(v[i])
+			diff := math.Abs(ui - vi)
+			sqDiff := diff * diff
+
+			localSumAbsDiff += diff
+			if diff > localMaxAbsDiff {
+				localMaxAbsDiff = diff
+			}
+			localSumSqDiff += sqDiff
+			if sqDiff > localMaxSqDiff {
+				localMaxSqDiff = sqDiff
+			}
+
+			diffSqSum += sqDiff
+			dotUV += ui * vi
+			normUSq += ui * ui
+			normVSq += vi * vi
+		}
+
+		l2 := math.Sqrt(diffSqSum)
+		localSumL2 += l2
+		if l2 > localMaxL2 {
+			localMaxL2 = l2
+		}
+
+		normU := math.Sqrt(normUSq)
+		normV := math.Sqrt(normVSq)
+		denomNorm := max(normU, 1e-12)
+		relL2 := l2 / denomNorm
+		localSumRelL2 += relL2
+		if relL2 > localMaxRelL2 {
+			localMaxRelL2 = relL2
+		}
+
+		var cosDist float64
+		if normU > 1e-12 && normV > 1e-12 {
+			cosSim := dotUV / (normU * normV)
+			// Clamp only above 1.0 to avoid negative cosine distance from float rounding.
+			cosDist = max(0.0, 1.0-cosSim)
+		}
+		localSumCosDist += cosDist
+		if cosDist > localMaxCosDist {
+			localMaxCosDist = cosDist
+		}
+	}
+
+	if localSentences == 0 {
+		return
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.NumSentences += localSentences
+	d.NumElements += localElements
+	d.SumAbsDiff += localSumAbsDiff
+	if localMaxAbsDiff > d.MaxAbsDiff {
+		d.MaxAbsDiff = localMaxAbsDiff
+	}
+	d.SumSqDiff += localSumSqDiff
+	if localMaxSqDiff > d.MaxSqDiff {
+		d.MaxSqDiff = localMaxSqDiff
+	}
+	d.SumL2Dist += localSumL2
+	if localMaxL2 > d.MaxL2Dist {
+		d.MaxL2Dist = localMaxL2
+	}
+	d.SumRelL2Dist += localSumRelL2
+	if localMaxRelL2 > d.MaxRelL2Dist {
+		d.MaxRelL2Dist = localMaxRelL2
+	}
+	d.SumCosineDist += localSumCosDist
+	if localMaxCosDist > d.MaxCosineDist {
+		d.MaxCosineDist = localMaxCosDist
+	}
+}
+
+func runBenchmark(backend compute.Backend, embedExec *model.Exec, testBackend compute.Backend, testEmbedExec *model.Exec, tokenizer tokenizers.Tokenizer, ds *datasets.Dataset, limit, totalQueries int, isWarmup bool) {
 	// Structured concurrency (keep track of goroutines).
 	var wg sync.WaitGroup
 
@@ -262,8 +437,10 @@ func runBenchmark(backend compute.Backend, tokenizer tokenizers.Tokenizer, embed
 
 	// Process batches and observe performance.
 	startTime, startCPUTime := time.Now(), cpuTime()
-	var numTokensProcessed, numNonPadTokensProcessed int64
-	var numSentencesProcessed int
+	var speedStats SpeedStats
+	speedStats.IsWarmup = isWarmup
+	var diffStats DiffStats
+
 	expectedNumQueries := limit
 	if expectedNumQueries <= 0 {
 		expectedNumQueries = totalQueries
@@ -280,18 +457,18 @@ func runBenchmark(backend compute.Backend, tokenizer tokenizers.Tokenizer, embed
 		var sentencesPerSecond float64
 		for count := range numSentencesProcessedChan {
 			// fmt.Printf("\r- Got %d sentences processed%s\n", count, humanize.EraseToEndOfLine)
-			numSentencesProcessed += count
+			speedStats.NumSentencesProcessed += count
 
 			// Report progress every second.
 			if time.Since(lastReportTime) > time.Second {
 				lastReportTime = time.Now()
 
 				// ETA estimation.
-				sentencesPerSecond = float64(numSentencesProcessed) / time.Since(startTime).Seconds()
+				sentencesPerSecond = float64(speedStats.NumSentencesProcessed) / time.Since(startTime).Seconds()
 				eta := "Unknown"
 				expectedTotalSentences := 10 * expectedNumQueries
-				if numSentencesProcessed > 0 {
-					remainingSeconds := float64(expectedTotalSentences-numSentencesProcessed) / sentencesPerSecond
+				if speedStats.NumSentencesProcessed > 0 {
+					remainingSeconds := float64(expectedTotalSentences-speedStats.NumSentencesProcessed) / sentencesPerSecond
 					if remainingSeconds > 0 {
 						eta = humanize.Duration(time.Duration(int64(remainingSeconds*1e9)) * time.Nanosecond)
 					} else {
@@ -302,7 +479,7 @@ func runBenchmark(backend compute.Backend, tokenizer tokenizers.Tokenizer, embed
 				speed := emaSpeed
 				emaMu.RUnlock()
 				fmt.Printf("\r   - Processed %s / %s passages (%s, %s non-padding) -- ETA %s ...%s",
-					humanize.Count(int64(numSentencesProcessed)), humanize.Count(int64(expectedTotalSentences)), humanize.Speed(sentencesPerSecond, "passages"),
+					humanize.Count(int64(speedStats.NumSentencesProcessed)), humanize.Count(int64(expectedTotalSentences)), humanize.Speed(sentencesPerSecond, "passages"),
 					humanize.Speed(speed, "tokens"), eta, humanize.EraseToEndOfLine)
 			}
 		}
@@ -311,7 +488,7 @@ func runBenchmark(backend compute.Backend, tokenizer tokenizers.Tokenizer, embed
 		speed := emaSpeed
 		emaMu.RUnlock()
 		fmt.Printf("\r  ✅ Processed %s / %s passages (%s, %s non-padding) -- done.%s\n",
-			humanize.Count(int64(numSentencesProcessed)), humanize.Count(int64(expectedTotalSentences)), humanize.Speed(sentencesPerSecond, "passages"),
+			humanize.Count(int64(speedStats.NumSentencesProcessed)), humanize.Count(int64(expectedTotalSentences)), humanize.Speed(sentencesPerSecond, "passages"),
 			humanize.Speed(speed, "tokens"), humanize.EraseToEndOfLine)
 	})
 
@@ -357,7 +534,8 @@ func runBenchmark(backend compute.Backend, tokenizer tokenizers.Tokenizer, embed
 				default:
 					klog.Fatalf("Unsupported int of %d-bits architecture", bits.UintSize)
 				}
-				inputTensor, err := tensors.FromRaw(backend, 0, shapes.Make(dtype, batchSize, seqLen), rawData)
+				batchShape := shapes.Make(dtype, batchSize, seqLen)
+				inputTensor, err := tensors.FromRaw(backend, 0, batchShape, rawData)
 				if err != nil {
 					klog.Fatalf("Failed to create input tensor: %+v", err)
 				}
@@ -369,8 +547,23 @@ func runBenchmark(backend compute.Backend, tokenizer tokenizers.Tokenizer, embed
 					fmt.Println()
 					klog.Fatalf("Failed to execute embeddings for %s: %+v", inputTensor.Shape(), err)
 				}
-				atomic.AddInt64(&numTokensProcessed, int64(len(bk.Batch)))
-				atomic.AddInt64(&numNonPadTokensProcessed, int64(bk.NonPadTokens))
+				if testEmbedExec != nil {
+					testInputTensor, err := tensors.FromRaw(testBackend, 0, batchShape, rawData)
+					if err != nil {
+						klog.Fatalf("Failed to create test input tensor: %+v", err)
+					}
+					testOutTensor, err := testEmbedExec.Call1(testInputTensor)
+					if err != nil {
+						fmt.Println()
+						klog.Fatalf("Failed to execute test embeddings for %s: %+v", testInputTensor.Shape(), err)
+					}
+					diffStats.UpdateBatch(outTensor, testOutTensor, bk.References)
+					testInputTensor.FinalizeAll()
+					testOutTensor.FinalizeAll()
+				}
+
+				atomic.AddInt64(&speedStats.NumTokensProcessed, int64(len(bk.Batch)))
+				atomic.AddInt64(&speedStats.NumNonPadTokensProcessed, int64(bk.NonPadTokens))
 
 				// Here we simply discard the embeddings.
 				// In a real application, you would save them or use them.
@@ -410,32 +603,44 @@ func runBenchmark(backend compute.Backend, tokenizer tokenizers.Tokenizer, embed
 	})
 
 	wg.Wait()
-	elapsed, cpuElapsed := time.Since(startTime), cpuTime()-startCPUTime
-	fmt.Printf("Total duration: %v\n", humanize.Duration(elapsed))
+	speedStats.Elapsed = time.Since(startTime)
+	speedStats.CPUElapsed = cpuTime() - startCPUTime
+	if isWarmup {
+		speedStats.UniqueShapes = mapLen(&seenShapes)
+	}
+	fmt.Printf("Total duration: %v\n", humanize.Duration(speedStats.Elapsed))
 
-	// Print nice report table with counts and speeds.
+	if testEmbedExec != nil {
+		ReportDifferences(&diffStats)
+	} else {
+		ReportSpeed(&speedStats)
+	}
+}
+
+// ReportSpeed prints a summary table with counts and processing speeds.
+func ReportSpeed(s *SpeedStats) {
 	cpuTimePerPassage := "N/A"
-	if numSentencesProcessed > 0 {
-		cpuTimePerPassage = fmt.Sprintf("%s/passage", humanize.Duration(cpuElapsed/time.Duration(numSentencesProcessed)))
+	if s.NumSentencesProcessed > 0 {
+		cpuTimePerPassage = fmt.Sprintf("%s/passage", humanize.Duration(s.CPUElapsed/time.Duration(s.NumSentencesProcessed)))
 	}
 	names := []string{"Passages", "Tokens", "Non-Pad Tokens", "CPU Time", "~Cores"}
 	totals := []string{
-		humanize.Count(int64(numSentencesProcessed)),
-		humanize.Count(numTokensProcessed),
-		humanize.Count(numNonPadTokensProcessed),
-		humanize.Duration(cpuElapsed),
-		fmt.Sprintf("%.1f", cpuElapsed.Seconds()/elapsed.Seconds()),
+		humanize.Count(int64(s.NumSentencesProcessed)),
+		humanize.Count(s.NumTokensProcessed),
+		humanize.Count(s.NumNonPadTokensProcessed),
+		humanize.Duration(s.CPUElapsed),
+		fmt.Sprintf("%.1f", s.CPUElapsed.Seconds()/s.Elapsed.Seconds()),
 	}
 	speeds := []string{
-		humanize.Speed(float64(numSentencesProcessed)/elapsed.Seconds(), " items"),
-		humanize.Speed(float64(numTokensProcessed)/elapsed.Seconds(), "tokens"),
-		humanize.Speed(float64(numNonPadTokensProcessed)/elapsed.Seconds(), "tokens"),
+		humanize.Speed(float64(s.NumSentencesProcessed)/s.Elapsed.Seconds(), " items"),
+		humanize.Speed(float64(s.NumTokensProcessed)/s.Elapsed.Seconds(), "tokens"),
+		humanize.Speed(float64(s.NumNonPadTokensProcessed)/s.Elapsed.Seconds(), "tokens"),
 		cpuTimePerPassage,
 		"N/A",
 	}
-	if isWarmup {
+	if s.IsWarmup {
 		names = append(names, "Unique Shapes")
-		totals = append(totals, humanize.Count(mapLen(&seenShapes)))
+		totals = append(totals, humanize.Count(s.UniqueShapes))
 		speeds = append(speeds, "N/A")
 	}
 	baseStyle := lipgloss.NewStyle().Padding(0, 1)
@@ -444,21 +649,81 @@ func runBenchmark(backend compute.Backend, tokenizer tokenizers.Tokenizer, embed
 		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("238"))).
 		Headers("Metric", "Total", "Speed").
 		StyleFunc(func(row, col int) lipgloss.Style {
-			s := baseStyle
+			st := baseStyle
 			if col > 0 && row != table.HeaderRow {
-				s = s.Align(lipgloss.Right)
+				st = st.Align(lipgloss.Right)
 			}
 			if row == table.HeaderRow {
-				headerStyle := s.Foreground(lipgloss.Color("252")).Bold(true)
+				headerStyle := st.Foreground(lipgloss.Color("252")).Bold(true)
 				if col > 0 {
 					headerStyle = headerStyle.Align(lipgloss.Center)
 				}
 				return headerStyle
 			}
-			return s
+			return st
 		})
 	for i := range names {
 		t.Row(names[i], totals[i], speeds[i])
+	}
+	fmt.Println(t)
+}
+
+// ReportDifferences prints a summary table comparing embeddings between the reference and test backends.
+func ReportDifferences(d *DiffStats) {
+	if d.NumSentences == 0 || d.NumElements == 0 {
+		fmt.Println("No passages processed to compare.")
+		return
+	}
+
+	meanAbsDiff := d.SumAbsDiff / float64(d.NumElements)
+	rmse := math.Sqrt(d.SumSqDiff / float64(d.NumElements))
+	meanL2 := d.SumL2Dist / float64(d.NumSentences)
+	meanRelL2 := d.SumRelL2Dist / float64(d.NumSentences)
+	meanCosDist := d.SumCosineDist / float64(d.NumSentences)
+
+	metrics := []string{
+		"Element-wise Abs Diff (|u_i - v_i|)",
+		"Element-wise Sq Diff (RMSE)",
+		"Passage Euclidean Distance (L2)",
+		"Passage Relative L2 (||u - v||_2 / ||u||_2)",
+		"Passage Cosine Distance (1 - cos(u, v))",
+	}
+	means := []string{
+		fmt.Sprintf("%.4e", meanAbsDiff),
+		fmt.Sprintf("%.4e", rmse),
+		fmt.Sprintf("%.4e", meanL2),
+		fmt.Sprintf("%.4e", meanRelL2),
+		fmt.Sprintf("%.4e", meanCosDist),
+	}
+	maxes := []string{
+		fmt.Sprintf("%.4e", d.MaxAbsDiff),
+		fmt.Sprintf("%.4e", math.Sqrt(d.MaxSqDiff)),
+		fmt.Sprintf("%.4e", d.MaxL2Dist),
+		fmt.Sprintf("%.4e", d.MaxRelL2Dist),
+		fmt.Sprintf("%.4e", d.MaxCosineDist),
+	}
+
+	baseStyle := lipgloss.NewStyle().Padding(0, 1)
+	t := table.New().
+		Border(lipgloss.NormalBorder()).
+		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("238"))).
+		Headers("Metric", "Mean", "Max").
+		StyleFunc(func(row, col int) lipgloss.Style {
+			st := baseStyle
+			if col > 0 && row != table.HeaderRow {
+				st = st.Align(lipgloss.Right)
+			}
+			if row == table.HeaderRow {
+				headerStyle := st.Foreground(lipgloss.Color("252")).Bold(true)
+				if col > 0 {
+					headerStyle = headerStyle.Align(lipgloss.Center)
+				}
+				return headerStyle
+			}
+			return st
+		})
+	for i := range metrics {
+		t.Row(metrics[i], means[i], maxes[i])
 	}
 	fmt.Println(t)
 }
