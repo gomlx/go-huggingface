@@ -57,13 +57,11 @@ func (m *Model) SentenceEmbeddingGraph(scope *model.Scope, tokens, seqLen *graph
 	}
 
 	if x == nil {
-		// Fallback if modules.json is not present or didn't contain sentence_transformers layers
+		// Fallback if modules.json is not present or didn't contain sentence_transformers layers:
+		// match Python sentence-transformers default behavior (last-token pooling for causal
+		// decoder models, mean pooling for bidirectional encoder models).
 		lastLayer, _ := m.AllLayers(scope, tokens, seqLen)
-		x = lastLayer
-		// and apply default pooling if a pooling config exists
-		if m.PoolingConfig != nil {
-			x = m.ApplySentencePooling(x, seqLen)
-		}
+		x = m.ApplySentencePooling(lastLayer, seqLen)
 	}
 
 	return x
@@ -94,7 +92,7 @@ func (m *Model) SentenceEmbeddingFromLastHiddenState(lastHiddenState, seqLen *gr
 		}
 	}
 
-	if !appliedModules && m.PoolingConfig != nil {
+	if !appliedModules {
 		x = m.ApplySentencePooling(x, seqLen)
 	}
 	return x
@@ -125,17 +123,33 @@ func (m *Model) SingleSentenceEmbeddingExec(backend compute.Backend, scope *mode
 	})
 }
 
+// effectivePoolingConfig returns m.PoolingConfig if configured, or synthesizes a default
+// PoolingConfig matching Python sentence-transformers (last-token pooling for causal models,
+// mean pooling otherwise).
+func (m *Model) effectivePoolingConfig() *PoolingConfig {
+	if m.PoolingConfig != nil {
+		return m.PoolingConfig
+	}
+	if m.UseCausalMask() {
+		return &PoolingConfig{
+			PoolingModeLastToken: true,
+		}
+	}
+	return &PoolingConfig{
+		PoolingModeMeanTokens: true,
+	}
+}
+
 // ApplySentencePooling applies the configured pooling function to the hidden states.
+// If no PoolingConfig was loaded on the model, it defaults to last-token pooling when
+// m.UseCausalMask() is true, and mean-token pooling otherwise (matching Python sentence-transformers).
 //
 // - hiddenStates: [batchSize, seqLen, hiddenSize]
 // - seqLen: nil or [batchSize] of type Int32.
 //
 // Returns [batchSize, hiddenSize]
 func (m *Model) ApplySentencePooling(hiddenStates, seqLen *graph.Node) *graph.Node {
-	if m.PoolingConfig == nil {
-		exceptions.Panicf("no pooling config was loaded for this model")
-	}
-	cfg := m.PoolingConfig
+	cfg := m.effectivePoolingConfig()
 	g := hiddenStates.Graph()
 
 	switch {
@@ -148,11 +162,13 @@ func (m *Model) ApplySentencePooling(hiddenStates, seqLen *graph.Node) *graph.No
 			// If no seqLen is provided, assume all tokens are valid and take the last one.
 			maxSeqLenNode := graph.DimensionSize(hiddenStates, 1)
 			lastTokenIdx = graph.Sub(maxSeqLenNode, graph.Scalar(g, maxSeqLenNode.DType(), 1))
+			lastTokenIdx = graph.Max(lastTokenIdx, graph.ScalarZero(g, lastTokenIdx.DType()))
 			lastTokenIdx = graph.ExpandAxes(lastTokenIdx, 0, 1) // [1, 1]
 			lastTokenIdx = graph.DynamicBroadcastInDim(lastTokenIdx, []int{0, 1}, graph.DimensionSpecFor(hiddenStates, 0), graph.StaticDim(1))
 		} else {
-			// seqLen is [batchSize]. Last token index is seqLen - 1.
+			// seqLen is [batchSize]. Last token index is max(seqLen - 1, 0) so batch-padded empty rows (seqLen == 0) stay in bounds.
 			lastTokenIdx = graph.Sub(seqLen, graph.Scalar(g, seqLen.DType(), 1))
+			lastTokenIdx = graph.Max(lastTokenIdx, graph.ScalarZero(g, lastTokenIdx.DType()))
 			lastTokenIdx = graph.ExpandAxes(lastTokenIdx, 1) // [batchSize, 1]
 		}
 		// Gather the last token embeddings of each example.

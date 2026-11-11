@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strings"
 	"sync"
 	"time"
 
@@ -52,18 +53,33 @@ func (d *Dataset) DownloadCtx(ctx context.Context, parquetFiles ...ParquetFile) 
 		return nil, err
 	}
 
-	// Compute total bytes to download and list of files needing download
+	downloadedPaths = make([]string, len(parquetFiles))
+
+	// Compute total bytes to download and list of files needing download.
+	type pendingParquet struct {
+		pf       ParquetFile
+		destPath string
+	}
+	var toDownload []pendingParquet
 	var totalBytesToDownload uint64
 	var downloadList []string
 	logFileList := d.Verbosity >= 2 || klog.V(1).Enabled()
-	for _, pf := range parquetFiles {
+	for idxFile, pf := range parquetFiles {
 		destPath := path.Join(repoCacheDir, "parquet", pf.Config, pf.Split, pf.Filename)
+		downloadedPaths[idxFile] = destPath
 		if !files.Exists(destPath) {
-			totalBytesToDownload += uint64(pf.Size)
+			toDownload = append(toDownload, pendingParquet{pf: pf, destPath: destPath})
+			if pf.Size > 0 {
+				totalBytesToDownload += uint64(pf.Size)
+			}
 			if logFileList {
 				downloadList = append(downloadList, fmt.Sprintf("  - %s (%s)", pf.Filename, humanize.Bytes(uint64(pf.Size))))
 			}
 		}
+	}
+
+	if len(toDownload) == 0 {
+		return downloadedPaths, nil
 	}
 
 	if logFileList && len(downloadList) > 0 {
@@ -76,31 +92,47 @@ func (d *Dataset) DownloadCtx(ctx context.Context, parquetFiles ...ParquetFile) 
 	ctx, cancelFn := context.WithCancel(ctx)
 	defer cancelFn()
 
-	downloadedPaths = make([]string, len(parquetFiles))
-
 	var downloadingMu sync.Mutex
 	var firstError error
-	var requireDownload int
-	perFileDownloaded := make([]uint64, len(parquetFiles))
+	requireDownload := len(toDownload)
+	perFileDownloaded := make([]uint64, requireDownload)
+	perFileSizeRecorded := make([]bool, requireDownload)
+	for i, item := range toDownload {
+		if item.pf.Size > 0 {
+			perFileSizeRecorded[i] = true
+		}
+	}
 	var allFilesDownloaded uint64
 	var numDownloadedFiles int
 	busyLoop := `-\|/`
 	busyLoopPos := 0
+	var lastLineLen int
 	lastPrintTime := time.Now()
+	showProgress := d.ProgressBar()
 
 	ratePrintFn := func() {
-		totalStr := ""
+		currentFile := min(numDownloadedFiles+1, requireDownload)
+		var sizeStr string
 		if totalBytesToDownload > 0 {
-			totalStr = " / " + humanize.Bytes(totalBytesToDownload) + " total"
-		}
-		if firstError == nil {
-			fmt.Printf("\rDownloaded %d/%d files %c %s%s downloaded    ",
-				numDownloadedFiles, requireDownload, busyLoop[busyLoopPos], humanize.Bytes(allFilesDownloaded), totalStr)
+			displayTotal := max(totalBytesToDownload, allFilesDownloaded)
+			sizeStr = fmt.Sprintf("%s / %s", humanize.Bytes(allFilesDownloaded), humanize.Bytes(displayTotal))
 		} else {
-			fmt.Printf("\rDownloaded %d/%d files, %s%s downloaded: error - %v     ",
-				numDownloadedFiles, requireDownload, humanize.Bytes(allFilesDownloaded), totalStr,
-				firstError)
+			sizeStr = humanize.Bytes(allFilesDownloaded)
 		}
+		var line string
+		if firstError == nil {
+			line = fmt.Sprintf("- Downloading file %d/%d %c (%s)",
+				currentFile, requireDownload, busyLoop[busyLoopPos], sizeStr)
+		} else {
+			line = fmt.Sprintf("- Downloading file %d/%d (%s): error - %v",
+				currentFile, requireDownload, sizeStr, firstError)
+		}
+		padded := line
+		if len(padded) < lastLineLen {
+			padded += strings.Repeat(" ", lastLineLen-len(padded))
+		}
+		lastLineLen = len(line)
+		fmt.Printf("\r%s", padded)
 		busyLoopPos = (busyLoopPos + 1) % len(busyLoop)
 		lastPrintTime = time.Now()
 	}
@@ -114,46 +146,47 @@ func (d *Dataset) DownloadCtx(ctx context.Context, parquetFiles ...ParquetFile) 
 		downloadingMu.Unlock()
 	}
 
-	var wg sync.WaitGroup
-	for idxFile, pf := range parquetFiles {
-		// Calculate the destination path.
-		// e.g. <cacheDir>/parquet/<config>/<split>/<filename>
-		destPath := path.Join(repoCacheDir, "parquet", pf.Config, pf.Split, pf.Filename)
-		downloadedPaths[idxFile] = destPath
-
-		if files.Exists(destPath) {
-			continue
-		}
-
-		dir, _ := path.Split(destPath)
+	for _, item := range toDownload {
+		dir, _ := path.Split(item.destPath)
 		if err = os.MkdirAll(dir, 0777); err != nil {
-			return nil, errors.Wrapf(err, "while creating directory to download %q", destPath)
+			return nil, errors.Wrapf(err, "while creating directory to download %q", item.destPath)
 		}
+	}
 
+	if showProgress {
+		fmt.Printf("\nHugging Face dataset %q:\n", d.ID)
+		ratePrintFn()
+	}
+
+	var wg sync.WaitGroup
+	for idxTask, item := range toDownload {
+		idxTask, item := idxTask, item
 		wg.Go(func() {
-			downloadingMu.Lock()
-			requireDownload++
-			downloadingMu.Unlock()
-			err := downloadManager.LockedDownload(ctx, pf.URL, destPath, false, func(downloadedBytes, totalBytes int64) {
+			err := downloadManager.LockedDownload(ctx, item.pf.URL, item.destPath, false, func(downloadedBytes, totalBytes int64) {
 				downloadingMu.Lock()
 				defer downloadingMu.Unlock()
-				lastReportedBytes := perFileDownloaded[idxFile]
-				newDownloaded := uint64(downloadedBytes) - lastReportedBytes
-				allFilesDownloaded += newDownloaded
-				perFileDownloaded[idxFile] = uint64(downloadedBytes)
-				if d.Verbosity > 0 && time.Since(lastPrintTime) > time.Second {
+				if !perFileSizeRecorded[idxTask] && totalBytes > 0 {
+					totalBytesToDownload += uint64(totalBytes)
+					perFileSizeRecorded[idxTask] = true
+				}
+				lastReportedBytes := perFileDownloaded[idxTask]
+				if uint64(downloadedBytes) > lastReportedBytes {
+					allFilesDownloaded += uint64(downloadedBytes) - lastReportedBytes
+					perFileDownloaded[idxTask] = uint64(downloadedBytes)
+				}
+				if showProgress && time.Since(lastPrintTime) >= 500*time.Millisecond {
 					ratePrintFn()
 				}
 			})
 
 			if err != nil {
-				reportErrorFn(errors.WithMessagef(err, "while downloading %q", pf.URL))
+				reportErrorFn(errors.WithMessagef(err, "while downloading %q", item.pf.URL))
 				return
 			}
 
 			downloadingMu.Lock()
 			numDownloadedFiles++
-			if d.Verbosity > 0 {
+			if showProgress && numDownloadedFiles < requireDownload {
 				ratePrintFn()
 			}
 			downloadingMu.Unlock()
@@ -161,18 +194,26 @@ func (d *Dataset) DownloadCtx(ctx context.Context, parquetFiles ...ParquetFile) 
 	}
 	wg.Wait()
 
-	if requireDownload > 0 {
-		if d.Verbosity > 0 {
-			if firstError != nil {
-				fmt.Println()
-			} else {
-				totalStr := ""
-				if totalBytesToDownload > 0 {
-					totalStr = " / " + humanize.Bytes(totalBytesToDownload) + " total"
-				}
-				fmt.Printf("\rDownloaded %d/%d files, %s%s downloaded         \n",
-					numDownloadedFiles, requireDownload, humanize.Bytes(allFilesDownloaded), totalStr)
+	if showProgress {
+		if firstError != nil {
+			ratePrintFn()
+			fmt.Println()
+		} else {
+			filesWord := "files"
+			if requireDownload == 1 {
+				filesWord = "file"
 			}
+			finalBytes := allFilesDownloaded
+			if finalBytes == 0 && totalBytesToDownload > 0 {
+				finalBytes = totalBytesToDownload
+			}
+			line := fmt.Sprintf("- Downloaded %d/%d %s (%s)",
+				numDownloadedFiles, requireDownload, filesWord, humanize.Bytes(finalBytes))
+			padded := line
+			if len(padded) < lastLineLen {
+				padded += strings.Repeat(" ", lastLineLen-len(padded))
+			}
+			fmt.Printf("\r%s\n", padded)
 		}
 	}
 

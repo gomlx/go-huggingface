@@ -112,7 +112,7 @@ Manages downloading and access to HuggingFace repositories.
   - `config.json` (mandatory base config)
   - `config_sentence_transformers.json` (sentence transformer pipeline settings)
   - `modules.json` (execution pipeline: Transformer -> Pooling -> Normalize)
-  - `1_Pooling/config.json` (pooling strategy: mean, CLS, max)
+  - `1_Pooling/config.json` (pooling strategy: mean, CLS, last-token; defaults to last-token for causal decoders and mean for bidirectional encoders when absent)
 - Supports RoPE positional embeddings, layer normalization, RMSNorm, multi-head/grouped-query attention, and task prompts (`task_prompts.json`).
 
 ### 3.6. `models/sam2`
@@ -222,7 +222,11 @@ When modifying or extending this repo, keep these specific architectural nuances
 
 ---
 
-## 7. CRITICAL: CHANGELOG Note on Every Fix
+## 7. CRITICAL: Git Commits & CHANGELOG Rules
+
+> [!IMPORTANT]
+> **NEVER COMMIT BEFORE USER REVIEW**:
+> Do **not** run `git commit` or `git push` until the user has reviewed the uncommitted changes and explicitly asked to commit them. Always leave changes in the working tree for review.
 
 > [!IMPORTANT]
 > **MANDATORY FOR ALL AGENTS AND DEVELOPERS**:

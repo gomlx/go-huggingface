@@ -161,6 +161,25 @@ func (r *Repo) DownloadFiles(repoFiles ...string) (downloadedPaths []string, err
 	return r.DownloadFilesCtx(context.Background(), repoFiles...)
 }
 
+// fileSizeFromInfo returns the size in bytes recorded in RepoInfo.Siblings for fileName, or 0 if unknown.
+func (r *Repo) fileSizeFromInfo(fileName string) uint64 {
+	if r.info == nil {
+		return 0
+	}
+	for _, si := range r.info.Siblings {
+		if si.Name == fileName {
+			if si.Size > 0 {
+				return uint64(si.Size)
+			}
+			if si.LFS != nil && si.LFS.Size > 0 {
+				return uint64(si.LFS.Size)
+			}
+			return 0
+		}
+	}
+	return 0
+}
+
 // DownloadFilesCtx is like DownloadFiles but accepts a context for cancellation support.
 func (r *Repo) DownloadFilesCtx(ctx context.Context, repoFiles ...string) (downloadedPaths []string, err error) {
 	if len(repoFiles) == 0 {
@@ -183,7 +202,6 @@ func (r *Repo) DownloadFilesCtx(ctx context.Context, repoFiles ...string) (downl
 	if err != nil {
 		return nil, err
 	}
-	_ = repoCacheDir
 
 	// Get snapshot dir:
 	snapshotDir, err := r.repoSnapshotsDir()
@@ -199,43 +217,14 @@ func (r *Repo) DownloadFilesCtx(ctx context.Context, repoFiles ...string) (downl
 
 	downloadedPaths = make([]string, len(repoFiles))
 
-	// Information about download progress, and firstError to report back if needed.
-	var downloadingMu sync.Mutex
-	var firstError error
-	var requireDownload int // number of files that require download (and are not in cache yet).
-	perFileDownloaded := make([]uint64, len(repoFiles))
-	var allFilesDownloaded uint64
-	var numDownloadedFiles int
-	busyLoop := `-\|/`
-	busyLoopPos := 0
-	lastPrintTime := time.Now()
-
-	// Print downloading progress.
-	ratePrintFn := func() {
-		if firstError == nil {
-			fmt.Printf("\rDownloaded %d/%d files %c %s downloaded    ",
-				numDownloadedFiles, requireDownload, busyLoop[busyLoopPos], humanize.Bytes(allFilesDownloaded))
-		} else {
-			fmt.Printf("\rDownloaded %d/%d files, %s downloaded: error - %v     ",
-				numDownloadedFiles, requireDownload, humanize.Bytes(allFilesDownloaded),
-				firstError)
-		}
-		busyLoopPos = (busyLoopPos + 1) % len(busyLoop)
-		lastPrintTime = time.Now()
+	type pendingFile struct {
+		repoFileName string
+		fileURL      string
+		snapshotPath string
+		blobPath     string
+		size         uint64
 	}
-
-	// Report error for a download, and interrupt everyone.
-	reportErrorFn := func(err error) {
-		downloadingMu.Lock()
-		if firstError == nil {
-			firstError = err
-		}
-		cancelFn()
-		downloadingMu.Unlock()
-	}
-
-	// Loop over each file to download.
-	var wg sync.WaitGroup
+	var missing []pendingFile
 	for idxFile, repoFileName := range repoFiles {
 		fileURL, err := r.FileURL(repoFileName)
 		if err != nil {
@@ -253,79 +242,238 @@ func (r *Repo) DownloadFilesCtx(ctx context.Context, repoFiles ...string) (downl
 			// File already downloaded, skip.
 			continue
 		}
+		missing = append(missing, pendingFile{
+			repoFileName: repoFileName,
+			fileURL:      fileURL,
+			snapshotPath: snapshotPath,
+		})
+	}
+	if len(missing) == 0 {
+		return downloadedPaths, nil
+	}
 
-		// Create directory for this individual file.
-		dir, _ := path.Split(snapshotPath)
-		if err = os.MkdirAll(dir, DefaultDirCreationPerm); err != nil {
-			return nil, errors.Wrapf(err, "while creating directory to download %q", snapshotPath)
+	// Information about download progress, and firstError to report back if needed.
+	var downloadingMu sync.Mutex
+	var firstError error
+
+	// Report error for a download, and interrupt everyone.
+	reportErrorFn := func(err error) {
+		downloadingMu.Lock()
+		if firstError == nil {
+			firstError = err
 		}
+		cancelFn()
+		downloadingMu.Unlock()
+	}
 
-		// Start downloading in a separate goroutine.
-		wg.Go(func() {
-			// Download header of file for safety checks, and so we can find the blobPath.
-			header, contentLength, err := downloadManager.FetchHeader(ctx, fileURL)
+	// Phase 1: Resolve headers in parallel so we can validate ETag/redirects, check blob cache hits,
+	// and compute the exact number of files and total bytes to download before printing progress.
+	var headWG sync.WaitGroup
+	for i := range missing {
+		i := i
+		headWG.Go(func() {
+			pf := &missing[i]
+			header, contentLength, err := downloadManager.FetchHeader(ctx, pf.fileURL)
 			if err != nil {
 				reportErrorFn(err)
 				return
 			}
-			metadata := extractFileMetadata(header, fileURL, contentLength)
+			metadata := extractFileMetadata(header, pf.fileURL, contentLength)
 			etag := metadata.ETag
 			if etag == "" {
 				reportErrorFn(errors.Errorf("resource %q for %q doesn't have an ETag, not able to ensure reproduceability",
-					repoFileName, r.ID))
+					pf.repoFileName, r.ID))
 				return
 			}
-			if metadata.Location != fileURL {
+			if metadata.Location != pf.fileURL {
 				// In the case of a redirect, remove authorization header when downloading blob
 				reportErrorFn(errors.Errorf("resource %q for %q has a redirect from %q to %q: this can be unsafe if we send our authorization token to the new URL",
-					repoFileName, r.ID, fileURL, metadata.Location))
+					pf.repoFileName, r.ID, pf.fileURL, metadata.Location))
 				return
 			}
-
-			// blobPath: download only if it has already been downloaded.
-			blobPath := path.Join(repoCacheDir, "blobs", etag)
-			if !files.Exists(blobPath) {
-				requireDownload++ // This file require download.
-				err := r.GetDownloadManager().LockedDownload(ctx, fileURL, blobPath, false, func(downloadedBytes, totalBytes int64) {
-					// Execute at every report of download.
-					downloadingMu.Lock()
-					defer downloadingMu.Unlock()
-					lastReportedBytes := perFileDownloaded[idxFile]
-					newDownloaded := uint64(downloadedBytes) - lastReportedBytes
-					allFilesDownloaded += newDownloaded
-					perFileDownloaded[idxFile] = uint64(downloadedBytes)
-					if r.Verbosity > 0 && time.Since(lastPrintTime) > time.Second {
-						ratePrintFn()
-					}
-				})
-				if err != nil {
-					reportErrorFn(err)
-					return
-				}
-
-				// Done, print out progress.
-				numDownloadedFiles++
-				if r.Verbosity > 0 {
-					ratePrintFn()
-				}
-			}
-
-			// Link blob file to snapshot.
-			err = createSymLink(snapshotPath, blobPath)
-			if err != nil {
-				reportErrorFn(errors.WithMessagef(err, "while downloading %q from repository %q", repoFileName, r.ID))
+			pf.blobPath = path.Join(repoCacheDir, "blobs", etag)
+			if metadata.Size > 0 {
+				pf.size = uint64(metadata.Size)
+			} else {
+				pf.size = r.fileSizeFromInfo(pf.repoFileName)
 			}
 		})
 	}
-	wg.Wait()
-	if requireDownload > 0 {
-		if r.Verbosity > 0 {
-			if firstError != nil {
-				fmt.Println()
-			} else {
-				fmt.Printf("\rDownloaded %d/%d files, %s downloaded         \n",
-					numDownloadedFiles, requireDownload, humanize.Bytes(allFilesDownloaded))
+	headWG.Wait()
+	if firstError != nil {
+		return nil, firstError
+	}
+
+	linkSnapshotFn := func(snapshotPath, blobPath, repoFileName string) error {
+		dir, _ := path.Split(snapshotPath)
+		if err := os.MkdirAll(dir, DefaultDirCreationPerm); err != nil {
+			return errors.Wrapf(err, "while creating directory to download %q", snapshotPath)
+		}
+		if err := createSymLink(snapshotPath, blobPath); err != nil {
+			return errors.WithMessagef(err, "while downloading %q from repository %q", repoFileName, r.ID)
+		}
+		return nil
+	}
+
+	type snapshotTarget struct {
+		snapshotPath string
+		repoFileName string
+	}
+	type blobDownloadTask struct {
+		fileURL  string
+		blobPath string
+		size     uint64
+		targets  []snapshotTarget
+	}
+
+	var toDownload []blobDownloadTask
+	blobToTaskIdx := make(map[string]int)
+	var totalBytesToDownload uint64
+
+	for _, pf := range missing {
+		if files.Exists(pf.blobPath) {
+			if err := linkSnapshotFn(pf.snapshotPath, pf.blobPath, pf.repoFileName); err != nil {
+				return nil, err
 			}
+			continue
+		}
+		if taskIdx, ok := blobToTaskIdx[pf.blobPath]; ok {
+			toDownload[taskIdx].targets = append(toDownload[taskIdx].targets, snapshotTarget{
+				snapshotPath: pf.snapshotPath,
+				repoFileName: pf.repoFileName,
+			})
+			continue
+		}
+		blobToTaskIdx[pf.blobPath] = len(toDownload)
+		toDownload = append(toDownload, blobDownloadTask{
+			fileURL:  pf.fileURL,
+			blobPath: pf.blobPath,
+			size:     pf.size,
+			targets: []snapshotTarget{{
+				snapshotPath: pf.snapshotPath,
+				repoFileName: pf.repoFileName,
+			}},
+		})
+		totalBytesToDownload += pf.size
+	}
+
+	if len(toDownload) == 0 {
+		return downloadedPaths, nil
+	}
+
+	// Phase 2: Download missing blobs in parallel and report progress.
+	requireDownload := len(toDownload)
+	perFileDownloaded := make([]uint64, requireDownload)
+	perFileSizeRecorded := make([]bool, requireDownload)
+	for i, task := range toDownload {
+		if task.size > 0 {
+			perFileSizeRecorded[i] = true
+		}
+	}
+	var allFilesDownloaded uint64
+	var numDownloadedFiles int
+	busyLoop := `-\|/`
+	busyLoopPos := 0
+	var lastLineLen int
+	lastPrintTime := time.Now()
+	showProgress := r.ProgressBar()
+	progressOut := r.progressOut()
+
+	// Print downloading progress. Must be called with downloadingMu held (or single-threaded before/after wg).
+	ratePrintFn := func() {
+		currentFile := min(numDownloadedFiles+1, requireDownload)
+		var sizeStr string
+		if totalBytesToDownload > 0 {
+			displayTotal := max(totalBytesToDownload, allFilesDownloaded)
+			sizeStr = fmt.Sprintf("%s / %s", humanize.Bytes(allFilesDownloaded), humanize.Bytes(displayTotal))
+		} else {
+			sizeStr = humanize.Bytes(allFilesDownloaded)
+		}
+		var line string
+		if firstError == nil {
+			line = fmt.Sprintf("- Downloading file %d/%d %c (%s)",
+				currentFile, requireDownload, busyLoop[busyLoopPos], sizeStr)
+		} else {
+			line = fmt.Sprintf("- Downloading file %d/%d (%s): error - %v",
+				currentFile, requireDownload, sizeStr, firstError)
+		}
+		padded := line
+		if len(padded) < lastLineLen {
+			padded += strings.Repeat(" ", lastLineLen-len(padded))
+		}
+		lastLineLen = len(line)
+		fmt.Fprintf(progressOut, "\r%s", padded)
+		busyLoopPos = (busyLoopPos + 1) % len(busyLoop)
+		lastPrintTime = time.Now()
+	}
+
+	if showProgress {
+		fmt.Fprintf(progressOut, "\n%s:\n", r.repoLabel())
+		ratePrintFn()
+	}
+
+	var wg sync.WaitGroup
+	for idxTask, task := range toDownload {
+		idxTask, task := idxTask, task
+		wg.Go(func() {
+			err := downloadManager.LockedDownload(ctx, task.fileURL, task.blobPath, false, func(downloadedBytes, totalBytes int64) {
+				downloadingMu.Lock()
+				defer downloadingMu.Unlock()
+				if !perFileSizeRecorded[idxTask] && totalBytes > 0 {
+					totalBytesToDownload += uint64(totalBytes)
+					perFileSizeRecorded[idxTask] = true
+				}
+				lastReportedBytes := perFileDownloaded[idxTask]
+				if uint64(downloadedBytes) > lastReportedBytes {
+					allFilesDownloaded += uint64(downloadedBytes) - lastReportedBytes
+					perFileDownloaded[idxTask] = uint64(downloadedBytes)
+				}
+				if showProgress && time.Since(lastPrintTime) >= 500*time.Millisecond {
+					ratePrintFn()
+				}
+			})
+			if err != nil {
+				reportErrorFn(err)
+				return
+			}
+
+			for _, target := range task.targets {
+				if err := linkSnapshotFn(target.snapshotPath, task.blobPath, target.repoFileName); err != nil {
+					reportErrorFn(err)
+					return
+				}
+			}
+
+			downloadingMu.Lock()
+			numDownloadedFiles++
+			if showProgress && numDownloadedFiles < requireDownload {
+				ratePrintFn()
+			}
+			downloadingMu.Unlock()
+		})
+	}
+	wg.Wait()
+
+	if showProgress {
+		if firstError != nil {
+			ratePrintFn()
+			fmt.Fprintln(progressOut)
+		} else {
+			filesWord := "files"
+			if requireDownload == 1 {
+				filesWord = "file"
+			}
+			finalBytes := allFilesDownloaded
+			if finalBytes == 0 && totalBytesToDownload > 0 {
+				finalBytes = totalBytesToDownload
+			}
+			line := fmt.Sprintf("- Downloaded %d/%d %s (%s)",
+				numDownloadedFiles, requireDownload, filesWord, humanize.Bytes(finalBytes))
+			padded := line
+			if len(padded) < lastLineLen {
+				padded += strings.Repeat(" ", lastLineLen-len(padded))
+			}
+			fmt.Fprintf(progressOut, "\r%s\n", padded)
 		}
 	}
 	if firstError != nil {
@@ -351,7 +499,7 @@ func (r *Repo) DownloadFileCtx(ctx context.Context, file string) (downloadedPath
 // fileMetadata used by HuggingFace Hub.
 type fileMetadata struct {
 	CommitHash, ETag, Location string
-	Size                       int
+	Size                       int64
 }
 
 func extractFileMetadata(header http.Header, url string, contentLength int64) (metadata fileMetadata) {
@@ -368,13 +516,13 @@ func extractFileMetadata(header http.Header, url string, contentLength int64) (m
 
 	if sizeStr := header.Get(HeaderXLinkedSize); sizeStr != "" {
 		var err error
-		metadata.Size, err = strconv.Atoi(sizeStr)
+		metadata.Size, err = strconv.ParseInt(sizeStr, 10, 64)
 		if err != nil {
 			metadata.Size = 0
 		}
 	}
-	if metadata.Size == 0 {
-		metadata.Size = int(contentLength)
+	if metadata.Size == 0 && contentLength > 0 {
+		metadata.Size = contentLength
 	}
 	return
 }

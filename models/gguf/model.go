@@ -121,13 +121,12 @@ func (m *Model) ggufFileNames() ([]string, error) {
 
 func (m *Model) loadFiles(filenames []string) error {
 	m.extras = nil
+	localPaths, err := m.Repo.DownloadFiles(filenames...)
+	if err != nil {
+		return errors.Wrap(err, "gguf: download files")
+	}
 	for i, filename := range filenames {
-		localPath, err := m.Repo.DownloadFile(filename)
-		if err != nil {
-			return errors.Wrapf(err, "gguf: download %s", filename)
-		}
-
-		f, err := Open(localPath)
+		f, err := Open(localPaths[i])
 		if err != nil {
 			return errors.Wrapf(err, "gguf: parse %s", filename)
 		}

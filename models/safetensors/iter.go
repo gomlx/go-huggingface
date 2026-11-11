@@ -1,6 +1,7 @@
 package safetensors
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -129,7 +130,7 @@ func iterFromRepoDownload(backend compute.Backend, repo *hub.Repo, useMMap bool,
 		}
 	}
 
-	var waitStart time.Time
+	var safetensorFiles []string
 	for filename, err := range repo.IterFileNames() {
 		select {
 		case <-done:
@@ -145,16 +146,53 @@ func iterFromRepoDownload(backend compute.Backend, repo *hub.Repo, useMMap bool,
 		if filepath.Ext(filename) != ".safetensors" && !strings.HasSuffix(filename, ".safetensors") {
 			continue
 		}
+		safetensorFiles = append(safetensorFiles, filename)
+	}
+	if len(safetensorFiles) == 0 {
+		return
+	}
 
-		localPath, err := repo.DownloadFile(filename)
+	// Batch-download all .safetensors files upfront so multi-shard models report accurate
+	// file counts and total byte progress (e.g. 1/3..3/3) and download shards in parallel.
+	dlCtx, dlCancel := context.WithCancel(context.Background())
+	stopCancelWatch := make(chan struct{})
+	go func() {
+		select {
+		case <-done:
+			dlCancel()
+		case <-stopCancelWatch:
+		}
+	}()
+	localPaths, err := repo.DownloadFilesCtx(dlCtx, safetensorFiles...)
+	close(stopCancelWatch)
+	dlCancel()
+	if err != nil {
+		select {
+		case <-done:
+			return
+		default:
+		}
+		reportErrFn(errors.Wrap(err, "failed to download safetensors files"))
+		return
+	}
+
+	var waitStart time.Time
+	for _, localPath := range localPaths {
+		select {
+		case <-done:
+			return
+		default:
+		}
+
+		openFile, err := os.Open(localPath)
 		if err != nil {
-			reportErrFn(errors.Wrapf(err, "failed to download %s", filename))
+			reportErrFn(errors.Wrapf(err, "failed to open %s", localPath))
 			return
 		}
 
-		m := &Model{Repo: repo}
-		header, dataOffset, err := m.parseHeader(localPath)
+		header, dataOffset, err := parseHeaderFromReader(openFile)
 		if err != nil {
+			openFile.Close()
 			reportErrFn(errors.Wrapf(err, "failed to parse header for %s", localPath))
 			return
 		}
@@ -164,12 +202,6 @@ func iterFromRepoDownload(backend compute.Backend, repo *hub.Repo, useMMap bool,
 			tensorNames = append(tensorNames, name)
 		}
 		tensorNames = sortTensorsByOffset(tensorNames, header)
-
-		openFile, err := os.Open(localPath)
-		if err != nil {
-			reportErrFn(errors.Wrapf(err, "failed to open %s", localPath))
-			return
-		}
 
 		fi, err := openFile.Stat()
 		if err != nil {

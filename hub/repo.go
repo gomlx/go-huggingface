@@ -2,6 +2,7 @@ package hub
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"os"
@@ -61,6 +62,7 @@ type Repo struct {
 	downloadManager *downloader.Manager
 
 	useProgressBar bool
+	progressWriter io.Writer
 }
 
 // New creates a reference to a HuggingFace model given its id.
@@ -98,6 +100,7 @@ func New(id string) *Repo {
 		Verbosity:           1,
 		MaxParallelDownload: 20, // At most 20 parallel downloads.
 		extraBlobsInfo:      true,
+		useProgressBar:      true,
 	}
 }
 
@@ -162,6 +165,32 @@ func (r *Repo) WithDownloadManager(manager *downloader.Manager) *Repo {
 func (r *Repo) WithProgressBar(useProgressBar bool) *Repo {
 	r.useProgressBar = useProgressBar
 	return r
+}
+
+// ProgressBar returns whether download progress output is enabled
+// (requires both Verbosity > 0 and WithProgressBar(true)).
+func (r *Repo) ProgressBar() bool {
+	return r.Verbosity > 0 && r.useProgressBar
+}
+
+// progressOut returns the writer to use for progress output (defaults to os.Stdout).
+func (r *Repo) progressOut() io.Writer {
+	if r.progressWriter != nil {
+		return r.progressWriter
+	}
+	return os.Stdout
+}
+
+// repoLabel returns a human-readable header label for this repository (e.g. `Hugging Face repo "google/gemma-2-2b"`).
+func (r *Repo) repoLabel() string {
+	switch r.repoType {
+	case RepoTypeDataset:
+		return fmt.Sprintf("Hugging Face dataset %q", r.ID)
+	case RepoTypeSpace:
+		return fmt.Sprintf("Hugging Face space %q", r.ID)
+	default:
+		return fmt.Sprintf("Hugging Face repo %q", r.ID)
+	}
 }
 
 // flatFolderName returns a serialized version of a hf.co repo name and type, safe for disk storage

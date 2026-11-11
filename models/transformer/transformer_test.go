@@ -185,4 +185,37 @@ func TestCreateGoMLXModelPropagatesCausalMask(t *testing.T) {
 	tmBertCausal := bertModelCausal.CreateGoMLXModel(scope.In("bert_causal"))
 	require.NotNil(t, tmBertCausal)
 	assert.True(t, tmBertCausal.UseCausalMask)
+
+	// 4. Gemma 2 model configuration (ArchitectureGemma, attn_logit_softcapping, query_pre_attn_scalar, alternating layer types)
+	gemma2Model := (&Model{
+		Config: Config{
+			ModelType:             "gemma2",
+			Architectures:         []string{"Gemma2ForCausalLM"},
+			HiddenSize:            2304,
+			NumHiddenLayers:       4,
+			NumAttentionHeads:     8,
+			NumKeyValueHeads:      4,
+			HeadDim:               256,
+			IntermediateSize:      9216,
+			VocabSize:             256000,
+			HiddenActivation:      "gelu_pytorch_tanh",
+			AttnLogitSoftcapping:  50.0,
+			FinalLogitSoftcapping: 30.0,
+			QueryPreAttnScalar:    256.0,
+			SlidingWindow:         4096,
+		},
+		useCausalMask: true,
+	})
+	tmGemma2 := gemma2Model.CreateGoMLXModel(scope.In("gemma2"))
+	require.NotNil(t, tmGemma2)
+	assert.Equal(t, mltransformer.ArchitectureGemma, tmGemma2.Architecture)
+	assert.Equal(t, 50.0, tmGemma2.AttentionScoreSoftCap)
+	assert.Equal(t, 30.0, tmGemma2.FinalLogitSoftCap)
+	assert.InDelta(t, 1.0/16.0, tmGemma2.QueryKeyScale, 1e-9)
+	assert.Equal(t, []mltransformer.LayerType{
+		mltransformer.LocalLayer,
+		mltransformer.GlobalLayer,
+		mltransformer.LocalLayer,
+		mltransformer.GlobalLayer,
+	}, tmGemma2.LayerTypes)
 }

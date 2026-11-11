@@ -18,7 +18,9 @@ type Config struct {
 	RMSNormEps            float64  `json:"rms_norm_eps"`
 	LayerNormEps          float64  `json:"layer_norm_eps"`
 	AttentionLogitCap     float64  `json:"attention_logit_cap"`
+	AttnLogitSoftcapping  float64  `json:"attn_logit_softcapping"`
 	FinalLogitSoftcapping float64  `json:"final_logit_softcapping"`
+	QueryPreAttnScalar    float64  `json:"query_pre_attn_scalar"`
 
 	HiddenSizePerLayerInput int      `json:"hidden_size_per_layer_input"`
 	VocabSizePerLayerInput  int      `json:"vocab_size_per_layer_input"`
