@@ -60,8 +60,8 @@ github.com/gomlx/go-darwinml v0.1.4 h1:Y4U0UnLit5UvpxkQOYFAQ0jqgJg2BVkVvpM4Q4zTu
 github.com/gomlx/go-darwinml v0.1.4/go.mod h1:mV/hfZIGSsd3GMpe9zl1eP6HDhVqZvphxiCqzqCLdwo=
 github.com/gomlx/go-xla v0.4.27 h1:7sarzfmaNcYvT6gM7dbFFzjqeKd0rAHIm3weqfjQAGA=
 github.com/gomlx/go-xla v0.4.27/go.mod h1:UCqM2qnYY3/68PNopbskyROihintpkWS/gYxqXKoSnc=
-github.com/gomlx/gomlx v0.28.32 h1:N2JABR3E6Jt+VIO92UbPxT/5/w5brXLfsjZHcJkqVYU=
-github.com/gomlx/gomlx v0.28.32/go.mod h1:Hn0vbQgzkjkXz6WhUD3bRefjMGGXuzMwjOKI4KXbCzo=
+github.com/gomlx/gomlx v0.28.33 h1:osr+iwTl12CwC2JAR+mRnfdOjoxSXtTrQBYaNxrHOL4=
+github.com/gomlx/gomlx v0.28.33/go.mod h1:Hn0vbQgzkjkXz6WhUD3bRefjMGGXuzMwjOKI4KXbCzo=
 github.com/gomlx/onnx-gomlx v0.5.21 h1:5Ycek6Vxz4yi3MhtVgrsyFfmT/zqUYsGl4ebrd04GNM=
 github.com/gomlx/onnx-gomlx v0.5.21/go.mod h1:OjJrSK4fM5gskpuWyULArBx3pT9vTMdSvvRLyhTGTTY=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
