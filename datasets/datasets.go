@@ -58,6 +58,12 @@ func (d *Dataset) WithCacheDir(cacheDir string) *Dataset {
 	return d
 }
 
+// WithProgressBar configures the usage of progress bar during download. Defaults to true.
+func (d *Dataset) WithProgressBar(useProgressBar bool) *Dataset {
+	d.Repo.WithProgressBar(useProgressBar)
+	return d
+}
+
 // String returns a formatted, human-readable summary of the dataset.
 func (d *Dataset) String() string {
 	info, err := d.Info()

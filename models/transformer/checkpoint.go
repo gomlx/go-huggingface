@@ -75,14 +75,21 @@ func (m *Model) SaveConfigs(dir string) error {
 	copiedPooling := false
 
 	if m.Repo != nil {
+		var configFiles []string
 		for fileName, err := range m.Repo.IterFileNames() {
 			if err != nil {
 				return errors.Wrapf(err, "failed listing files from repository %q", m.Repo.ID)
 			}
-			if !isConfigOrTokenizerFile(fileName) {
-				continue
+			if isConfigOrTokenizerFile(fileName) {
+				configFiles = append(configFiles, fileName)
 			}
-
+		}
+		if len(configFiles) > 0 {
+			if err := m.Repo.FetchFiles(configFiles...); err != nil {
+				return errors.Wrapf(err, "failed fetching config files from repository %q", m.Repo.ID)
+			}
+		}
+		for _, fileName := range configFiles {
 			data, err := m.Repo.ReadFile(fileName)
 			if err != nil {
 				return errors.Wrapf(err, "failed reading %q from repository %q", fileName, m.Repo.ID)

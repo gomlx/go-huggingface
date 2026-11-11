@@ -3,6 +3,11 @@
 ## Unreleased
 
 - 2026/11/11:
+  - `hub`, `datasets`:
+    - Improved download progress output in `Repo.DownloadFilesCtx` and `Dataset.DownloadCtx` to display repository context (`Hugging Face repo "<id>":` / `Hugging Face dataset "<id>":`), active file index (`- Downloading file 1/3 ... (<downloaded> / <total>)`), and completion summary (`- Downloaded 3/3 files (<total>)`), printing nothing when all files are already cached.
+    - Resolved file headers upfront in `Repo.DownloadFilesCtx` before starting transfers so total file counts and total byte sizes are known immediately, fixed unsynchronized progress counter updates, avoided creating empty snapshot subdirectories on failed/404 requests, used `int64` for `fileMetadata.Size`, and honored `Repo.WithProgressBar` (defaulting to `true`, plus added `Repo.ProgressBar()` and `Dataset.WithProgressBar()`).
+  - `models/safetensors`, `models/gguf`, `models/transformer`, `tokenizers`:
+    - Batched multi-file downloads (`Repo.DownloadFiles` / `Repo.FetchFiles`) in `safetensors.IterTensorsFromRepoWithMMap`, `safetensors.Model.LoadSingleFileModel`, `safetensors.Model.IterSafetensors`, `safetensors.Model.IterTensors`, `gguf.Model.loadFiles`, `transformer.LoadModel`, `transformer.Model.SaveConfigs`, and `tokenizers.New`, and checked `Repo.HasFile` before reading optional configuration/index files so multi-shard models download in parallel with a single unified progress counter instead of repeated `0/1` messages.
   - `models/transformer`:
     - Added Gemma 2 (`model_type: "gemma2"`) configuration support in `Config` and `Model.CreateGoMLXModel`: mapped `gemma2` (and `gemma`) to `ArchitectureGemma` (without Q/K RMSNorm), parsed `attn_logit_softcapping` and `query_pre_attn_scalar`, fell back to `hidden_act` when `hidden_activation` is unset, and populated alternating `sliding_attention` / `full_attention` `LayerTypes` when `sliding_window > 0` and `layer_types` is omitted.
     - Matched Python `sentence-transformers` default pooling when `PoolingConfig` / `modules.json` is absent (`SentenceEmbeddingGraph`, `SentenceEmbeddingFromLastHiddenState`, and `ApplySentencePooling`): default to last-token pooling when `Model.UseCausalMask()` is true, and mean pooling otherwise; also clamped `lastTokenIdx` to `>= 0` so batch-padded empty rows (`seqLen == 0`) stay in bounds.

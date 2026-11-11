@@ -86,24 +86,23 @@ func (m *Model) LoadSingleFileModel() error {
 		return errors.New("Repocreate a ModelSafetensor with NewModelSafetensor first")
 	}
 
-	localPaths := []string{}
+	var safetensorFiles []string
 	for filename, err := range m.Repo.IterFileNames() {
 		if err != nil {
 			return err
 		}
-
 		if filepath.Ext(filename) == ".safetensors" {
-			// Download and parse the file to get tensor names
-			localPath, err := m.Repo.DownloadFile(filename)
-			if err != nil {
-				return errors.Wrapf(err, "failed to download %s", filename)
-			}
-			localPaths = append(localPaths, localPath)
+			safetensorFiles = append(safetensorFiles, filename)
 		}
 	}
 
-	if len(localPaths) == 0 {
+	if len(safetensorFiles) == 0 {
 		return errors.New("no .safetensors files found in repository")
+	}
+
+	localPaths, err := m.Repo.DownloadFiles(safetensorFiles...)
+	if err != nil {
+		return errors.Wrap(err, "failed to download safetensors files")
 	}
 
 	header, _, err := m.parseHeader(localPaths[0])
@@ -188,25 +187,28 @@ func (m *Model) GetSafetensor(filename string) (*FileInfo, error) {
 // The header holds metadata to all tensors contained in the file.
 func (m *Model) IterSafetensors() func(yield func(FileInfo, error) bool) {
 	return func(yield func(FileInfo, error) bool) {
+		var safetensorFiles []string
 		for filename, err := range m.Repo.IterFileNames() {
 			if err != nil {
 				yield(FileInfo{}, err)
 				return
 			}
-
-			// Only process .safetensors files
-			if !strings.HasSuffix(filename, ".safetensors") {
-				continue
+			if strings.HasSuffix(filename, ".safetensors") {
+				safetensorFiles = append(safetensorFiles, filename)
 			}
+		}
+		if len(safetensorFiles) == 0 {
+			return
+		}
 
-			// Download and parse header
-			localPath, err := m.Repo.DownloadFile(filename)
-			if err != nil {
-				yield(FileInfo{}, errors.Wrapf(err, "failed to download %s", filename))
-				return
-			}
+		localPaths, err := m.Repo.DownloadFiles(safetensorFiles...)
+		if err != nil {
+			yield(FileInfo{}, errors.Wrap(err, "failed to download safetensors files"))
+			return
+		}
 
-			header, _, err := m.parseHeader(localPath)
+		for i, filename := range safetensorFiles {
+			header, _, err := m.parseHeader(localPaths[i])
 			if err != nil {
 				yield(FileInfo{}, errors.Wrapf(err, "failed to parse header for %s", filename))
 				return
@@ -279,8 +281,15 @@ func (m *Model) IterTensors(backend compute.Backend) func(yield func(TensorAndNa
 			shardToTensors[fileName] = append(shardToTensors[fileName], tensorName)
 		}
 
+		// Pre-fetch all shard files together so multi-shard downloads are batched.
+		shardFiles := xslices.SortedKeys(shardToTensors)
+		if err := m.Repo.FetchFiles(shardFiles...); err != nil {
+			yield(TensorAndName{}, errors.Wrap(err, "failed to download safetensors shard files"))
+			return
+		}
+
 		// Process each shard file with one mmap
-		for _, fileName := range xslices.SortedKeys(shardToTensors) {
+		for _, fileName := range shardFiles {
 			// Create reader for shard.
 			reader, err := m.NewTensorReader(fileName)
 			if err != nil {

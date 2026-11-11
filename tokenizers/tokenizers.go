@@ -51,6 +51,22 @@ func New(repo *hub.Repo) (Tokenizer, error) {
 		return nil, err
 	}
 
+	// Pre-fetch tokenizer configuration and vocabulary/model files together in a single batch.
+	var toFetch []string
+	if repo.HasFile("tokenizer_config.json") {
+		toFetch = append(toFetch, "tokenizer_config.json")
+	}
+	if repo.HasFile("tokenizer.json") {
+		toFetch = append(toFetch, "tokenizer.json")
+	} else if repo.HasFile("tokenizer.model") {
+		toFetch = append(toFetch, "tokenizer.model")
+	}
+	if len(toFetch) > 0 {
+		if err := repo.FetchFiles(toFetch...); err != nil {
+			return nil, err
+		}
+	}
+
 	config, err := GetConfig(repo)
 	if err != nil {
 		return nil, err

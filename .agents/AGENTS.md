@@ -222,7 +222,11 @@ When modifying or extending this repo, keep these specific architectural nuances
 
 ---
 
-## 7. CRITICAL: CHANGELOG Note on Every Fix
+## 7. CRITICAL: Git Commits & CHANGELOG Rules
+
+> [!IMPORTANT]
+> **NEVER COMMIT BEFORE USER REVIEW**:
+> Do **not** run `git commit` or `git push` until the user has reviewed the uncommitted changes and explicitly asked to commit them. Always leave changes in the working tree for review.
 
 > [!IMPORTANT]
 > **MANDATORY FOR ALL AGENTS AND DEVELOPERS**:

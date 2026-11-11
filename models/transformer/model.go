@@ -83,7 +83,31 @@ func LoadModel(repo *hub.Repo) (*Model, error) {
 		useMMap:    safetensors.DefaultUseMMap(),
 	}
 
+	hasInfo := repo.DownloadInfo(false) == nil
+	if hasInfo {
+		if !repo.HasFile("config.json") {
+			return nil, fmt.Errorf("config.json is missing or failed to download from repo")
+		}
+		var configFiles []string
+		for _, candidate := range []string{
+			"config.json",
+			"config_sentence_transformers.json",
+			"modules.json",
+			"1_Pooling/config.json",
+		} {
+			if repo.HasFile(candidate) {
+				configFiles = append(configFiles, candidate)
+			}
+		}
+		if err := repo.FetchFiles(configFiles...); err != nil {
+			return nil, fmt.Errorf("failed to download model configurations: %w", err)
+		}
+	}
+
 	loadFile := func(filename string, v any) (bool, error) {
+		if hasInfo && !repo.HasFile(filename) {
+			return false, nil
+		}
 		b, err := repo.ReadFile(filename)
 		if err != nil {
 			// File likely doesn't exist or network error. We treat as missing.
@@ -374,6 +398,9 @@ func (m *Model) Description() string {
 }
 
 func (m *Model) estimateSizeFromIndex() {
+	if !m.Repo.HasFile("model.safetensors.index.json") {
+		return
+	}
 	// Try to see if there is an index with total_size metadata
 	b, err := m.Repo.ReadFile("model.safetensors.index.json")
 	if err == nil {
