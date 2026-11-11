@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- 2026/11/11:
+  - `models/transformer`:
+    - Added Gemma 2 (`model_type: "gemma2"`) configuration support in `Config` and `Model.CreateGoMLXModel`: mapped `gemma2` (and `gemma`) to `ArchitectureGemma` (without Q/K RMSNorm), parsed `attn_logit_softcapping` and `query_pre_attn_scalar`, fell back to `hidden_act` when `hidden_activation` is unset, and populated alternating `sliding_attention` / `full_attention` `LayerTypes` when `sliding_window > 0` and `layer_types` is omitted.
+    - Matched Python `sentence-transformers` default pooling when `PoolingConfig` / `modules.json` is absent (`SentenceEmbeddingGraph`, `SentenceEmbeddingFromLastHiddenState`, and `ApplySentencePooling`): default to last-token pooling when `Model.UseCausalMask()` is true, and mean pooling otherwise; also clamped `lastTokenIdx` to `>= 0` so batch-padded empty rows (`seqLen == 0`) stay in bounds.
+  - `models/safetensors`:
+    - Fixed `iterFromRepoDownload` to read the safetensors header directly from the opened local file (`parseHeaderFromReader`) instead of passing an absolute OS cache path to `Model.parseHeader`, avoiding a spurious `Repo.Open` 404 request on remote repositories.
+
 - 2026/11/08:
   - `models/timestral`, `examples/timestral`:
     - Added `Model.WithForceFloat32(forceFloat32 bool) *Model` and `Model.ForceFloat32() bool` to use `dtypes.Float32` instead of `dtypes.Float64` for internal Welford running statistics (`ComputeCausalStatistics` and `AdvancingBlockFrames`).

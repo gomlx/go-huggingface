@@ -152,9 +152,15 @@ func iterFromRepoDownload(backend compute.Backend, repo *hub.Repo, useMMap bool,
 			return
 		}
 
-		m := &Model{Repo: repo}
-		header, dataOffset, err := m.parseHeader(localPath)
+		openFile, err := os.Open(localPath)
 		if err != nil {
+			reportErrFn(errors.Wrapf(err, "failed to open %s", localPath))
+			return
+		}
+
+		header, dataOffset, err := parseHeaderFromReader(openFile)
+		if err != nil {
+			openFile.Close()
 			reportErrFn(errors.Wrapf(err, "failed to parse header for %s", localPath))
 			return
 		}
@@ -164,12 +170,6 @@ func iterFromRepoDownload(backend compute.Backend, repo *hub.Repo, useMMap bool,
 			tensorNames = append(tensorNames, name)
 		}
 		tensorNames = sortTensorsByOffset(tensorNames, header)
-
-		openFile, err := os.Open(localPath)
-		if err != nil {
-			reportErrFn(errors.Wrapf(err, "failed to open %s", localPath))
-			return
-		}
 
 		fi, err := openFile.Stat()
 		if err != nil {

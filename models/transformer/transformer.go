@@ -99,23 +99,38 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 		}
 
 	} else {
-		arch := mltransformer.ArchitectureGemma4
-		if m.Config.ModelType != "gemma4" && m.Config.ModelType != "gemma4_text" {
+		var arch mltransformer.Architecture
+		switch m.Config.ModelType {
+		case "gemma4", "gemma4_text":
+			arch = mltransformer.ArchitectureGemma4
+		case "gemma2", "gemma":
+			arch = mltransformer.ArchitectureGemma
+		default:
 			arch = mltransformer.ArchitectureGemma3
+		}
+		activationName := m.Config.HiddenActivation
+		if activationName == "" {
+			activationName = m.Config.HiddenAct
 		}
 		tm.WithArchitecture(arch).
 			WithNormalization(layers.NormalizationRMSNorm).
 			WithNormEpsilon(m.Config.RMSNormEps).
-			WithActivation(activation.FromName(m.Config.HiddenActivation)).
+			WithActivation(activation.FromName(activationName)).
 			WithNumKVHeads(m.Config.NumKeyValueHeads).
 			WithBias(false).
 			WithFinalNormalization(layers.NormalizationRMSNorm)
 
 		attnLogitCap := m.Config.AttentionLogitCap
+		if attnLogitCap == 0 {
+			attnLogitCap = m.Config.AttnLogitSoftcapping
+		}
 		if attnLogitCap == 0 && (m.Config.ModelType == "gemma4" || m.Config.ModelType == "gemma4_text") {
 			attnLogitCap = 50.0
 			tm.WithRMSNormOffset(0.0)
 			tm.WithQueryKeyScale(1.0)
+		}
+		if m.Config.QueryPreAttnScalar > 0 {
+			tm.WithQueryKeyScale(1.0 / math.Sqrt(m.Config.QueryPreAttnScalar))
 		}
 
 		tm.WithSlidingWindow(m.Config.SlidingWindow).
@@ -126,6 +141,17 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 			layerTypes := make([]mltransformer.LayerType, m.Config.NumHiddenLayers)
 			for i, lt := range m.Config.LayerTypes {
 				if lt == "sliding_attention" {
+					layerTypes[i] = mltransformer.LocalLayer
+				} else {
+					layerTypes[i] = mltransformer.GlobalLayer
+				}
+			}
+			tm.WithLayerTypes(layerTypes)
+		} else if m.Config.ModelType == "gemma2" && m.Config.SlidingWindow > 0 && m.Config.NumHiddenLayers > 0 {
+			// Hugging Face Gemma2Config alternates sliding_attention (even layers) and full_attention (odd layers).
+			layerTypes := make([]mltransformer.LayerType, m.Config.NumHiddenLayers)
+			for i := range layerTypes {
+				if i%2 == 0 {
 					layerTypes[i] = mltransformer.LocalLayer
 				} else {
 					layerTypes[i] = mltransformer.GlobalLayer

@@ -64,5 +64,28 @@ func TestApplySentencePooling(t *testing.T) {
 					return []*graph.Node{hiddenStates}, []*graph.Node{out}
 				}, []any{tc.expected}, 1e-3)
 		}
+
+		// Default pooling when PoolingConfig == nil:
+		// - Causal models default to last-token pooling (and handle seqLen == 0 padded rows safely).
+		// - Non-causal models default to mean pooling.
+		graphtest.RunTestGraphFnWithBackend(t, "default_causal_last_token_and_zero_seqlen", backend,
+			func(g *graph.Graph) (inputs, outputs []*graph.Node) {
+				hiddenStates := graph.OnePlus(graph.Iota(g, shapes.Make(dtypes.Float32, 3*4, 2), 0))
+				hiddenStates = graph.Reshape(hiddenStates, 3, 4, 2)
+				seqLen := graph.Const(g, []int32{4, 2, 0})
+				m := (&transformer.Model{}).WithCausalMask(true)
+				out := m.SentenceEmbeddingFromLastHiddenState(hiddenStates, seqLen)
+				return []*graph.Node{hiddenStates, seqLen}, []*graph.Node{out}
+			}, []any{[][]float32{{4, 4}, {6, 6}, {9, 9}}}, 1e-3)
+
+		graphtest.RunTestGraphFnWithBackend(t, "default_bidirectional_mean_pool", backend,
+			func(g *graph.Graph) (inputs, outputs []*graph.Node) {
+				hiddenStates := graph.OnePlus(graph.Iota(g, shapes.Make(dtypes.Float32, 2*4, 2), 0))
+				hiddenStates = graph.Reshape(hiddenStates, 2, 4, 2)
+				seqLen := graph.Const(g, []int32{4, 3})
+				m := (&transformer.Model{}).WithCausalMask(false)
+				out := m.SentenceEmbeddingFromLastHiddenState(hiddenStates, seqLen)
+				return []*graph.Node{hiddenStates, seqLen}, []*graph.Node{out}
+			}, []any{[][]float32{{2.5, 2.5}, {6, 6}}}, 1e-3)
 	})
 }
