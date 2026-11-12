@@ -87,11 +87,11 @@ Adding **`GGMLQ4_1`**, **`GGMLQ5_0`**, and **`GGMLQ5_1`** to `compute` and `goml
      - `Q4_1`: $y_j = d \cdot (qs_j \mathbin{\&} \text{0xF}) + m$, $y_{j+16} = d \cdot (qs_j \gg 4) + m$.
      - `Q5_0`: 5th bits from `qh = uint32_le(block[2:6])` (`xh0 = ((qh >> j) << 4) & 0x10`, `xh1 = (qh >> (j+12)) & 0x10`), signed $q = \text{int32}((nibble \mid xh)) - 16$, $y = d \cdot q$.
      - `Q5_1`: same 5-bit unpacking (`0..31` unsigned), $y = d \cdot q + m$.
-   - Add paired integer dot-product kernels (`vecDotQ4_1_Q8_0`, `vecDotQ5_0_Q8_0`, `vecDotQ5_1_Q8_0`) to `ggmlVecDotFunc` (used by `FusedQuantizedDense` Mode B1 pre-quantized and Mode B2 `QuantizedMatmuls: true`):
+   - Add paired integer dot-product kernels (`vecDotQ4_1_Q8_0`, `vecDotQ5_0_Q8_0`, `vecDotQ5_1_Q8_0`) to `ggmlVecDotFunc` (used by `FusedQuantizedDense` Mode B1 pre-quantized and Mode B2 `QuantizedMatmul: true`):
      - Symmetric (`Q5_0`): $\text{acc} \mathrel{+}= (d_w \cdot d_x) \sum_{k=0}^{31} q_{w,k} q_{x,k}$.
      - Asymmetric (`Q4_1`, `Q5_1`): accumulate integer dot $\text{sumi} = \sum_{k=0}^{31} q_{w,k} q_{x,k}$ and integer activation sum $\text{sumx} = \sum_{k=0}^{31} q_{x,k}$ per 32-element block, then $\text{acc} \mathrel{+}= (d_w \cdot d_x)\,\text{sumi} + (m_w \cdot d_x)\,\text{sumx}$.
 3. **`compute/support/backendtest/quantized_dense_ggml.go` & `shapeinference/quantized_dense_test.go`**:
-   - Extend reference block builders and test suites to cover `GGMLQ4_1`, `GGMLQ5_0`, and `GGMLQ5_1` across Mode A, Mode B1, Mode B2 (`QuantizedMatmuls: true`), VJP, and `QuantizedEmbeddingLookup`.
+   - Extend reference block builders and test suites to cover `GGMLQ4_1`, `GGMLQ5_0`, and `GGMLQ5_1` across Mode A, Mode B1, Mode B2 (`QuantizedMatmul: true`), VJP, and `QuantizedEmbeddingLookup`.
 
 ---
 
@@ -105,8 +105,8 @@ Adding **`GGMLQ4_1`**, **`GGMLQ5_0`**, and **`GGMLQ5_1`** to `compute` and `goml
    - Add optional `*Quantization` metadata on `model.Variable` (`Scheme`, `GGMLType`, optional `Scale`/`ZeroPoint` `*Variable`, `BlockAxis`, `BlockSize`), preserved across `CloneToStore`, with `Variable.WithQuantization(...)` and `Variable.Quantization()`.
 4. **`gomlx/ml/layers` & `gomlx/ml/zoo/transformer`**:
    - **`layers.NewDense` (`*layers.DenseBuilder`) & `fnn.New`**:
-     - Check `scope.GetVariable("weights")` first. When `weightsVar != nil && weightsVar.Quantization() != nil`, dispatch to `nn.QuantizedDense` with `WeightLayout: layout`, `WeightQuantization`, optional fused `WithActivation(act)`, and `QuantizedMatmuls: model.GetParamOr(scope, ParamQuantizedMatmuls, true)`.
-     - Note: `QuantizedMatmuls: true` (`XQuantization: nil`) invokes `gobackend` Mode B2, which quantizes `x` into pooled `Q8_0` / `Q8_K` scratch buffers inside `FusedQuantizedDense` without graph-level intermediate allocations.
+     - Check `scope.GetVariable("weights")` first. When `weightsVar != nil && weightsVar.Quantization() != nil`, dispatch to `nn.QuantizedDense` with `WeightLayout: layout`, `WeightQuantization`, optional fused `WithActivation(act)`, and `QuantizedMatmul` (configured via `WithQuantizedMatmul` or `model.GetParamOr(scope, ParamQuantizedMatmul, true)`).
+     - Note: `QuantizedMatmul: true` (`XQuantization: nil`) invokes `gobackend` Mode B2, which quantizes `x` into pooled `Q8_0` / `Q8_K` scratch buffers inside `FusedQuantizedDense` without graph-level intermediate allocations.
    - **`layers.Embedding` & `pos.Learned.PreEncode`**:
      - In `layers.Embedding`: when `scope.GetVariable("embeddings")` has `QuantGGML` quantization, call `nn.QuantizedGather` and cast output to `dtype` if needed; if preloaded float dtype differs from `dtype`, cast output cleanly.
      - In `pos.Learned.PreEncode`: reuse an existing `pos_embed/embeddings` variable even if its float dtype differs from `x.DType()` (e.g. `Float16` in GGUF while `x` is `Float32`), casting after `Gather`.

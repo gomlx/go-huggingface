@@ -294,8 +294,8 @@ func TestGGUFTransformerEndToEnd(t *testing.T) {
 				}
 			}
 
-			// With ParamQuantizedMatmuls=false (weight-only float32 matmuls), both backends match within 1e-4.
-			store.SetParam(layers.ParamQuantizedMatmuls, false)
+			// With ParamQuantizedMatmul=false (weight-only float32 matmuls), both backends match within 1e-4.
+			store.SetParam(layers.ParamQuantizedMatmul, false)
 			execFloat := model.MustNewExec(backend, store, func(s *model.Scope, inputs []*graph.Node) *graph.Node {
 				return m.SentenceEmbeddingGraph(s, inputs[0], inputs[1])
 			})
