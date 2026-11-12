@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- 2026/11/12:
+  - `models/gguf`:
+    - Mapped `TensorTypeQ8_K` to `compute.GGMLQ8_K` in `TensorType.ToGGMLQuantType()`.
+
 - 2026/11/11:
   - `hub`, `datasets`:
     - Improved download progress output in `Repo.DownloadFilesCtx` and `Dataset.DownloadCtx` to display repository context (`Hugging Face repo "<id>":` / `Hugging Face dataset "<id>":`), active file index (`- Downloading file 1/3 ... (<downloaded> / <total>)`), and completion summary (`- Downloaded 3/3 files (<total>)`), printing nothing when all files are already cached.
