@@ -291,6 +291,7 @@ func TestToGGMLQuantType(t *testing.T) {
 		{TensorTypeQ4_K, compute.GGMLQ4_K},
 		{TensorTypeQ5_K, compute.GGMLQ5_K},
 		{TensorTypeQ6_K, compute.GGMLQ6_K},
+		{TensorTypeQ8_K, compute.GGMLQ8_K},
 	}
 	for _, tc := range supported {
 		got, ok := tc.tt.ToGGMLQuantType()

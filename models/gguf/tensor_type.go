@@ -260,6 +260,8 @@ func (t TensorType) ToGGMLQuantType() (compute.GGMLQuantType, bool) {
 		return compute.GGMLQ5_K, true
 	case TensorTypeQ6_K:
 		return compute.GGMLQ6_K, true
+	case TensorTypeQ8_K:
+		return compute.GGMLQ8_K, true
 	default:
 		return 0, false
 	}
