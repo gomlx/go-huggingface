@@ -35,11 +35,13 @@ go-huggingface/
 │   └── hubinfo/                 # CLI tool to inspect metadata, save local copies, and manage cache
 ├── datasets/                    # HuggingFace datasets client & Parquet scanning
 ├── docs/
-│   └── CHANGELOG.md             # Project change log (MANDATORY UPDATE ON EVERY FIX)
+│   ├── CHANGELOG.md             # Project change log (MANDATORY UPDATE ON EVERY FIX)
+│   └── GGUF-models.md           # Design & architecture guide for GGUF transformer models
 ├── examples/
 │   ├── BAAI-bge-small-en-v1.5/  # Example & test suite for BERT-based sentence embeddings
 │   ├── gemma4-e4bit/            # Gemma 4 E4B model loading example
 │   ├── kalmgemma3/              # KaLM-Gemma3 12B sentence embedding example & tests
+│   ├── minilm-l6-v2-gguf/       # GGUF sentence embedding example & llama.cpp parity tests
 │   └── msmarco/                 # MS MARCO dataset reader and embedding benchmark
 ├── hub/                         # Core HuggingFace Hub client (remote, local, and embed modes)
 ├── internal/
@@ -85,7 +87,7 @@ Manages downloading and access to HuggingFace repositories.
   - `Decode([]int) string`: Reconstructs text from token IDs.
   - `SpecialTokenID(SpecialToken) (int, error)`: Standardized lookup for `[BOS]`, `[EOS]`, `[PAD]`, `[UNK]`, `[MASK]`, `[CLS]`.
 - **`hftokenizer`**:
-  - Pure Go implementation that unmarshals `tokenizer.json`.
+  - Pure Go implementation that unmarshals `tokenizer.json`, or builds directly from embedded GGUF `tokenizer.ggml.*` metadata via `NewFromGGUF(config, GGUFTokenizerParams)` (supporting BERT WordPiece with `llama.cpp` `\u2581` PhantomSpace normalization, ByteLevel BPE, and SentencePiece Unigram).
   - Handles normalizers (BERT normalizer, lowercase, strip accents, replace), pre-tokenizers (whitespace, ByteLevel, Metaspace, BertPreTokenizer), models (BPE with byte fallback, WordPiece with `##` prefix, Unigram with Viterbi search), and post-processors (TemplateProcessing, BertProcessing, RobertaProcessing).
 - **`tokenizers/bucket`**:
   - Asynchronously batches streamed sentences into discrete length buckets to minimize zero-padding overhead in neural network inputs.
@@ -101,19 +103,20 @@ Manages downloading and access to HuggingFace repositories.
 
 ### 3.4. `models/gguf`
 - Parses GGUF v2/v3 files (magic `GGUF`, metadata key-values, tensor info headers).
-- Features pure-Go dequantizers for standard and k-quant block formats:
-  - `Q8_0`, `Q4_0`, `Q4_1`, `Q5_0`, `Q5_1`
-  - `Q2_K`, `Q3_K`, `Q4_K`, `Q5_K`, `Q6_K`
+- Features pure-Go dequantizers and raw `Uint8` GGML block loaders (`ReadTensorRaw`, `ToGGMLQuantType`) for standard and k-quant block formats:
+  - `Q8_0`, `Q4_0`, `Q4_1`, `Q5_0`, `Q5_1`, `IQ4_NL`
+  - `Q2_K`, `Q3_K`, `Q4_K`, `Q5_K`, `Q6_K`, `Q8_K`
+- Provides multi-file `.gguf` quantization selection (`SelectGGUFFile`, preferring `Q4_K_M` first, overridable via `Model.WithFile`) and embedded tokenizer extraction (`File.TokenizerParams`, `File.LoadTokenizer`).
 - Reads half-precision FP16 scales using `compute/dtypes/float16`.
 
 ### 3.5. `models/transformer`
-- Maps HuggingFace model architectures to GoMLX computation graphs (`github.com/gomlx/gomlx/ml/zoo/transformer`).
-- Parses HuggingFace config stack:
-  - `config.json` (mandatory base config)
+- Maps HuggingFace SafeTensors and GGUF model architectures to GoMLX computation graphs (`github.com/gomlx/gomlx/ml/zoo/transformer`).
+- Parses HuggingFace config stack (or synthesizes configuration, pooling, L2 normalization, and embedded tokenizers directly from `.gguf` metadata when JSON sidecars are omitted):
+  - `config.json` (base config; optional for `.gguf` repositories)
   - `config_sentence_transformers.json` (sentence transformer pipeline settings)
   - `modules.json` (execution pipeline: Transformer -> Pooling -> Normalize)
   - `1_Pooling/config.json` (pooling strategy: mean, CLS, last-token; defaults to last-token for causal decoders and mean for bidirectional encoders when absent)
-- Supports RoPE positional embeddings, layer normalization, RMSNorm, multi-head/grouped-query attention, and task prompts (`task_prompts.json`).
+- Supports native quantized GGUF execution (`LoadStore` attaches `model.Quantization` metadata so GoMLX dispatches `nn.QuantizedDense` and `nn.QuantizedGather`), `WithGGUFFile(filename)`, `WithApproximateGelu(approx)`, RoPE positional embeddings, layer normalization, RMSNorm, multi-head/grouped-query attention, and task prompts (`task_prompts.json`).
 
 ### 3.6. `models/sam2`
 - Implements Facebook's Segment Anything 2 (SAM2) image architecture in GoMLX:

@@ -284,6 +284,9 @@ func TestToGGMLQuantType(t *testing.T) {
 		want compute.GGMLQuantType
 	}{
 		{TensorTypeQ4_0, compute.GGMLQ4_0},
+		{TensorTypeQ4_1, compute.GGMLQ4_1},
+		{TensorTypeQ5_0, compute.GGMLQ5_0},
+		{TensorTypeQ5_1, compute.GGMLQ5_1},
 		{TensorTypeQ8_0, compute.GGMLQ8_0},
 		{TensorTypeIQ4_NL, compute.GGMLIQ4NL},
 		{TensorTypeQ2_K, compute.GGMLQ2_K},
@@ -301,6 +304,40 @@ func TestToGGMLQuantType(t *testing.T) {
 
 	_, ok := TensorTypeF32.ToGGMLQuantType()
 	assert.False(t, ok)
-	_, ok = TensorTypeQ4_1.ToGGMLQuantType()
+	_, ok = TensorTypeQ8_1.ToGGMLQuantType()
 	assert.False(t, ok)
+}
+
+func TestSelectGGUFFile(t *testing.T) {
+	miniLMFiles := []string{
+		"all-MiniLM-L6-v2-Q2_K.gguf",
+		"all-MiniLM-L6-v2-Q3_K_L.gguf",
+		"all-MiniLM-L6-v2-Q3_K_M.gguf",
+		"all-MiniLM-L6-v2-Q3_K_S.gguf",
+		"all-MiniLM-L6-v2-Q4_0.gguf",
+		"all-MiniLM-L6-v2-Q4_K_M.gguf",
+		"all-MiniLM-L6-v2-Q4_K_S.gguf",
+		"all-MiniLM-L6-v2-Q5_0.gguf",
+		"all-MiniLM-L6-v2-Q5_K_M.gguf",
+		"all-MiniLM-L6-v2-Q5_K_S.gguf",
+		"all-MiniLM-L6-v2-Q6_K.gguf",
+		"all-MiniLM-L6-v2-Q8_0.gguf",
+		"all-MiniLM-L6-v2-ggml-model-f16.gguf",
+	}
+	assert.Equal(t, "all-MiniLM-L6-v2-Q4_K_M.gguf", SelectGGUFFile(miniLMFiles))
+
+	// Without Q4_K_M or Q4_K_S, prefer Q5_K_M.
+	assert.Equal(t, "model.Q5_K_M.gguf", SelectGGUFFile([]string{
+		"mmproj-model-f16.gguf",
+		"model.f16.gguf",
+		"model.Q8_0.gguf",
+		"model.Q5_K_M.gguf",
+	}))
+
+	// Exclude mmproj unless nothing else exists.
+	assert.Equal(t, "model-custom.gguf", SelectGGUFFile([]string{
+		"mmproj-Q4_K_M.gguf",
+		"model-custom.gguf",
+	}))
+	assert.Equal(t, "", SelectGGUFFile(nil))
 }

@@ -19,6 +19,9 @@ import (
 //
 // It returns the final pooled embedding (usually [batchSize, embedSize]) for the sentence.
 func (m *Model) SentenceEmbeddingGraph(scope *model.Scope, tokens, seqLen *graph.Node) *graph.Node {
+	if m.isGGUF && m.parsedGGUF == nil {
+		_ = m.ensureGGUFHeader()
+	}
 	var x *graph.Node
 	// Add a batch axis if not present.
 	if tokens.Rank() == 1 {

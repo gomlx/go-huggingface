@@ -3,8 +3,13 @@
 ## Unreleased
 
 - 2026/11/12:
-  - `models/gguf`:
-    - Mapped `TensorTypeQ8_K` to `compute.GGMLQ8_K` in `TensorType.ToGGMLQuantType()`.
+  - `models/transformer`, `models/gguf`, `tokenizers/hftokenizer` (documented in `docs/GGUF-models.md`):
+    - Added end-to-end GGUF Transformer model support in `models/transformer`: auto-detects `.gguf` repositories (with or without `config.json` / `tokenizer.json` / `modules.json`), maps GGUF metadata (`general.architecture`, `<arch>.*`, `<arch>.pooling_type`, `<arch>.attention.causal`) and tensor names (`token_embd`, `position_embd`, `token_types`, `blk.{N}.*`, including split and fused `attn_qkv`) to GoMLX scopes, keeps 2D GGML quantized weights (`Q4_0`, `Q4_1`, `Q5_0`, `Q5_1`, `Q8_0`, `IQ4_NL`, `Q2_K`–`Q6_K`, `Q8_K`) in native compressed `Uint8` block layout with `model.Quantization` metadata for `nn.QuantizedDense` / `nn.QuantizedGather`, and exposes `IsGGUF()`, `GGUFFile()`, `GGUFFiles()`, `WithGGUFFile()`, and `WithApproximateGelu()`.
+    - Added pure-Go embedded GGUF tokenizer builder `hftokenizer.NewFromGGUF` (`GGUFTokenizerParams`, `gguf.File.TokenizerParams`, `gguf.File.LoadTokenizer`) supporting BERT WordPiece (including `llama.cpp`'s PhantomSpace `\u2581` token convention), GPT-2 ByteLevel BPE, and LLaMA/SentencePiece Unigram vocabularies without external dependencies.
+    - Mapped `TensorTypeQ4_1`, `TensorTypeQ5_0`, `TensorTypeQ5_1`, and `TensorTypeQ8_K` in `gguf.TensorType.ToGGMLQuantType()`, and added `gguf.SelectGGUFFile` (defaulting to `Q4_K_M`-first community preference order) and `gguf.Model.WithFile()`.
+  - `examples/minilm-l6-v2-gguf`, `examples/msmarco/benchmark_embed`:
+    - Added `examples/minilm-l6-v2-gguf` testing `second-state/All-MiniLM-L6-v2-Embedding-GGUF` (`all-MiniLM-L6-v2-Q4_K_M.gguf`) against materialized `llama.cpp` reference embeddings (`cosine_similarity > 0.9997`).
+    - Added GGUF model support, `-gguf_file`, and `-approx_gelu` flags to `examples/msmarco/benchmark_embed`.
 
 - 2026/11/11:
   - `hub`, `datasets`:

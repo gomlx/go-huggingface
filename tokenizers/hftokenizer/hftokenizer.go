@@ -128,7 +128,14 @@ func NewFromContent(config *api.Config, content []byte) (*Tokenizer, error) {
 	if err := json.Unmarshal(content, &tj); err != nil {
 		return nil, errors.Wrapf(err, "failed to parse tokenizer.json")
 	}
+	return NewFromStruct(config, &tj)
+}
 
+// NewFromStruct creates a HuggingFace tokenizer from an already populated TokenizerJSON structure.
+func NewFromStruct(config *api.Config, tj *TokenizerJSON) (*Tokenizer, error) {
+	if tj == nil {
+		return nil, errors.New("hftokenizer: TokenizerJSON is nil")
+	}
 	err := compileDecoderRegex(tj.Decoder)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to compile decoder regex")
@@ -136,7 +143,7 @@ func NewFromContent(config *api.Config, content []byte) (*Tokenizer, error) {
 
 	t := &Tokenizer{
 		config:      config,
-		tokenizer:   &tj,
+		tokenizer:   tj,
 		idToToken:   make(map[int]string),
 		addedTokens: make(map[string]int),
 		unkID:       -1,
@@ -446,7 +453,7 @@ func (t *Tokenizer) SpecialTokenID(token api.SpecialToken) (int, error) {
 
 // VocabSize returns the size of the vocabulary.
 func (t *Tokenizer) VocabSize() int {
-	return len(t.tokenizer.Model.Vocab) + len(t.tokenizer.AddedTokens)
+	return len(t.idToToken)
 }
 
 // GetVocab returns the full vocabulary mapping.

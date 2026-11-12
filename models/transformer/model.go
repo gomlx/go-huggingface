@@ -10,6 +10,7 @@ import (
 	"github.com/gomlx/compute/support/humanize"
 	"github.com/gomlx/compute/support/xslices"
 	"github.com/gomlx/go-huggingface/hub"
+	"github.com/gomlx/go-huggingface/models/gguf"
 	"github.com/gomlx/go-huggingface/models/safetensors"
 	"github.com/gomlx/go-huggingface/tokenizers"
 	"github.com/gomlx/gomlx/core/tensors"
@@ -40,6 +41,13 @@ type Model struct {
 	// Cached parameter count and bytes for Description
 	totalParameters *int64
 	totalBytes      *int64
+
+	// GGUF support and GELU precision override
+	isGGUF          bool
+	ggufFiles       []string
+	ggufFile        string
+	parsedGGUF      *gguf.File
+	approximateGelu *bool
 
 	tokenizer tokenizers.Tokenizer
 	KVCache   *mltransformer.KVCache
@@ -85,7 +93,12 @@ func LoadModel(repo *hub.Repo) (*Model, error) {
 
 	hasInfo := repo.DownloadInfo(false) == nil
 	if hasInfo {
-		if !repo.HasFile("config.json") {
+		hasSafeTensors := m.detectRepoFormats()
+		if !hasSafeTensors && len(m.ggufFiles) > 0 {
+			m.isGGUF = true
+			m.ggufFile = gguf.SelectGGUFFile(m.ggufFiles)
+		}
+		if !repo.HasFile("config.json") && !m.isGGUF {
 			return nil, fmt.Errorf("config.json is missing or failed to download from repo")
 		}
 		var configFiles []string
@@ -99,8 +112,10 @@ func LoadModel(repo *hub.Repo) (*Model, error) {
 				configFiles = append(configFiles, candidate)
 			}
 		}
-		if err := repo.FetchFiles(configFiles...); err != nil {
-			return nil, fmt.Errorf("failed to download model configurations: %w", err)
+		if len(configFiles) > 0 {
+			if err := repo.FetchFiles(configFiles...); err != nil {
+				return nil, fmt.Errorf("failed to download model configurations: %w", err)
+			}
 		}
 	}
 
@@ -119,12 +134,16 @@ func LoadModel(repo *hub.Repo) (*Model, error) {
 		return true, nil
 	}
 
-	// config.json is required
-	if ok, err := loadFile("config.json", &m.Config); err != nil || !ok {
-		if err != nil {
+	// config.json is required unless loading a self-contained GGUF repository.
+	if ok, err := loadFile("config.json", &m.Config); err != nil {
+		return nil, err
+	} else if !ok {
+		if !m.isGGUF {
+			return nil, fmt.Errorf("config.json is missing or failed to download from repo")
+		}
+		if err := m.ensureGGUFHeader(); err != nil {
 			return nil, err
 		}
-		return nil, fmt.Errorf("config.json is missing or failed to download from repo")
 	}
 
 	// Optional files
@@ -249,6 +268,9 @@ func (m *Model) LoadStore(backend compute.Backend, store *model.Store) error {
 // Only variables where filterFn(fullPath) returns true will be loaded.
 // Other tensors will be finalized immediately to conserve memory.
 func (m *Model) LoadStoreFiltered(backend compute.Backend, store *model.Store, filterFn func(path string) bool) error {
+	if m.isGGUF {
+		return m.loadStoreGGUF(backend, store, filterFn)
+	}
 	var totalParams int64
 	var totalBytes int64
 
@@ -363,6 +385,9 @@ func (m *Model) Description() string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("Model: %s\n", m.Repo.ID))
+	if m.isGGUF && m.ggufFile != "" {
+		sb.WriteString(fmt.Sprintf("GGUF File: %s\n", m.ggufFile))
+	}
 	sb.WriteString(fmt.Sprintf("Architecture: %s\n", strings.Join(m.Config.Architectures, ", ")))
 	sb.WriteString(fmt.Sprintf("Layers: %d\n", m.Config.NumHiddenLayers))
 	sb.WriteString(fmt.Sprintf("Hidden Size: %d\n", m.Config.HiddenSize))
@@ -583,6 +608,13 @@ func (m *Model) GetTokenizer() (tokenizers.Tokenizer, error) {
 	}
 	var err error
 	m.tokenizer, err = tokenizers.New(m.Repo)
+	if err != nil && m.isGGUF {
+		var ggufErr error
+		m.tokenizer, ggufErr = m.loadGGUFTokenizer()
+		if ggufErr == nil {
+			return m.tokenizer, nil
+		}
+	}
 	return m.tokenizer, err
 }
 

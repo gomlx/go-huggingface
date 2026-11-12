@@ -246,6 +246,12 @@ func (t TensorType) ToGGMLQuantType() (compute.GGMLQuantType, bool) {
 	switch t {
 	case TensorTypeQ4_0:
 		return compute.GGMLQ4_0, true
+	case TensorTypeQ4_1:
+		return compute.GGMLQ4_1, true
+	case TensorTypeQ5_0:
+		return compute.GGMLQ5_0, true
+	case TensorTypeQ5_1:
+		return compute.GGMLQ5_1, true
 	case TensorTypeQ8_0:
 		return compute.GGMLQ8_0, true
 	case TensorTypeIQ4_NL:
