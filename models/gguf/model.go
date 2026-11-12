@@ -2,6 +2,7 @@ package gguf
 
 import (
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/gomlx/compute"
@@ -10,16 +11,106 @@ import (
 	"github.com/pkg/errors"
 )
 
+// DefaultGGUFQuantPreference lists quantization tags in community-preferred default selection order
+// when a HuggingFace repository contains multiple .gguf variants and no explicit file was requested.
+var DefaultGGUFQuantPreference = []string{
+	"Q4_K_M",
+	"Q4_K_S",
+	"Q5_K_M",
+	"Q5_K_S",
+	"Q8_0",
+	"Q6_K",
+	"Q5_1",
+	"Q5_0",
+	"Q4_1",
+	"Q4_0",
+	"IQ4_NL",
+	"Q3_K_M",
+	"Q3_K_L",
+	"Q3_K_S",
+	"Q2_K",
+	"F16",
+	"BF16",
+	"F32",
+}
+
+// SelectGGUFFile selects the preferred primary .gguf file from a list of repository filenames.
+//
+// It prefers non-mmproj model files matching [DefaultGGUFQuantPreference] (starting with Q4_K_M),
+// falling back to files[0] if none match. Returns "" if files is empty.
+func SelectGGUFFile(files []string) string {
+	if len(files) == 0 {
+		return ""
+	}
+	if len(files) == 1 {
+		return files[0]
+	}
+
+	// Exclude auxiliary vision projector files ("mmproj*") unless no other .gguf files exist.
+	candidates := make([]string, 0, len(files))
+	for _, f := range files {
+		base := strings.ToLower(filepath.Base(f))
+		if !strings.HasPrefix(base, "mmproj") {
+			candidates = append(candidates, f)
+		}
+	}
+	if len(candidates) == 0 {
+		candidates = files
+	}
+
+	for _, tag := range DefaultGGUFQuantPreference {
+		for _, f := range candidates {
+			if matchesGGUFQuantTag(f, tag) {
+				return f
+			}
+		}
+	}
+	return candidates[0]
+}
+
+// matchesGGUFQuantTag checks whether a .gguf filename carries tag as a delimited token
+// (e.g. "model-Q4_K_M.gguf", "model.Q4_K_M.gguf", "model_f16.gguf", or "Q4_K_M.gguf").
+func matchesGGUFQuantTag(filename, tag string) bool {
+	base := filepath.Base(filename)
+	if strings.HasSuffix(strings.ToLower(base), ".gguf") {
+		base = base[:len(base)-len(".gguf")]
+	}
+	upper := strings.ToUpper(base)
+	tag = strings.ToUpper(tag)
+
+	isDelim := func(b byte) bool {
+		return b == '-' || b == '.' || b == '_'
+	}
+
+	searchFrom := 0
+	for searchFrom <= len(upper)-len(tag) {
+		idx := strings.Index(upper[searchFrom:], tag)
+		if idx < 0 {
+			return false
+		}
+		pos := searchFrom + idx
+		end := pos + len(tag)
+		leftOK := pos == 0 || isDelim(upper[pos-1])
+		rightOK := end == len(upper) || isDelim(upper[end])
+		if leftOK && rightOK {
+			return true
+		}
+		searchFrom = pos + 1
+	}
+	return false
+}
+
 // Model represents a GGUF model, optionally backed by a HuggingFace repo.
 // For multimodal models (e.g., LLaVA), extras holds additional GGUF files
 // (such as the vision encoder/projector). File is the primary file used for
 // config metadata; tensors are looked up across all files.
 type Model struct {
-	Repo   *hub.Repo
-	File   *File
-	extras []extraEntry
-	reader *Reader
-	mu     sync.Mutex
+	Repo          *hub.Repo
+	File          *File
+	preferredFile string
+	extras        []extraEntry
+	reader        *Reader
+	mu            sync.Mutex
 }
 
 // extraEntry pairs an extra GGUF file with its lazily-initialized reader.
@@ -57,8 +148,17 @@ func NewEmpty(repo *hub.Repo) *Model {
 	return &Model{Repo: repo}
 }
 
-// Load downloads the first .gguf file from the repo and parses it.
+// WithFile configures a specific .gguf filename in the repository to load when Load() is called.
+func (m *Model) WithFile(filename string) *Model {
+	m.preferredFile = filename
+	return m
+}
+
+// Load downloads the preferred .gguf file from the repo (see [SelectGGUFFile] and [Model.WithFile]) and parses it.
 func (m *Model) Load() error {
+	if m.preferredFile != "" {
+		return m.loadFiles([]string{m.preferredFile})
+	}
 	files, err := m.ggufFileNames()
 	if err != nil {
 		return err
@@ -66,7 +166,7 @@ func (m *Model) Load() error {
 	if len(files) == 0 {
 		return errors.Errorf("gguf: no .gguf file found in repository")
 	}
-	return m.loadFiles(files[:1])
+	return m.loadFiles([]string{SelectGGUFFile(files)})
 }
 
 // LoadAll downloads all .gguf files from the repo.

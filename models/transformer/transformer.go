@@ -52,6 +52,9 @@ func (m *Model) ForwardGraph(scope *model.Scope, tokens, seqLen *graph.Node) *gr
 //
 // It takes the context ctx with the loaded variables.
 func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
+	if m.isGGUF && m.parsedGGUF == nil {
+		_ = m.ensureGGUFHeader()
+	}
 	headDim := m.Config.HeadDim
 	if headDim == 0 && m.Config.NumAttentionHeads > 0 {
 		headDim = m.Config.HiddenSize / m.Config.NumAttentionHeads
@@ -61,7 +64,7 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 		ropeTheta = 10000.0
 	}
 
-	isBert := m.Config.ModelType == "bert" || (len(m.Config.Architectures) > 0 && m.Config.Architectures[0] == "BertModel")
+		isBert := m.isBertModel()
 
 	tm := mltransformer.New(scope).
 		WithVocabSize(m.Config.VocabSize).
@@ -220,17 +223,25 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 		}
 	}
 
-	torchDtype := m.Config.TorchDtype
-	if torchDtype == "" {
-		torchDtype = m.Config.DType
+	if m.approximateGelu != nil {
+		tm.WithApproximateGelu(*m.approximateGelu)
 	}
-	switch torchDtype {
-	case "bfloat16":
-		tm.WithDType(dtypes.BFloat16)
-	case "float16":
-		tm.WithDType(dtypes.Float16)
-	default:
+
+	if m.isGGUF {
 		tm.WithDType(dtypes.Float32)
+	} else {
+		torchDtype := m.Config.TorchDtype
+		if torchDtype == "" {
+			torchDtype = m.Config.DType
+		}
+		switch torchDtype {
+		case "bfloat16":
+			tm.WithDType(dtypes.BFloat16)
+		case "float16":
+			tm.WithDType(dtypes.Float16)
+		default:
+			tm.WithDType(dtypes.Float32)
+		}
 	}
 
 	if m.KVCache != nil {

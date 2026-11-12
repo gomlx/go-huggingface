@@ -25,6 +25,7 @@ import (
 	"github.com/gomlx/go-huggingface/datasets"
 	bge "github.com/gomlx/go-huggingface/examples/BAAI-bge-small-en-v1.5"
 	"github.com/gomlx/go-huggingface/examples/kalmgemma3"
+	minilmgguf "github.com/gomlx/go-huggingface/examples/minilm-l6-v2-gguf"
 	"github.com/gomlx/go-huggingface/examples/msmarco"
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/models/transformer"
@@ -41,7 +42,14 @@ import (
 )
 
 var (
-	flagModel        = flag.String("model", kalmgemma3.Repository, fmt.Sprintf("Model repository to use. Examples: %q, %q", kalmgemma3.Repository, bge.Repository))
+	flagModel = flag.String("model", kalmgemma3.Repository, fmt.Sprintf("Model repository to use. Examples: %q, %q, %q", kalmgemma3.Repository, bge.Repository, minilmgguf.Repository))
+	flagGGUFFile = flag.String("gguf_file", "",
+		"Specific .gguf filename to load when -model is a multi-file GGUF repository. "+
+			"When empty, selects by community preference order: "+
+			"Q4_K_M, Q4_K_S, Q5_K_M, Q5_K_S, Q8_0, Q6_K, Q5_1, Q5_0, Q4_1, Q4_0, IQ4_NL, Q3_K_M, Q3_K_L, Q3_K_S, Q2_K, F16, BF16, F32 "+
+			"(falling back to the first non-mmproj .gguf file).")
+	flagApproxGelu = flag.Bool("approx_gelu", true,
+		"Use tanh-approximate GELU (matches GoMLX default and llama.cpp ggml_gelu); set false for exact erf GELU.")
 	flagLimit        = flag.Int("limit", -1, "Limit the number of queries indexed. Set <= 0 to use all.")
 	flagMSMarcoSplit = flag.String("msmarco_split", msmarco.TrainSplit, "Split to read from MS MARCO dataset (e.g. 'train', 'validation', 'test')")
 	flagBucketBudget = flag.Int("bucket", 8*1024,
@@ -97,8 +105,19 @@ func main() {
 	}
 
 	hfModel := mustRunWithElapsedTime("Loading model configurations", func() (*transformer.Model, error) {
-		return transformer.LoadModel(repo)
+		m, err := transformer.LoadModel(repo)
+		if err != nil {
+			return nil, err
+		}
+		m.WithApproximateGelu(*flagApproxGelu)
+		if *flagGGUFFile != "" {
+			m.WithGGUFFile(*flagGGUFFile)
+		}
+		return m, nil
 	})
+	if hfModel.IsGGUF() {
+		fmt.Printf("- GGUF file: %s (approx_gelu=%t)\n", hfModel.GGUFFile(), *flagApproxGelu)
+	}
 
 	tokenizer := mustRunWithElapsedTime("Loading tokenizer", func() (tokenizers.Tokenizer, error) {
 		return hfModel.GetTokenizer()
@@ -156,7 +175,7 @@ func createEmbedExec(backend compute.Backend, repo *hub.Repo, hfModel *transform
 	store := model.NewStore()
 	var embedExec *model.Exec
 	var err error
-	if repoHasSafetensors(repo) {
+	if hfModel.IsGGUF() || repoHasSafetensors(repo) {
 		mustRunWithElapsedTime(fmt.Sprintf("Loading variables into store (%s)", backend.Name()), func() (any, error) {
 			return nil, hfModel.LoadStore(backend, store)
 		})
@@ -215,7 +234,7 @@ func createEmbedExec(backend compute.Backend, repo *hub.Repo, hfModel *transform
 			klog.Fatalf("Failed to create ONNX model executor (%s): %v", backend.Name(), err)
 		}
 	} else {
-		klog.Fatalf("No safetensors or ONNX model files found in repository %q", *flagModel)
+		klog.Fatalf("No safetensors, GGUF, or ONNX model files found in repository %q", *flagModel)
 	}
 	embedExec.SetMaxCache(execMaxCacheSize)
 	embedExec.DonateStore()
