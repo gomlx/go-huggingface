@@ -92,8 +92,9 @@ Manages downloading and access to HuggingFace repositories.
 - **`tokenizers/bucket`**:
   - Asynchronously batches streamed sentences into discrete length buckets to minimize zero-padding overhead in neural network inputs.
   - Strategies:
-    - `ByTwoBitBucket(batchSize, minSentenceLength)`: Buckets using values representable by 2 bits (e.g., 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64...). Restricts padding overhead to ~20% while providing binary/hardware-friendly shapes.
+    - `ByTwoBitBucket(batchSize, minSentenceLength)` / `ByTwoBitBucketBudget(tokensBudget, minSentenceLength)`: Buckets using values representable by 2 bits (e.g., 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64...). Restricts padding overhead to ~20% while providing binary/hardware-friendly shapes.
     - `ByPower(batchSize, minSentenceLength, base)` / `ByPowerBudget(tokenBudget, minSentenceLength, base)`.
+    - `Unpadded()`: Emits each sentence individually without padding (`BatchSize = 1`, `SentenceLength = max(sentenceLength, 1)`), with a fast zero-copy pass-through path in `Run` for dynamic-shape backends.
   - Supports `WithMaxDelay(...)` to flush partial batches after a latency threshold in real-time streaming services.
 
 ### 3.3. `models/safetensors`

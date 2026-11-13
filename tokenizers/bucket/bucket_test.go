@@ -337,3 +337,50 @@ func TestBucketizerRunWithMaxDelay(t *testing.T) {
 		<-done
 	})
 }
+
+func TestBucketizerUnpadded(t *testing.T) {
+	mockTok := &mockTokenizer{padID: 99}
+	b := New(mockTok).Unpadded().WithMaxParallelization(1)
+
+	input := make(chan SentenceRef, 5)
+	output := make(chan Bucket, 5)
+
+	done := make(chan struct{})
+	go func() {
+		b.Run(input, output)
+		close(done)
+	}()
+
+	input <- SentenceRef{Sentence: "123", Reference: "ref1"}         // len 3
+	input <- SentenceRef{Sentence: "12345", Reference: "ref2"}       // len 5
+	input <- SentenceRef{Sentence: "12345678901", Reference: "ref3"} // len 11
+	input <- SentenceRef{Sentence: "", Reference: "ref_empty"}       // len 0 -> padded to 1
+	close(input)
+	<-done
+
+	var buckets []Bucket
+	for bk := range output {
+		buckets = append(buckets, bk)
+	}
+	require.Len(t, buckets, 4)
+
+	assert.Equal(t, Shape{BatchSize: 1, SentenceLength: 3}, buckets[0].Shape)
+	assert.Equal(t, []int{1, 2, 3}, buckets[0].Batch)
+	assert.Equal(t, 3, buckets[0].NonPadTokens)
+	assert.Equal(t, []Reference{"ref1"}, buckets[0].References)
+
+	assert.Equal(t, Shape{BatchSize: 1, SentenceLength: 5}, buckets[1].Shape)
+	assert.Equal(t, []int{1, 2, 3, 4, 5}, buckets[1].Batch)
+	assert.Equal(t, 5, buckets[1].NonPadTokens)
+	assert.Equal(t, []Reference{"ref2"}, buckets[1].References)
+
+	assert.Equal(t, Shape{BatchSize: 1, SentenceLength: 11}, buckets[2].Shape)
+	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}, buckets[2].Batch)
+	assert.Equal(t, 11, buckets[2].NonPadTokens)
+	assert.Equal(t, []Reference{"ref3"}, buckets[2].References)
+
+	assert.Equal(t, Shape{BatchSize: 1, SentenceLength: 1}, buckets[3].Shape)
+	assert.Equal(t, []int{99}, buckets[3].Batch)
+	assert.Equal(t, 0, buckets[3].NonPadTokens)
+	assert.Equal(t, []Reference{"ref_empty"}, buckets[3].References)
+}

@@ -9,6 +9,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/pprof"
 	"sync"
 	"sync/atomic"
@@ -35,14 +36,16 @@ import (
 	_ "github.com/gomlx/gomlx/backends/default"
 	"github.com/gomlx/gomlx/core/graph"
 	"github.com/gomlx/gomlx/core/tensors"
+	"github.com/gomlx/gomlx/ml/layers"
 	"github.com/gomlx/gomlx/ml/model"
+	"github.com/gomlx/gomlx/ui/commandline"
 	"github.com/gomlx/onnx-gomlx/onnx"
 	"github.com/gomlx/onnx-gomlx/onnx/parser"
 	"k8s.io/klog/v2"
 )
 
 var (
-	flagModel = flag.String("model", kalmgemma3.Repository, fmt.Sprintf("Model repository to use. Examples: %q, %q, %q", kalmgemma3.Repository, bge.Repository, minilmgguf.Repository))
+	flagModel    = flag.String("model", kalmgemma3.Repository, fmt.Sprintf("Model repository to use. Examples: %q, %q, %q", kalmgemma3.Repository, bge.Repository, minilmgguf.Repository))
 	flagGGUFFile = flag.String("gguf_file", "",
 		"Specific .gguf filename to load when -model is a multi-file GGUF repository. "+
 			"When empty, selects by community preference order: "+
@@ -55,11 +58,12 @@ var (
 	flagBucketBudget = flag.Int("bucket", 8*1024,
 		"Bucket budget in number of tokens: sentences will be batched in buckets of this number of tokens in total. "+
 			"So sentences with 128 tokens, if the budget is 1K, the batchsSize will be 8. "+
-			"The buckets use the 'two-bits' algorithm to minimize padding -- e.g.: sizes 8, 12, 16, 24, 32, 48, etc.")
+			"The buckets use the 'two-bits' algorithm to minimize padding -- e.g.: sizes 8, 12, 16, 24, 32, 48, etc. "+
+			"Set <= 0 to embed each sentence individually (with -dynamic=true on dynamic-shape backends, no padding is used).")
 	flagParallelEmbedders = flag.Int("num_embedders", 1, "Number of parallel embedders. "+
 		"The optimal value depends on the backend and the bucket size (-bucket), for GPUs usually 1 or 2 is enough.")
-	flagProfile = flag.Bool("profile", false, "Enable profiling.")
-	flagCPUProf = flag.String("cpuprof", "", "Write CPU profile to file.")
+	flagProfile     = flag.Bool("profile", false, "Enable profiling.")
+	flagCPUProf     = flag.String("cpuprof", "", "Write CPU profile to file.")
 	flagWarmup      = flag.Bool("warmup", false, "Do a warmup run over the dataset first, compiling the execution graph for each new batch shape encountered.")
 	flagShapes      = flag.Bool("shapes", false, "Report the shapes of the batches encountered during the warmup run.")
 	flagDynamic     = flag.Bool("dynamic", true, "Use dynamic shapes if supported by the backend.")
@@ -73,12 +77,29 @@ func MapHas[K comparable, V any](m map[K]V, k K) bool {
 	return ok
 }
 
+func createModelStore() *model.Store {
+	store := model.NewStore()
+	store.SetParams(map[string]any{
+		layers.ParamQuantizedMatmul: true,
+	})
+	return store
+}
+
 func main() {
+	store := createModelStore()
+	settings := commandline.CreateSettingsFlag(store, "")
 	klog.InitFlags(nil)
 	flag.Parse()
+	paramsSet, err := commandline.ParseSettings(store, *settings)
+	if err != nil {
+		klog.Fatalf("Failed to parse -set settings: %+v", err)
+	}
 
 	fmt.Printf("- Model %q, bucket %d, parallel embedders %d, dynamic shapes %t, warmup %t, shapes %t\n",
 		*flagModel, *flagBucketBudget, *flagParallelEmbedders, *flagDynamic, *flagWarmup, *flagShapes)
+	if len(paramsSet) > 0 {
+		fmt.Printf("- Modified settings:\n%s\n", commandline.SprintModifiedSettings(store, paramsSet))
+	}
 
 	if *flagCPUProf != "" {
 		f, err := os.Create(*flagCPUProf)
@@ -128,12 +149,17 @@ func main() {
 	})
 	fmt.Printf("- Backend: %s\n", backend.Description())
 
+	unpadded := *flagBucketBudget <= 0 && *flagDynamic && backend.Capabilities().HasDynamicShapes()
+	if unpadded {
+		fmt.Printf("- Unpadded single-sentence mode enabled (batchSize=1 static, seqLen dynamic)\n")
+	}
+
 	padID := 0
 	if id, err := tokenizer.SpecialTokenID(tapi.TokPad); err == nil {
 		padID = id
 	}
 
-	embedExec := createEmbedExec(backend, repo, hfModel, padID)
+	embedExec := createEmbedExec(backend, store, repo, hfModel, padID, unpadded)
 
 	var testBackend compute.Backend
 	var testEmbedExec *model.Exec
@@ -142,7 +168,11 @@ func main() {
 			return compute.NewWithConfig(*flagTestBackend)
 		})
 		fmt.Printf("- Test Backend: %s\n", testBackend.Description())
-		testEmbedExec = createEmbedExec(testBackend, repo, hfModel, padID)
+		testStore := createModelStore()
+		if _, err := commandline.ParseSettings(testStore, *settings); err != nil {
+			klog.Fatalf("Failed to parse -set settings for test store: %+v", err)
+		}
+		testEmbedExec = createEmbedExec(testBackend, testStore, repo, hfModel, padID, unpadded)
 	}
 
 	// Dataset preparation and stats.
@@ -164,15 +194,14 @@ func main() {
 
 	if *flagWarmup {
 		fmt.Printf("\n--- Warmup Run ---\n")
-		runBenchmark(backend, embedExec, testBackend, testEmbedExec, tokenizer, ds, limit, int(totalQueries), true)
+		runBenchmark(backend, embedExec, testBackend, testEmbedExec, tokenizer, ds, limit, int(totalQueries), unpadded, true)
 	}
 
 	fmt.Printf("\n--- Benchmark Run ---\n")
-	runBenchmark(backend, embedExec, testBackend, testEmbedExec, tokenizer, ds, limit, int(totalQueries), false)
+	runBenchmark(backend, embedExec, testBackend, testEmbedExec, tokenizer, ds, limit, int(totalQueries), unpadded, false)
 }
 
-func createEmbedExec(backend compute.Backend, repo *hub.Repo, hfModel *transformer.Model, padID int) *model.Exec {
-	store := model.NewStore()
+func createEmbedExec(backend compute.Backend, store *model.Store, repo *hub.Repo, hfModel *transformer.Model, padID int, unpadded bool) *model.Exec {
 	var embedExec *model.Exec
 	var err error
 	if hfModel.IsGGUF() || repoHasSafetensors(repo) {
@@ -181,8 +210,11 @@ func createEmbedExec(backend compute.Backend, repo *hub.Repo, hfModel *transform
 		})
 
 		embedExec, err = model.NewExec(backend, store, func(scope *model.Scope, tokens *graph.Node) *graph.Node {
-			constPadID := graph.Scalar(tokens.Graph(), tokens.DType(), padID)
-			seqLen := graph.ReduceSum(graph.ConvertDType(graph.NotEqual(tokens, constPadID), dtypes.Int32), 1)
+			var seqLen *graph.Node
+			if !unpadded {
+				constPadID := graph.Scalar(tokens.Graph(), tokens.DType(), padID)
+				seqLen = graph.ReduceSum(graph.ConvertDType(graph.NotEqual(tokens, constPadID), dtypes.Int32), 1)
+			}
 			x := hfModel.SentenceEmbeddingGraph(scope, tokens, seqLen)
 			return graph.ConvertDType(x, dtypes.Float32)
 		})
@@ -204,9 +236,12 @@ func createEmbedExec(backend compute.Backend, repo *hub.Repo, hfModel *transform
 		embedExec, err = model.NewExec(backend, store, func(scope *model.Scope, tokens *graph.Node) *graph.Node {
 			g := tokens.Graph()
 			scope.SetTraining(g, false)
-			constPadID := graph.Scalar(g, tokens.DType(), padID)
-			notPad := graph.NotEqual(tokens, constPadID)
-			seqLen := graph.ReduceSum(graph.ConvertDType(notPad, dtypes.Int32), 1)
+			var notPad, seqLen *graph.Node
+			if !unpadded {
+				constPadID := graph.Scalar(g, tokens.DType(), padID)
+				notPad = graph.NotEqual(tokens, constPadID)
+				seqLen = graph.ReduceSum(graph.ConvertDType(notPad, dtypes.Int32), 1)
+			}
 
 			inputNames, inputShapes := onnxModel.Inputs()
 			onnxInputs := make(map[string]*graph.Node, len(inputNames))
@@ -216,7 +251,11 @@ func createEmbedExec(backend compute.Backend, repo *hub.Repo, hfModel *transform
 				case "input_ids":
 					onnxInputs[name] = graph.ConvertDType(tokens, dtype)
 				case "attention_mask":
-					onnxInputs[name] = graph.ConvertDType(notPad, dtype)
+					if unpadded {
+						onnxInputs[name] = graph.OnesLike(graph.ConvertDType(tokens, dtype))
+					} else {
+						onnxInputs[name] = graph.ConvertDType(notPad, dtype)
+					}
 				case "token_type_ids":
 					onnxInputs[name] = graph.ZerosLike(graph.ConvertDType(tokens, dtype))
 				case "position_ids":
@@ -236,10 +275,18 @@ func createEmbedExec(backend compute.Backend, repo *hub.Repo, hfModel *transform
 	} else {
 		klog.Fatalf("No safetensors, GGUF, or ONNX model files found in repository %q", *flagModel)
 	}
-	embedExec.SetMaxCache(execMaxCacheSize)
+	if unpadded && !backend.Capabilities().HasDynamicShapes() {
+		embedExec.SetMaxCache(-1)
+	} else {
+		embedExec.SetMaxCache(execMaxCacheSize)
+	}
 	embedExec.DonateStore()
 	if *flagDynamic && backend.Capabilities().HasDynamicShapes() {
-		embedExec.WithDynamicAxes([]string{"batch", "seq_len"})
+		if unpadded {
+			embedExec.WithDynamicAxes([]string{"", "seq_len"})
+		} else {
+			embedExec.WithDynamicAxes([]string{"batch", "seq_len"})
+		}
 	}
 	return embedExec
 }
@@ -255,6 +302,7 @@ type SpeedStats struct {
 	NumNonPadTokensProcessed int64
 	Elapsed                  time.Duration
 	CPUElapsed               time.Duration
+	MaxRSSBytes              int64
 	IsWarmup                 bool
 	UniqueShapes             int
 }
@@ -403,7 +451,7 @@ func (d *DiffStats) UpdateBatch(refTensor, testTensor *tensors.Tensor, reference
 	}
 }
 
-func runBenchmark(backend compute.Backend, embedExec *model.Exec, testBackend compute.Backend, testEmbedExec *model.Exec, tokenizer tokenizers.Tokenizer, ds *datasets.Dataset, limit, totalQueries int, isWarmup bool) {
+func runBenchmark(backend compute.Backend, embedExec *model.Exec, testBackend compute.Backend, testEmbedExec *model.Exec, tokenizer tokenizers.Tokenizer, ds *datasets.Dataset, limit, totalQueries int, unpadded, isWarmup bool) {
 	// Structured concurrency (keep track of goroutines).
 	var wg sync.WaitGroup
 
@@ -411,9 +459,13 @@ func runBenchmark(backend compute.Backend, embedExec *model.Exec, testBackend co
 	bucketsInputChan := make(chan bucket.SentenceRef, 5)
 	bucketsOutputChan := make(chan bucket.Bucket, 10)
 	bkt := bucket.New(tokenizer).
-		ByTwoBitBucketBudget(*flagBucketBudget, 8).
-		WithMaxParallelization(-1).
-		WithBatchPadding(true)
+		WithMaxParallelization(-1)
+	if unpadded {
+		bkt.Unpadded()
+	} else {
+		bkt.ByTwoBitBucketBudget(*flagBucketBudget, 8).
+			WithBatchPadding(true)
+	}
 
 	wg.Go(func() {
 		bkt.Run(bucketsInputChan, bucketsOutputChan)
@@ -624,6 +676,7 @@ func runBenchmark(backend compute.Backend, embedExec *model.Exec, testBackend co
 	wg.Wait()
 	speedStats.Elapsed = time.Since(startTime)
 	speedStats.CPUElapsed = cpuTime() - startCPUTime
+	speedStats.MaxRSSBytes = maxRSSBytes()
 	if isWarmup {
 		speedStats.UniqueShapes = mapLen(&seenShapes)
 	}
@@ -642,19 +695,21 @@ func ReportSpeed(s *SpeedStats) {
 	if s.NumSentencesProcessed > 0 {
 		cpuTimePerPassage = fmt.Sprintf("%s/passage", humanize.Duration(s.CPUElapsed/time.Duration(s.NumSentencesProcessed)))
 	}
-	names := []string{"Passages", "Tokens", "Non-Pad Tokens", "CPU Time", "~Cores"}
+	names := []string{"Passages", "Tokens", "Non-Pad Tokens", "CPU Time", "~Cores", "Max RSS Mem"}
 	totals := []string{
 		humanize.Count(int64(s.NumSentencesProcessed)),
 		humanize.Count(s.NumTokensProcessed),
 		humanize.Count(s.NumNonPadTokensProcessed),
 		humanize.Duration(s.CPUElapsed),
 		fmt.Sprintf("%.1f", s.CPUElapsed.Seconds()/s.Elapsed.Seconds()),
+		humanize.Bytes(s.MaxRSSBytes),
 	}
 	speeds := []string{
 		humanize.Speed(float64(s.NumSentencesProcessed)/s.Elapsed.Seconds(), " items"),
 		humanize.Speed(float64(s.NumTokensProcessed)/s.Elapsed.Seconds(), "tokens"),
 		humanize.Speed(float64(s.NumNonPadTokensProcessed)/s.Elapsed.Seconds(), "tokens"),
 		cpuTimePerPassage,
+		"N/A",
 		"N/A",
 	}
 	if s.IsWarmup {
@@ -751,6 +806,15 @@ func cpuTime() time.Duration {
 	var ru syscall.Rusage
 	_ = syscall.Getrusage(syscall.RUSAGE_SELF, &ru)
 	return time.Duration(ru.Utime.Nano() + ru.Stime.Nano())
+}
+
+func maxRSSBytes() int64 {
+	var ru syscall.Rusage
+	_ = syscall.Getrusage(syscall.RUSAGE_SELF, &ru)
+	if runtime.GOOS == "darwin" {
+		return int64(ru.Maxrss) // bytes on macOS
+	}
+	return int64(ru.Maxrss) * 1024 // KiB on Linux/BSD
 }
 
 func mustRunWithElapsedTime[T any](name string, f func() (T, error)) T {
