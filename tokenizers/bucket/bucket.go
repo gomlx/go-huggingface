@@ -234,6 +234,20 @@ func (b *Bucketizer) ByTwoBitBucketBudget(tokensBudget, minSentenceLength int) *
 	})
 }
 
+// Unpadded configures the bucketizer to emit each sentence individually without padding
+// (BatchSize = 1, SentenceLength = max(sentenceLength, 1)).
+//
+// This is useful with dynamic-shape backends when single-sentence processing with zero
+// padding is desired while still taking advantage of parallel streaming tokenization.
+func (b *Bucketizer) Unpadded() *Bucketizer {
+	return b.WithShapeFn(func(sentenceLength int) Shape {
+		return Shape{
+			BatchSize:      1,
+			SentenceLength: max(sentenceLength, 1),
+		}
+	})
+}
+
 // TwoBitBucketLen returns the smallest size >= unpaddedLen that uses only
 // the two highest bits (either 2^n or 1.5 * 2^n).
 //
@@ -449,6 +463,15 @@ func (b *Bucketizer) Run(input <-chan SentenceRef, output chan<- Bucket) {
 			}
 
 			shape := b.shapeFn(len(item.ids))
+			if shape.BatchSize == 1 && shape.SentenceLength == len(item.ids) {
+				b.output <- Bucket{
+					Shape:        shape,
+					Batch:        item.ids,
+					References:   []Reference{item.ref.Reference},
+					NonPadTokens: len(item.ids),
+				}
+				continue
+			}
 			pb, exists := b.activeBuckets[shape]
 			if !exists {
 				pb = b.newPendingBucket(shape)
