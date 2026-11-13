@@ -18,7 +18,9 @@ import (
 	"github.com/gomlx/go-huggingface/tokenizers/api"
 	"github.com/gomlx/gomlx/core/graph"
 	"github.com/gomlx/gomlx/core/tensors"
+	"github.com/gomlx/gomlx/ml/layers"
 	"github.com/gomlx/gomlx/ml/model"
+	"github.com/gomlx/gomlx/ui/commandline"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/klog/v2"
@@ -59,21 +61,32 @@ func must1[T any](v T, err error) T {
 }
 
 func TestMain(m *testing.M) {
+	testStore = model.NewStore()
+	testStore.SetParams(map[string]any{
+		layers.ParamQuantizedMatmul: true,
+	})
+	settings := commandline.CreateSettingsFlag(testStore, "")
 	klog.InitFlags(nil)
 	flag.Parse()
+	paramsSet, err := commandline.ParseSettings(testStore, *settings)
+	if err != nil {
+		fmt.Printf("Failed to parse -set settings: %v\n", err)
+		os.Exit(1)
+	}
+	if len(paramsSet) > 0 {
+		fmt.Printf("Modified settings:\n%s\n", commandline.SprintModifiedSettings(testStore, paramsSet))
+	}
 	if testing.Short() {
 		fmt.Printf("🚨 Skipping tests because -short flag is set.\n")
 		os.Exit(0)
 	}
 
-	var err error
 	testBackend, err = compute.New()
 	if err != nil {
 		fmt.Printf("Failed to initialize backend: %v\n", err)
 		os.Exit(1)
 	}
 
-	testStore = model.NewStore()
 	testRepo = hub.New(Repository)
 	if err := testRepo.DownloadInfo(false); err != nil {
 		fmt.Printf("Failed to LoadRepo: %v\n", err)

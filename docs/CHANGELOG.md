@@ -3,9 +3,9 @@
 ## Unreleased
 
 - 2026/11/13:
-  - `examples/msmarco/benchmark_embed`:
+  - `examples/msmarco/benchmark_embed`, `examples/minilm-l6-v2-gguf`:
     - Added `Max RSS Mem` row (`syscall.Getrusage`) to the benchmark speed summary table (`ReportSpeed`).
-    - Added `-set` hyperparameter flag (`commandline.CreateSettingsFlag`, pre-populated with `layers.ParamQuantizedMatmul: true`).
+    - Added `-set` hyperparameter flag (`commandline.CreateSettingsFlag`, pre-populated with `layers.ParamQuantizedMatmul: true`) to both `benchmark_embed` and `minilm-l6-v2-gguf` tests.
 
 - 2026/11/12:
   - `models/transformer`, `models/gguf`, `tokenizers/hftokenizer` (documented in `docs/GGUF-models.md`):
