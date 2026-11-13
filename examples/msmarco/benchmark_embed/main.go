@@ -9,6 +9,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/pprof"
 	"sync"
 	"sync/atomic"
@@ -35,7 +36,9 @@ import (
 	_ "github.com/gomlx/gomlx/backends/default"
 	"github.com/gomlx/gomlx/core/graph"
 	"github.com/gomlx/gomlx/core/tensors"
+	"github.com/gomlx/gomlx/ml/layers"
 	"github.com/gomlx/gomlx/ml/model"
+	"github.com/gomlx/gomlx/ui/commandline"
 	"github.com/gomlx/onnx-gomlx/onnx"
 	"github.com/gomlx/onnx-gomlx/onnx/parser"
 	"k8s.io/klog/v2"
@@ -73,12 +76,29 @@ func MapHas[K comparable, V any](m map[K]V, k K) bool {
 	return ok
 }
 
+func createModelStore() *model.Store {
+	store := model.NewStore()
+	store.SetParams(map[string]any{
+		layers.ParamQuantizedMatmul: true,
+	})
+	return store
+}
+
 func main() {
+	store := createModelStore()
+	settings := commandline.CreateSettingsFlag(store, "")
 	klog.InitFlags(nil)
 	flag.Parse()
+	paramsSet, err := commandline.ParseSettings(store, *settings)
+	if err != nil {
+		klog.Fatalf("Failed to parse -set settings: %+v", err)
+	}
 
 	fmt.Printf("- Model %q, bucket %d, parallel embedders %d, dynamic shapes %t, warmup %t, shapes %t\n",
 		*flagModel, *flagBucketBudget, *flagParallelEmbedders, *flagDynamic, *flagWarmup, *flagShapes)
+	if len(paramsSet) > 0 {
+		fmt.Printf("- Modified settings:\n%s\n", commandline.SprintModifiedSettings(store, paramsSet))
+	}
 
 	if *flagCPUProf != "" {
 		f, err := os.Create(*flagCPUProf)
@@ -133,7 +153,7 @@ func main() {
 		padID = id
 	}
 
-	embedExec := createEmbedExec(backend, repo, hfModel, padID)
+	embedExec := createEmbedExec(backend, store, repo, hfModel, padID)
 
 	var testBackend compute.Backend
 	var testEmbedExec *model.Exec
@@ -142,7 +162,11 @@ func main() {
 			return compute.NewWithConfig(*flagTestBackend)
 		})
 		fmt.Printf("- Test Backend: %s\n", testBackend.Description())
-		testEmbedExec = createEmbedExec(testBackend, repo, hfModel, padID)
+		testStore := createModelStore()
+		if _, err := commandline.ParseSettings(testStore, *settings); err != nil {
+			klog.Fatalf("Failed to parse -set settings for test store: %+v", err)
+		}
+		testEmbedExec = createEmbedExec(testBackend, testStore, repo, hfModel, padID)
 	}
 
 	// Dataset preparation and stats.
@@ -171,8 +195,7 @@ func main() {
 	runBenchmark(backend, embedExec, testBackend, testEmbedExec, tokenizer, ds, limit, int(totalQueries), false)
 }
 
-func createEmbedExec(backend compute.Backend, repo *hub.Repo, hfModel *transformer.Model, padID int) *model.Exec {
-	store := model.NewStore()
+func createEmbedExec(backend compute.Backend, store *model.Store, repo *hub.Repo, hfModel *transformer.Model, padID int) *model.Exec {
 	var embedExec *model.Exec
 	var err error
 	if hfModel.IsGGUF() || repoHasSafetensors(repo) {
@@ -255,6 +278,7 @@ type SpeedStats struct {
 	NumNonPadTokensProcessed int64
 	Elapsed                  time.Duration
 	CPUElapsed               time.Duration
+	MaxRSSBytes              int64
 	IsWarmup                 bool
 	UniqueShapes             int
 }
@@ -624,6 +648,7 @@ func runBenchmark(backend compute.Backend, embedExec *model.Exec, testBackend co
 	wg.Wait()
 	speedStats.Elapsed = time.Since(startTime)
 	speedStats.CPUElapsed = cpuTime() - startCPUTime
+	speedStats.MaxRSSBytes = maxRSSBytes()
 	if isWarmup {
 		speedStats.UniqueShapes = mapLen(&seenShapes)
 	}
@@ -642,19 +667,21 @@ func ReportSpeed(s *SpeedStats) {
 	if s.NumSentencesProcessed > 0 {
 		cpuTimePerPassage = fmt.Sprintf("%s/passage", humanize.Duration(s.CPUElapsed/time.Duration(s.NumSentencesProcessed)))
 	}
-	names := []string{"Passages", "Tokens", "Non-Pad Tokens", "CPU Time", "~Cores"}
+	names := []string{"Passages", "Tokens", "Non-Pad Tokens", "CPU Time", "~Cores", "Max RSS Mem"}
 	totals := []string{
 		humanize.Count(int64(s.NumSentencesProcessed)),
 		humanize.Count(s.NumTokensProcessed),
 		humanize.Count(s.NumNonPadTokensProcessed),
 		humanize.Duration(s.CPUElapsed),
 		fmt.Sprintf("%.1f", s.CPUElapsed.Seconds()/s.Elapsed.Seconds()),
+		humanize.Bytes(s.MaxRSSBytes),
 	}
 	speeds := []string{
 		humanize.Speed(float64(s.NumSentencesProcessed)/s.Elapsed.Seconds(), " items"),
 		humanize.Speed(float64(s.NumTokensProcessed)/s.Elapsed.Seconds(), "tokens"),
 		humanize.Speed(float64(s.NumNonPadTokensProcessed)/s.Elapsed.Seconds(), "tokens"),
 		cpuTimePerPassage,
+		"N/A",
 		"N/A",
 	}
 	if s.IsWarmup {
@@ -751,6 +778,15 @@ func cpuTime() time.Duration {
 	var ru syscall.Rusage
 	_ = syscall.Getrusage(syscall.RUSAGE_SELF, &ru)
 	return time.Duration(ru.Utime.Nano() + ru.Stime.Nano())
+}
+
+func maxRSSBytes() int64 {
+	var ru syscall.Rusage
+	_ = syscall.Getrusage(syscall.RUSAGE_SELF, &ru)
+	if runtime.GOOS == "darwin" {
+		return int64(ru.Maxrss) // bytes on macOS
+	}
+	return int64(ru.Maxrss) * 1024 // KiB on Linux/BSD
 }
 
 func mustRunWithElapsedTime[T any](name string, f func() (T, error)) T {

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- 2026/11/13:
+  - `examples/msmarco/benchmark_embed`:
+    - Added `Max RSS Mem` row (`syscall.Getrusage`) to the benchmark speed summary table (`ReportSpeed`).
+    - Added `-set` hyperparameter flag (`commandline.CreateSettingsFlag`, pre-populated with `layers.ParamQuantizedMatmul: true`).
+
 - 2026/11/12:
   - `models/transformer`, `models/gguf`, `tokenizers/hftokenizer` (documented in `docs/GGUF-models.md`):
     - Added end-to-end GGUF Transformer model support in `models/transformer`: auto-detects `.gguf` repositories (with or without `config.json` / `tokenizer.json` / `modules.json`), maps GGUF metadata (`general.architecture`, `<arch>.*`, `<arch>.pooling_type`, `<arch>.attention.causal`) and tensor names (`token_embd`, `position_embd`, `token_types`, `blk.{N}.*`, including split and fused `attn_qkv`) to GoMLX scopes, keeps 2D GGML quantized weights (`Q4_0`, `Q4_1`, `Q5_0`, `Q5_1`, `Q8_0`, `IQ4_NL`, `Q2_K`–`Q6_K`, `Q8_K`) in native compressed `Uint8` block layout with `model.Quantization` metadata for `nn.QuantizedDense` / `nn.QuantizedGather`, and exposes `IsGGUF()`, `GGUFFile()`, `GGUFFiles()`, `WithGGUFFile()`, and `WithApproximateGelu()`.
