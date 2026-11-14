@@ -9,7 +9,7 @@ require (
 	github.com/gofrs/flock v0.13.0
 	github.com/gomlx/compute v0.1.29
 	github.com/gomlx/gomlx v0.28.35
-	github.com/gomlx/onnx-gomlx v0.5.21
+	github.com/gomlx/onnx-gomlx v0.5.32
 	github.com/google/uuid v1.6.0
 	github.com/parquet-go/parquet-go v0.29.0
 	github.com/pkg/errors v0.9.1
