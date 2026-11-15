@@ -11,7 +11,9 @@ import (
 	_ "github.com/gomlx/gomlx/backends/default"
 	"github.com/gomlx/gomlx/core/graph"
 	"github.com/gomlx/gomlx/core/graph/graphtest"
+	"github.com/gomlx/gomlx/core/tensors"
 	"github.com/gomlx/gomlx/support/testutil"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestApplySentencePooling(t *testing.T) {
@@ -87,5 +89,43 @@ func TestApplySentencePooling(t *testing.T) {
 				out := m.SentenceEmbeddingFromLastHiddenState(hiddenStates, seqLen)
 				return []*graph.Node{hiddenStates, seqLen}, []*graph.Node{out}
 			}, []any{[][]float32{{2.5, 2.5}, {6, 6}}}, 1e-3)
+	})
+}
+
+func TestSentenceHalfPrecisionPoolingAndNormalize(t *testing.T) {
+	testutil.TestOfficialBackends(t, func(t *testing.T, backend compute.Backend) {
+		for _, dt := range []dtypes.DType{dtypes.Float16, dtypes.BFloat16} {
+			t.Run(dt.String(), func(t *testing.T) {
+				// Large values (300.0 -> 300^2 = 90000 > Float16 max 65504) and zero vectors
+				// verify Float32 promotion in mean pooling and L2 normalization.
+				m := &transformer.Model{
+					PoolingConfig: &transformer.PoolingConfig{PoolingModeMeanTokens: true},
+					Modules: []transformer.ModuleConfig{
+						{Type: "sentence_transformers.models.Pooling"},
+						{Type: "sentence_transformers.models.Normalize"},
+					},
+				}
+				m.WithCausalMask(false)
+
+				exec := graph.MustNewExec(backend, func(hidden, seqLen *graph.Node) *graph.Node {
+					h := graph.ConvertDType(hidden, dt)
+					out := m.SentenceEmbeddingFromLastHiddenState(h, seqLen)
+					assert.Equal(t, dt, out.DType())
+					return graph.ConvertDType(out, dtypes.Float32)
+				})
+
+				// Row 0: valid tokens have [300, 400] -> norm=500 -> normalized [0.6, 0.8]
+				// Row 1: zero tokens -> eps=1e-12 prevents 0/0=NaN -> normalized [0, 0]
+				hiddenIn := tensors.FromValue([][][]float32{
+					{{300, 400}, {300, 400}, {0, 0}},
+					{{0, 0}, {0, 0}, {0, 0}},
+				})
+				seqLenIn := tensors.FromValue([]int32{2, 2})
+				got := exec.MustExec(hiddenIn, seqLenIn)[0].Value().([][]float32)
+
+				assert.InDeltaSlice(t, []float32{0.6, 0.8}, got[0], 1e-2)
+				assert.InDeltaSlice(t, []float32{0, 0}, got[1], 1e-6)
+			})
+		}
 	})
 }

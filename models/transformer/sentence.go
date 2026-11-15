@@ -102,7 +102,13 @@ func (m *Model) SentenceEmbeddingFromLastHiddenState(lastHiddenState, seqLen *gr
 }
 
 func normalizeEmbeddings(x *graph.Node) *graph.Node {
-	// Apply L2 normalization: x = x / max(norm(x), eps)
+	// Apply L2 normalization: x = x / max(norm(x), eps).
+	// Promote half-precision inputs to Float32 so squaring/summing avoids Float16 overflow
+	// and eps (1e-12) does not underflow to zero.
+	origDType := x.DType()
+	if origDType == dtypes.Float16 || origDType == dtypes.BFloat16 {
+		x = graph.ConvertDType(x, dtypes.Float32)
+	}
 	// Compute norm along the final dimension (hidden_size)
 	norm := graph.Sqrt(graph.ReduceSum(graph.Square(x), -1))
 	eps := graph.Scalar(x.Graph(), norm.DType(), 1e-12)
@@ -110,7 +116,11 @@ func normalizeEmbeddings(x *graph.Node) *graph.Node {
 
 	// Expand norm back to [batch, 1] for broadcasting against [batch, hidden_size]
 	norm = graph.ExpandAxes(norm, -1)
-	return graph.Div(x, norm)
+	res := graph.Div(x, norm)
+	if res.DType() != origDType {
+		res = graph.ConvertDType(res, origDType)
+	}
+	return res
 }
 
 // SingleSentenceEmbeddingExec returns a model.Exec that can be used to compute sentence embeddings.
@@ -183,13 +193,26 @@ func (m *Model) ApplySentencePooling(hiddenStates, seqLen *graph.Node) *graph.No
 		return lastTokenEmbeddings
 
 	case cfg.PoolingModeMeanTokens:
-		if seqLen == nil {
-			return graph.ReduceMean(hiddenStates, 1) // [batch, hidden]
+		// Promote half-precision hidden states to Float32 for accumulation accuracy and to
+		// prevent Float16 sum overflow on longer sequences, then cast back to origDType.
+		origDType := hiddenStates.DType()
+		work := hiddenStates
+		if origDType == dtypes.Float16 || origDType == dtypes.BFloat16 {
+			work = graph.ConvertDType(work, dtypes.Float32)
 		}
-		// Create a boolean mask from seqLen.
-		indices := graph.DynamicIota(g, seqLen.DType(), 1, graph.DimensionSpecFor(hiddenStates, 0), graph.DimensionSpecFor(hiddenStates, 1))
-		mask := graph.LessThan(indices, graph.ExpandAxes(seqLen, 1))
-		return graph.MaskedReduceMean(hiddenStates, mask, 1) // [batch, hidden]
+		var pooled *graph.Node
+		if seqLen == nil {
+			pooled = graph.ReduceMean(work, 1) // [batch, hidden]
+		} else {
+			// Create a boolean mask from seqLen.
+			indices := graph.DynamicIota(g, seqLen.DType(), 1, graph.DimensionSpecFor(work, 0), graph.DimensionSpecFor(work, 1))
+			mask := graph.LessThan(indices, graph.ExpandAxes(seqLen, 1))
+			pooled = graph.MaskedReduceMean(work, mask, 1) // [batch, hidden]
+		}
+		if pooled.DType() != origDType {
+			pooled = graph.ConvertDType(pooled, origDType)
+		}
+		return pooled
 
 	case cfg.PoolingModeClsToken:
 		// CLS token is typically the first token (index 0).

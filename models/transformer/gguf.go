@@ -231,6 +231,125 @@ func (m *Model) loadGGUFTokenizer() (tokenizers.Tokenizer, error) {
 
 // loadStoreGGUF loads GGUF tensors into store, keeping supported 2D GGML quantized weights in
 // their native compressed Uint8 block layout with model.Quantization metadata.
+func ggufFloatDType(t gguf.TensorType) (dtypes.DType, bool) {
+	switch t {
+	case gguf.TensorTypeF32:
+		return dtypes.Float32, true
+	case gguf.TensorTypeF16:
+		return dtypes.Float16, true
+	case gguf.TensorTypeBF16:
+		return dtypes.BFloat16, true
+	default:
+		return dtypes.InvalidDType, false
+	}
+}
+
+// ggufDTypes infers the primary model computation dtype and normalization parameter dtype
+// from the GGUF tensor headers.
+//
+// If ForceFloat32() is enabled or the GGUF contains any quantized tensors, both dtypes
+// default to Float32 (keeping quantized weights via QuantGGML and promoting small unquantized
+// F16/BF16 tensors such as position embeddings to Float32). For unquantized half-precision
+// GGUFs, the dominant 2D weight dtype becomes modelDType while normDType tracks the
+// normalization weights (often Float32 in llama.cpp F16/BF16 exports).
+func (m *Model) ggufDTypes() (modelDType, normDType dtypes.DType) {
+	if m.forceFloat32 {
+		return dtypes.Float32, dtypes.Float32
+	}
+	if err := m.ensureGGUFHeader(); err != nil || m.parsedGGUF == nil {
+		return dtypes.Float32, dtypes.Float32
+	}
+
+	isBert := m.isBertModel()
+	for _, info := range m.parsedGGUF.TensorInfos {
+		if _, quantOK := info.Type.ToGGMLQuantType(); quantOK {
+			return dtypes.Float32, dtypes.Float32
+		}
+	}
+
+	matrixElems := make(map[dtypes.DType]uint64)
+	otherElems := make(map[dtypes.DType]uint64)
+	var seenNormF32, seenNormF16, seenNormBF16 bool
+
+	for _, info := range m.parsedGGUF.TensorInfos {
+		dt, ok := ggufFloatDType(info.Type)
+		if !ok {
+			continue
+		}
+
+		isNorm := false
+		if _, isWeight, isQKV := parseGGUFFusedQKV(info.Name); isQKV {
+			_ = isWeight
+		} else {
+			_, varName, mapped := mapGGUFTensorName(info.Name, isBert)
+			if !mapped {
+				continue
+			}
+			isNorm = varName == "gain" || varName == "offset" || varName == "scale"
+		}
+
+		if isNorm {
+			switch dt {
+			case dtypes.Float32:
+				seenNormF32 = true
+			case dtypes.Float16:
+				seenNormF16 = true
+			case dtypes.BFloat16:
+				seenNormBF16 = true
+			}
+			continue
+		}
+
+		elems := info.NumElements()
+		if len(info.Shape) == 2 {
+			matrixElems[dt] += elems
+		} else {
+			otherElems[dt] += elems
+		}
+	}
+
+	pickDominant := func(counts map[dtypes.DType]uint64) dtypes.DType {
+		bestDT := dtypes.InvalidDType
+		var bestCount uint64
+		for _, candidate := range []dtypes.DType{dtypes.Float32, dtypes.Float16, dtypes.BFloat16} {
+			if c := counts[candidate]; c > bestCount {
+				bestCount = c
+				bestDT = candidate
+			}
+		}
+		return bestDT
+	}
+
+	modelDType = pickDominant(matrixElems)
+	if modelDType == dtypes.InvalidDType {
+		modelDType = pickDominant(otherElems)
+	}
+	if modelDType == dtypes.InvalidDType {
+		modelDType = dtypes.Float32
+	}
+
+	normCount := 0
+	if seenNormF32 {
+		normCount++
+		normDType = dtypes.Float32
+	}
+	if seenNormF16 {
+		normCount++
+		normDType = dtypes.Float16
+	}
+	if seenNormBF16 {
+		normCount++
+		normDType = dtypes.BFloat16
+	}
+	if normCount == 0 {
+		normDType = modelDType
+	} else if normCount > 1 {
+		normDType = dtypes.Float32
+	}
+
+	return modelDType, normDType
+}
+
 func (m *Model) loadStoreGGUF(backend compute.Backend, store *model.Store, filterFn func(path string) bool) error {
 	if err := m.ensureGGUFHeader(); err != nil {
 		return err
@@ -242,6 +361,7 @@ func (m *Model) loadStoreGGUF(backend compute.Backend, store *model.Store, filte
 	defer reader.Close()
 
 	isBert := m.isBertModel()
+	targetModelDType, targetNormDType := m.ggufDTypes()
 	var totalParams int64
 	var totalBytes int64
 
@@ -267,7 +387,7 @@ func (m *Model) loadStoreGGUF(backend compute.Backend, store *model.Store, filte
 	for _, info := range m.parsedGGUF.TensorInfos {
 		// Handle fused QKV tensors (e.g. blk.{N}.attn_qkv.{weight,bias} in some BERT GGUF exports).
 		if layerNum, isWeight, isQKV := parseGGUFFusedQKV(info.Name); isQKV {
-			if err := loadSplitGGUFQKV(reader, backend, info, layerNum, isBert, isWeight, storeLoadedVar); err != nil {
+			if err := loadSplitGGUFQKV(reader, backend, info, layerNum, isBert, isWeight, targetModelDType == dtypes.Float32, storeLoadedVar); err != nil {
 				return err
 			}
 			continue
@@ -298,15 +418,23 @@ func (m *Model) loadStoreGGUF(backend compute.Backend, store *model.Store, filte
 		}
 
 		// Native float/int tensor (or non-2D / fallback quantized tensor): load on host first so
-		// Float16/BFloat16 tensors (e.g. position_embd.weight in MiniLM GGUFs) convert cleanly to Float32.
+		// Float32 promotion can be applied when target dtype requires Float32 (quantized models,
+		// mixed norm dtypes, Float64 tensors, or ForceFloat32).
 		hostTensor, err := reader.ReadTensor(nil, info.Name)
 		if err != nil {
 			return errors.WithMessagef(err, "failed loading GGUF tensor %q from %q", info.Name, m.ggufFile)
 		}
-		tensorToLoad, err := ensureFloat32HostTensor(hostTensor)
-		if err != nil {
-			hostTensor.FinalizeAll()
-			return errors.WithMessagef(err, "failed converting GGUF tensor %q to Float32", info.Name)
+		isNorm := varName == "gain" || varName == "offset" || varName == "scale"
+		needFloat32 := targetModelDType == dtypes.Float32 ||
+			hostTensor.DType() == dtypes.Float64 ||
+			(isNorm && targetNormDType == dtypes.Float32)
+		tensorToLoad := hostTensor
+		if needFloat32 {
+			tensorToLoad, err = ensureFloat32HostTensor(hostTensor)
+			if err != nil {
+				hostTensor.FinalizeAll()
+				return errors.WithMessagef(err, "failed converting GGUF tensor %q to Float32", info.Name)
+			}
 		}
 		if backend != nil {
 			if err := tensorToLoad.ToDevice(backend, 0); err != nil {
@@ -490,6 +618,7 @@ func loadSplitGGUFQKV(
 	layerNum int,
 	isBert bool,
 	isWeight bool,
+	forceFloat32 bool,
 	storeFn func(scopePath []string, varName string, t *tensors.Tensor, q *model.Quantization, logicalElems, byteSize int64),
 ) error {
 	layerScope := fmt.Sprintf("layer_%d", layerNum)
@@ -541,87 +670,93 @@ func loadSplitGGUFQKV(
 			}
 			return nil
 		}
-
-		hostT, err := reader.ReadTensor(nil, info.Name)
-		if err != nil {
-			return err
-		}
-		f32T, err := ensureFloat32HostTensor(hostT)
-		if err != nil {
-			hostT.FinalizeAll()
-			return err
-		}
-		defer f32T.FinalizeAll()
-
-		dims := f32T.Shape().Dimensions
-		if len(dims) != 2 || dims[0]%3 != 0 {
-			return errors.Errorf("unexpected shape %s for %s", f32T.Shape(), info.Name)
-		}
-		rowsPerPart := dims[0] / 3
-		cols := dims[1]
-		flat, err := tensors.CopyFlatData[float32](f32T)
-		if err != nil {
-			return err
-		}
-		partLen := rowsPerPart * cols
-		for idx, part := range targets {
-			partTensor := tensors.FromFlatDataAndDimensions(flat[idx*partLen:(idx+1)*partLen], rowsPerPart, cols)
-			if backend != nil {
-				if err := partTensor.ToDevice(backend, 0); err != nil {
-					partTensor.FinalizeAll()
-					return err
-				}
-			}
-			storeFn(
-				[]string{layerScope, attnGroup, "MultiHeadAttention", part, "dense"},
-				"weights",
-				partTensor,
-				nil,
-				int64(partLen),
-				int64(partLen*4),
-			)
-		}
-		return nil
 	}
 
-	// Bias [3*D] -> 3 x [D]
 	hostT, err := reader.ReadTensor(nil, info.Name)
 	if err != nil {
 		return err
 	}
-	f32T, err := ensureFloat32HostTensor(hostT)
-	if err != nil {
-		hostT.FinalizeAll()
-		return err
+	if forceFloat32 || hostT.DType() == dtypes.Float64 {
+		converted, err := ensureFloat32HostTensor(hostT)
+		if err != nil {
+			hostT.FinalizeAll()
+			return err
+		}
+		hostT = converted
 	}
-	defer f32T.FinalizeAll()
+	defer hostT.FinalizeAll()
 
-	flat, err := tensors.CopyFlatData[float32](f32T)
+	dims := hostT.Shape().Dimensions
+	var varName string
+	var partDims []int
+	if isWeight {
+		if len(dims) != 2 || dims[0]%3 != 0 {
+			return errors.Errorf("unexpected shape %s for %s", hostT.Shape(), info.Name)
+		}
+		varName = "weights"
+		partDims = []int{dims[0] / 3, dims[1]}
+	} else {
+		if len(dims) != 1 || dims[0]%3 != 0 {
+			return errors.Errorf("unexpected shape %s for %s", hostT.Shape(), info.Name)
+		}
+		varName = "biases"
+		partDims = []int{dims[0] / 3}
+	}
+
+	parts, err := splitTensorFirstAxis3(hostT, partDims...)
 	if err != nil {
 		return err
 	}
-	if len(flat)%3 != 0 {
-		return errors.Errorf("unexpected bias length %d for %s", len(flat), info.Name)
-	}
-	partLen := len(flat) / 3
 	for idx, part := range targets {
-		partTensor := tensors.FromFlatDataAndDimensions(flat[idx*partLen:(idx+1)*partLen], partLen)
+		partTensor := parts[idx]
 		if backend != nil {
 			if err := partTensor.ToDevice(backend, 0); err != nil {
-				partTensor.FinalizeAll()
+				for _, rem := range parts[idx:] {
+					rem.FinalizeAll()
+				}
 				return err
 			}
 		}
+		partShape := partTensor.Shape()
 		storeFn(
 			[]string{layerScope, attnGroup, "MultiHeadAttention", part, "dense"},
-			"biases",
+			varName,
 			partTensor,
 			nil,
-			int64(partLen),
-			int64(partLen*4),
+			int64(partShape.Size()),
+			int64(partShape.ByteSize()),
 		)
 	}
 	return nil
+}
+
+func splitTensorFirstAxis3(t *tensors.Tensor, partDims ...int) ([]*tensors.Tensor, error) {
+	switch t.DType() {
+	case dtypes.Float32:
+		return splitTypedFirstAxis3[float32](t, partDims...)
+	case dtypes.Float16:
+		return splitTypedFirstAxis3[float16.Float16](t, partDims...)
+	case dtypes.BFloat16:
+		return splitTypedFirstAxis3[bfloat16.BFloat16](t, partDims...)
+	default:
+		return nil, errors.Errorf("unsupported dtype %s for fused QKV split", t.DType())
+	}
+}
+
+func splitTypedFirstAxis3[T float32 | float16.Float16 | bfloat16.BFloat16](t *tensors.Tensor, partDims ...int) ([]*tensors.Tensor, error) {
+	flat, err := tensors.CopyFlatData[T](t)
+	if err != nil {
+		return nil, err
+	}
+	if len(flat)%3 != 0 {
+		return nil, errors.Errorf("unexpected fused QKV element count %d (not divisible by 3)", len(flat))
+	}
+	partLen := len(flat) / 3
+	parts := make([]*tensors.Tensor, 3)
+	for idx := range 3 {
+		parts[idx] = tensors.FromFlatDataAndDimensions(flat[idx*partLen:(idx+1)*partLen], partDims...)
+	}
+	return parts, nil
 }
 
 // ensureFloat32HostTensor converts Float16, BFloat16, or Float64 host tensors to Float32,

@@ -5,10 +5,13 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gomlx/compute"
 	"github.com/gomlx/compute/dtypes"
+	"github.com/gomlx/compute/dtypes/bfloat16"
+	"github.com/gomlx/compute/dtypes/float16"
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/models/gguf"
 	"github.com/gomlx/go-huggingface/models/transformer"
@@ -232,6 +235,7 @@ func TestGGUFTransformerEndToEnd(t *testing.T) {
 	for _, approxGelu := range []bool{true, false} {
 		var refOut [][]float32
 		var refFloatOut [][]float32
+		var refFloatIsCUDA bool
 		testutil.TestOfficialBackends(t, func(t *testing.T, backend compute.Backend) {
 			m, err := transformer.LoadModel(repo)
 			require.NoError(t, err)
@@ -303,11 +307,258 @@ func TestGGUFTransformerEndToEnd(t *testing.T) {
 			gotFloat := outsFloat[0].Value().([][]float32)
 			if refFloatOut == nil {
 				refFloatOut = gotFloat
+				refFloatIsCUDA = strings.Contains(strings.ToLower(t.Name()), "cuda")
 			} else {
+				tol := 1e-4
+				if refFloatIsCUDA || strings.Contains(strings.ToLower(t.Name()), "cuda") {
+					// cuBLAS TF32 default on Ampere+ introduces ~2e-4 variance vs IEEE Float32.
+					tol = 1e-3
+				}
 				for r := range gotFloat {
-					assert.InDeltaSlicef(t, refFloatOut[r], gotFloat[r], 1e-4, "approxGelu=%v row %d float32 matmul parity", approxGelu, r)
+					assert.InDeltaSlicef(t, refFloatOut[r], gotFloat[r], tol, "approxGelu=%v row %d float32 matmul parity", approxGelu, r)
 				}
 			}
+		})
+	}
+}
+
+func makeHalfRamp(n int, scale float32, ttype gguf.TensorType) []byte {
+	out := make([]byte, n*2)
+	for i := range n {
+		// Deterministic small non-uniform pattern centered around zero.
+		val := scale * float32((i%13)-6)
+		var bits uint16
+		switch ttype {
+		case gguf.TensorTypeF16:
+			bits = float16.FromFloat32(val).Bits()
+		case gguf.TensorTypeBF16:
+			bits = bfloat16.FromFloat32(val).Bits()
+		default:
+			panic("expected half tensor type")
+		}
+		binary.LittleEndian.PutUint16(out[i*2:(i+1)*2], bits)
+	}
+	return out
+}
+
+func writeSyntheticHalfBertGGUF(t *testing.T, filePath string, weightType, normType gguf.TensorType) {
+	t.Helper()
+	const (
+		hidden       = 32
+		intermediate = 64
+		maxPos       = 16
+		vocabSize    = 8
+	)
+
+	makeNorm := func(val float32) []byte {
+		switch normType {
+		case gguf.TensorTypeF32:
+			return makeF32Vec(hidden, val)
+		case gguf.TensorTypeF16, gguf.TensorTypeBF16:
+			out := make([]byte, hidden*2)
+			var bits uint16
+			if normType == gguf.TensorTypeF16 {
+				bits = float16.FromFloat32(val).Bits()
+			} else {
+				bits = bfloat16.FromFloat32(val).Bits()
+			}
+			for i := range hidden {
+				binary.LittleEndian.PutUint16(out[i*2:(i+1)*2], bits)
+			}
+			return out
+		default:
+			t.Fatalf("unsupported normType %v", normType)
+			return nil
+		}
+	}
+
+	specs := []syntheticTensorSpec{
+		{name: "token_embd.weight", shape: []uint64{hidden, vocabSize}, ttype: weightType, data: makeHalfRamp(vocabSize*hidden, 0.05, weightType)},
+		{name: "position_embd.weight", shape: []uint64{hidden, maxPos}, ttype: weightType, data: makeHalfRamp(maxPos*hidden, 0.03, weightType)},
+		{name: "token_types.weight", shape: []uint64{hidden, 2}, ttype: gguf.TensorTypeF32, data: makeF32Vec(2*hidden, 0.02)},
+		{name: "token_embd_norm.weight", shape: []uint64{hidden}, ttype: normType, data: makeNorm(1.0)},
+		{name: "token_embd_norm.bias", shape: []uint64{hidden}, ttype: normType, data: makeNorm(0.0)},
+
+		{name: "blk.0.attn_qkv.weight", shape: []uint64{hidden, 3 * hidden}, ttype: weightType, data: makeHalfRamp(3*hidden*hidden, 0.04, weightType)},
+		{name: "blk.0.attn_qkv.bias", shape: []uint64{3 * hidden}, ttype: gguf.TensorTypeF32, data: makeF32Vec(3*hidden, 0.01)},
+		{name: "blk.0.attn_output.weight", shape: []uint64{hidden, hidden}, ttype: weightType, data: makeHalfRamp(hidden*hidden, 0.04, weightType)},
+		{name: "blk.0.attn_output.bias", shape: []uint64{hidden}, ttype: gguf.TensorTypeF32, data: makeF32Vec(hidden, 0.0)},
+		{name: "blk.0.attn_output_norm.weight", shape: []uint64{hidden}, ttype: normType, data: makeNorm(1.0)},
+		{name: "blk.0.attn_output_norm.bias", shape: []uint64{hidden}, ttype: normType, data: makeNorm(0.0)},
+		{name: "blk.0.ffn_up.weight", shape: []uint64{hidden, intermediate}, ttype: weightType, data: makeHalfRamp(intermediate*hidden, 0.03, weightType)},
+		{name: "blk.0.ffn_up.bias", shape: []uint64{intermediate}, ttype: gguf.TensorTypeF32, data: makeF32Vec(intermediate, 0.05)},
+		{name: "blk.0.ffn_down.weight", shape: []uint64{intermediate, hidden}, ttype: weightType, data: makeHalfRamp(hidden*intermediate, 0.03, weightType)},
+		{name: "blk.0.ffn_down.bias", shape: []uint64{hidden}, ttype: gguf.TensorTypeF32, data: makeF32Vec(hidden, 0.0)},
+		{name: "blk.0.layer_output_norm.weight", shape: []uint64{hidden}, ttype: normType, data: makeNorm(1.0)},
+		{name: "blk.0.layer_output_norm.bias", shape: []uint64{hidden}, ttype: normType, data: makeNorm(0.0)},
+	}
+
+	w := &syntheticGGUFWriter{}
+	w.buf = append(w.buf, "GGUF"...)
+	w.u32(3)
+	w.u64(uint64(len(specs)))
+	w.u64(16)
+
+	w.kvStr("general.architecture", "bert")
+	w.kvU32("bert.context_length", maxPos)
+	w.kvU32("bert.embedding_length", hidden)
+	w.kvU32("bert.block_count", 1)
+	w.kvU32("bert.feed_forward_length", intermediate)
+	w.kvU32("bert.attention.head_count", 2)
+	w.kvF32("bert.attention.layer_norm_epsilon", 1e-12)
+	w.kvBool("bert.attention.causal", false)
+	w.kvU32("bert.pooling_type", 1)
+
+	w.kvStr("tokenizer.ggml.model", "bert")
+	w.kvStrArr("tokenizer.ggml.tokens", []string{"[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]", "hello", "world", "##s"})
+	w.kvU32("tokenizer.ggml.unknown_token_id", 1)
+	w.kvU32("tokenizer.ggml.bos_token_id", 2)
+	w.kvU32("tokenizer.ggml.seperator_token_id", 3)
+	w.kvU32("tokenizer.ggml.padding_token_id", 0)
+	w.kvU32("tokenizer.ggml.token_type_count", 2)
+
+	var dataBlob []byte
+	for _, s := range specs {
+		for len(dataBlob)%32 != 0 {
+			dataBlob = append(dataBlob, 0)
+		}
+		offset := uint64(len(dataBlob))
+		dataBlob = append(dataBlob, s.data...)
+
+		w.str(s.name)
+		w.u32(uint32(len(s.shape)))
+		for _, d := range s.shape {
+			w.u64(d)
+		}
+		w.u32(uint32(s.ttype))
+		w.u64(offset)
+	}
+	for len(w.buf)%32 != 0 {
+		w.buf = append(w.buf, 0)
+	}
+	w.buf = append(w.buf, dataBlob...)
+	require.NoError(t, os.WriteFile(filePath, w.buf, 0644))
+}
+
+func TestGGUFHalfPrecisionEndToEnd(t *testing.T) {
+	testCases := []struct {
+		name              string
+		filename          string
+		weightType        gguf.TensorType
+		normType          gguf.TensorType
+		expectedDType     dtypes.DType
+		expectedNormDType dtypes.DType
+	}{
+		{
+			name:              "f16_weights_f32_norms",
+			filename:          "tiny-bert-fp16.gguf",
+			weightType:        gguf.TensorTypeF16,
+			normType:          gguf.TensorTypeF32,
+			expectedDType:     dtypes.Float16,
+			expectedNormDType: dtypes.Float32,
+		},
+		{
+			name:              "bf16_weights_f32_norms",
+			filename:          "tiny-bert-bf16.gguf",
+			weightType:        gguf.TensorTypeBF16,
+			normType:          gguf.TensorTypeF32,
+			expectedDType:     dtypes.BFloat16,
+			expectedNormDType: dtypes.Float32,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			repoDir := t.TempDir()
+			writeSyntheticHalfBertGGUF(t, filepath.Join(repoDir, tc.filename), tc.weightType, tc.normType)
+			repo := hub.NewLocal(repoDir)
+
+			var refNative [][]float32
+			testutil.TestOfficialBackends(t, func(t *testing.T, backend compute.Backend) {
+				mNative, err := transformer.LoadModel(repo)
+				require.NoError(t, err)
+
+				storeNative := model.NewStore()
+				gmNative := mNative.CreateGoMLXModel(storeNative.RootScope())
+				assert.Equal(t, tc.expectedDType, gmNative.DType)
+				assert.Equal(t, tc.expectedNormDType, gmNative.NormDType)
+
+				require.NoError(t, mNative.LoadStore(backend, storeNative))
+
+				// Verify half-precision weights & split QKV stay native, while Float32 norms stay Float32.
+				for _, varPath := range []string{
+					"/token_embed/embeddings",
+					"/pos_embed/embeddings",
+					"/layer_0/attn/MultiHeadAttention/query/dense/weights",
+					"/layer_0/attn/MultiHeadAttention/key/dense/weights",
+					"/layer_0/attn/MultiHeadAttention/value/dense/weights",
+					"/layer_0/attn/MultiHeadAttention/output/dense/weights",
+					"/layer_0/ff1/dense/weights",
+					"/layer_0/ff2/dense/weights",
+				} {
+					v := storeNative.GetVariable(varPath)
+					require.NotNilf(t, v, "expected variable %s", varPath)
+					assert.Equalf(t, tc.expectedDType, v.Shape().DType, "variable %s dtype", varPath)
+				}
+				for _, normPath := range []string{
+					"/embed_norm/layer_normalization/gain",
+					"/embed_norm/layer_normalization/offset",
+					"/layer_0/norm1/layer_normalization/gain",
+					"/layer_0/norm2/layer_normalization/gain",
+				} {
+					v := storeNative.GetVariable(normPath)
+					require.NotNilf(t, v, "expected norm variable %s", normPath)
+					assert.Equalf(t, tc.expectedNormDType, v.Shape().DType, "norm variable %s dtype", normPath)
+				}
+
+				execNative := model.MustNewExec(backend, storeNative, func(s *model.Scope, inputs []*graph.Node) *graph.Node {
+					emb := mNative.SentenceEmbeddingGraph(s, inputs[0], inputs[1])
+					assert.Equal(t, tc.expectedDType, emb.DType())
+					return graph.ConvertDType(emb, dtypes.Float32)
+				})
+				tokenIDs := tensors.FromValue([][]int32{{2, 5, 6, 7, 3, 0}, {2, 5, 3, 0, 0, 0}})
+				seqLens := tensors.FromValue([]int32{5, 3})
+				gotNative := execNative.MustExec(tokenIDs, seqLens)[0].Value().([][]float32)
+
+				// Compare with WithForceFloat32(true).
+				mF32, err := transformer.LoadModel(repo)
+				require.NoError(t, err)
+				mF32.WithForceFloat32(true)
+				assert.True(t, mF32.ForceFloat32())
+				storeF32 := model.NewStore()
+				gmF32 := mF32.CreateGoMLXModel(storeF32.RootScope())
+				assert.Equal(t, dtypes.Float32, gmF32.DType)
+
+				require.NoError(t, mF32.LoadStore(backend, storeF32))
+				assert.Equal(t, dtypes.Float32, storeF32.GetVariable("/token_embed/embeddings").Shape().DType)
+				assert.Equal(t, dtypes.Float32, storeF32.GetVariable("/layer_0/attn/MultiHeadAttention/query/dense/weights").Shape().DType)
+
+				execF32 := model.MustNewExec(backend, storeF32, func(s *model.Scope, inputs []*graph.Node) *graph.Node {
+					emb := mF32.SentenceEmbeddingGraph(s, inputs[0], inputs[1])
+					assert.Equal(t, dtypes.Float32, emb.DType())
+					return emb
+				})
+				gotF32 := execF32.MustExec(tokenIDs, seqLens)[0].Value().([][]float32)
+
+				for r := range gotNative {
+					var normSq, dot float64
+					for c := range gotNative[r] {
+						normSq += float64(gotNative[r][c]) * float64(gotNative[r][c])
+						dot += float64(gotNative[r][c]) * float64(gotF32[r][c])
+					}
+					assert.InDeltaf(t, 1.0, math.Sqrt(normSq), 2e-2, "row %d L2 norm", r)
+					assert.Greaterf(t, dot, 0.995, "row %d native half vs ForceFloat32 cosine similarity", r)
+					assert.InDeltaSlicef(t, gotF32[r], gotNative[r], 3e-2, "row %d native half vs ForceFloat32 parity", r)
+				}
+
+				if refNative == nil {
+					refNative = gotNative
+				} else {
+					for r := range gotNative {
+						assert.InDeltaSlicef(t, refNative[r], gotNative[r], 2e-2, "row %d backend parity", r)
+					}
+				}
+			})
 		})
 	}
 }
