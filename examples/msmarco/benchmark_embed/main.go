@@ -97,8 +97,8 @@ func main() {
 		klog.Fatalf("Failed to parse -set settings: %+v", err)
 	}
 
-	fmt.Printf("- Model %q, bucket %d, parallel embedders %d, dynamic shapes %t, warmup %t, shapes %t\n",
-		*flagModel, *flagBucketBudget, *flagParallelEmbedders, *flagDynamic, *flagWarmup, *flagShapes)
+	fmt.Printf("- Model %q, bucket %d, parallel embedders %d, dynamic shapes %t, warmup %t, shapes %t, force_f32 %t\n",
+		*flagModel, *flagBucketBudget, *flagParallelEmbedders, *flagDynamic, *flagWarmup, *flagShapes, *flagForceFloat32)
 	if len(paramsSet) > 0 {
 		fmt.Printf("- Modified settings:\n%s\n", commandline.SprintModifiedSettings(store, paramsSet))
 	}
@@ -140,7 +140,7 @@ func main() {
 		return m, nil
 	})
 	if hfModel.IsGGUF() {
-		fmt.Printf("- GGUF file: %s (approx_gelu=%t, force_f32=%t)\n", hfModel.GGUFFile(), *flagApproxGelu, *flagForceFloat32)
+		fmt.Printf("- GGUF file: %s (approx_gelu=%t)\n", hfModel.GGUFFile(), *flagApproxGelu)
 	}
 
 	tokenizer := mustRunWithElapsedTime("Loading tokenizer", func() (tokenizers.Tokenizer, error) {
