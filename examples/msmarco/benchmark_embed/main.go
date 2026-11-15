@@ -53,6 +53,8 @@ var (
 			"(falling back to the first non-mmproj .gguf file).")
 	flagApproxGelu = flag.Bool("approx_gelu", true,
 		"Use tanh-approximate GELU (matches GoMLX default and llama.cpp ggml_gelu); set false for exact erf GELU.")
+	flagForceFloat32 = flag.Bool("force_f32", false,
+		"Force Float32 weights and computation even when the model provides native Float16/BFloat16 weights.")
 	flagLimit        = flag.Int("limit", -1, "Limit the number of queries indexed. Set <= 0 to use all.")
 	flagMSMarcoSplit = flag.String("msmarco_split", msmarco.TrainSplit, "Split to read from MS MARCO dataset (e.g. 'train', 'validation', 'test')")
 	flagBucketBudget = flag.Int("bucket", 8*1024,
@@ -131,13 +133,14 @@ func main() {
 			return nil, err
 		}
 		m.WithApproximateGelu(*flagApproxGelu)
+		m.WithForceFloat32(*flagForceFloat32)
 		if *flagGGUFFile != "" {
 			m.WithGGUFFile(*flagGGUFFile)
 		}
 		return m, nil
 	})
 	if hfModel.IsGGUF() {
-		fmt.Printf("- GGUF file: %s (approx_gelu=%t)\n", hfModel.GGUFFile(), *flagApproxGelu)
+		fmt.Printf("- GGUF file: %s (approx_gelu=%t, force_f32=%t)\n", hfModel.GGUFFile(), *flagApproxGelu, *flagForceFloat32)
 	}
 
 	tokenizer := mustRunWithElapsedTime("Loading tokenizer", func() (tokenizers.Tokenizer, error) {

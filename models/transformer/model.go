@@ -48,9 +48,23 @@ type Model struct {
 	ggufFile        string
 	parsedGGUF      *gguf.File
 	approximateGelu *bool
+	forceFloat32    bool
 
 	tokenizer tokenizers.Tokenizer
 	KVCache   *mltransformer.KVCache
+}
+
+// WithForceFloat32 forces weights and computation to Float32, converting any
+// half-precision (Float16/BFloat16) tensors to Float32 during loading.
+// This is useful for backends that do not support half-precision operations.
+func (m *Model) WithForceFloat32(force bool) *Model {
+	m.forceFloat32 = force
+	return m
+}
+
+// ForceFloat32 returns whether weights and computation are forced to Float32.
+func (m *Model) ForceFloat32() bool {
+	return m.forceFloat32
 }
 
 // WithMMap configures whether to use memory-mapped files (mmap) when reading tensors,
@@ -276,7 +290,11 @@ func (m *Model) LoadStoreFiltered(backend compute.Backend, store *model.Store, f
 
 	isBert := m.Config.ModelType == "bert" || (len(m.Config.Architectures) > 0 && m.Config.Architectures[0] == "BertModel")
 
-	for tensorAndName, err := range safetensors.IterTensorsFromRepoWithMMap(backend, m.Repo, m.UseMMap()) {
+	loadBackend := backend
+	if m.forceFloat32 {
+		loadBackend = nil
+	}
+	for tensorAndName, err := range safetensors.IterTensorsFromRepoWithMMap(loadBackend, m.Repo, m.UseMMap()) {
 		if err != nil {
 			return errors.WithMessagef(err, "failed loading variables of models %q", m.Repo.ID)
 		}
@@ -308,6 +326,21 @@ func (m *Model) LoadStoreFiltered(backend compute.Backend, store *model.Store, f
 			// Do not overwrite it with base weights, and free the unused tensor immediately.
 			tensorToLoad.FinalizeAll()
 			continue
+		}
+
+		if m.forceFloat32 {
+			converted, err := ensureFloat32HostTensor(tensorToLoad)
+			if err != nil {
+				tensorToLoad.FinalizeAll()
+				return errors.WithMessagef(err, "failed converting tensor %q to Float32", fullPath)
+			}
+			tensorToLoad = converted
+			if backend != nil {
+				if err := tensorToLoad.ToDevice(backend, 0); err != nil {
+					tensorToLoad.FinalizeAll()
+					return errors.WithMessagef(err, "failed transferring tensor %q to device", fullPath)
+				}
+			}
 		}
 
 		// Track size

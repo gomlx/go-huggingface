@@ -227,8 +227,14 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 		tm.WithApproximateGelu(*m.approximateGelu)
 	}
 
-	if m.isGGUF {
+	if m.forceFloat32 {
 		tm.WithDType(dtypes.Float32)
+	} else if m.isGGUF {
+		modelDType, normDType := m.ggufDTypes()
+		tm.WithDType(modelDType)
+		if normDType != dtypes.InvalidDType && normDType != modelDType {
+			tm.WithNormDType(normDType)
+		}
 	} else {
 		torchDtype := m.Config.TorchDtype
 		if torchDtype == "" {
