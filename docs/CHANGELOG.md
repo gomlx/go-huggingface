@@ -7,8 +7,9 @@
     - Added native half-precision (`Float16` / `BFloat16`) support for unquantized half-precision GGUF models in `ggufDTypes()`, `loadStoreGGUF`, `loadSplitGGUFQKV`, and `CreateGoMLXModel`: preserves half-precision weights and split QKV tensors natively while configuring `tm.WithNormDType(normDType)` when GGUF normalization parameters are `Float32` (as in llama.cpp `F16`/`BF16` exports); quantized GGUFs continue to use `Float32` with `QuantGGML` weights.
     - Added `Model.WithForceFloat32(force bool) *Model` and `Model.ForceFloat32() bool` to force `Float32` weights and execution (converting `Float16`/`BFloat16` tensors on load) for both GGUF and Safetensors models on backends without half-precision support.
     - Promoted `Float16`/`BFloat16` hidden states and embeddings to `Float32` inside `normalizeEmbeddings` and `ApplySentencePooling` (`PoolingModeMeanTokens`) before squaring/reducing/`1e-12` epsilon clamping, casting back to the input dtype.
-  - `examples/msmarco/benchmark_embed`:
-    - Added `-force_f32` flag to force `Float32` execution via `Model.WithForceFloat32`.
+  - `examples/msmarco/benchmark_embed`, `examples/timestral`:
+    - Added `-force_f32` flag to `examples/msmarco/benchmark_embed` to force `Float32` weights and execution via `Model.WithForceFloat32`.
+    - Renamed `examples/timestral`'s `-force_float32` flag to `-force_f32` for consistency across examples.
 
 - 2026/11/13:
   - `tokenizers/bucket`, `examples/msmarco/benchmark_embed`:
