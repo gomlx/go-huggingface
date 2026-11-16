@@ -25,9 +25,6 @@ See examples:
 * [Tencent's KaLM-Embedding-Gemma3-12B-2511 Sentence Encoder](https://github.com/gomlx/go-huggingface/tree/main/examples/kalmgemma3): 
   a small library that makes it trivial to use this model and serves as an example of how to use others.
 * [BAAI (Beijing Academy of Artificial Intelligence) BGE Small Sentence Embedder (English) v1.5](https://github.com/gomlx/go-huggingface/tree/main/examples/BAAI-bge-small-en-v1.5): a small and very performant sentence embedder (BERT-based).
-  
-🚧 **EXPERIMENTAL and IN DEVELOPMENT**: By no means does it cover all models/tokenizers/dataset types in HuggingFace, but support is continuously expanding (we add support for the models we are using, or when someone asks for it). Models are easy to run, datasets are easy to scan, tokenizers come configured from HuggingFace, etc. But ... it is still under development -- and on that note: contributions and suggestions are most welcome.
-
 
 
 ---
@@ -306,6 +303,11 @@ Tokens:  	[101 1996 2338 2003 2006 1996 2795 1012 102 0 0 0…]
 **Package**: `github.com/gomlx/go-huggingface/models/transformer`
 
 The `models/transformer` package allows downloading and inspecting HuggingFace transformer models, reading their configurations and weights, and building a `GoMLX` computation graph dynamically based on the model architectures (such as `sentence_transformers` pipelines).
+
+> [!Tip]
+> * There are other types of models supported under [go-huggingface/models/...](https://github.com/gomlx/go-huggingface/tree/main/models). E.g.: Sentence embedding, Timestral (foundational time-series model), etc.
+> * With [`go-huggingface/.agents/AGENTS.md`](https://github.com/gomlx/go-huggingface/blob/main/.agents/AGENTS.md) as a context, along with [GoMLX Skills](https://github.com/gomlx/gomlx/tree/main/.agents/skills/golang-gomlx), any model not yet supported is usually just some 30 minutes away for your AI to implement. If you need some help or optimization, just reach out.
+
 
 ### Example with `tencent/KaLM-Embedding-Gemma3-12B-2511`
 
