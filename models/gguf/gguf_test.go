@@ -229,6 +229,39 @@ func TestTensorInfoParsing(t *testing.T) {
 	assert.Equal(t, uint64(5), info2.NumElements())
 }
 
+func TestTensorInfoLookupWithUnsortedOffsets(t *testing.T) {
+	// Write tensor infos out of offset order so Open's sort reorders f.TensorInfos.
+	// Verify GetTensorInfo still returns the matching entry for each name.
+	tensorData := make([]byte, 68)
+	path := buildMinimalGGUF(t, 1, 2,
+		func(b *ggufBuilder) {
+			b.writeKVString("general.architecture", "test")
+		},
+		func(b *ggufBuilder) {
+			b.writeTensorInfo("later", []uint64{5}, TensorTypeF32, 48)
+			b.writeTensorInfo("earlier", []uint64{3, 4}, TensorTypeF32, 0)
+		},
+		tensorData)
+
+	f, err := Open(path)
+	require.NoError(t, err)
+	require.Len(t, f.TensorInfos, 2)
+	assert.Equal(t, "earlier", f.TensorInfos[0].Name)
+	assert.Equal(t, "later", f.TensorInfos[1].Name)
+
+	earlier, ok := f.GetTensorInfo("earlier")
+	require.True(t, ok)
+	assert.Equal(t, "earlier", earlier.Name)
+	assert.Equal(t, uint64(0), earlier.Offset)
+	assert.Equal(t, []uint64{3, 4}, earlier.Shape)
+
+	later, ok := f.GetTensorInfo("later")
+	require.True(t, ok)
+	assert.Equal(t, "later", later.Name)
+	assert.Equal(t, uint64(48), later.Offset)
+	assert.Equal(t, []uint64{5}, later.Shape)
+}
+
 func TestListTensorNames(t *testing.T) {
 	path := buildMinimalGGUF(t, 1, 2,
 		func(b *ggufBuilder) {
