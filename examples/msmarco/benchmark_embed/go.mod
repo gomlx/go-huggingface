@@ -5,7 +5,7 @@ go 1.27.4
 require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/gomlx/compute v0.1.30
-	github.com/gomlx/go-huggingface v0.4.36
+	github.com/gomlx/go-huggingface v0.4.37
 	github.com/gomlx/gomlx v0.28.36
 	github.com/gomlx/onnx-gomlx v0.5.33
 	k8s.io/klog/v2 v2.140.0

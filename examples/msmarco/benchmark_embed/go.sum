@@ -60,8 +60,8 @@ github.com/gomlx/exceptions v0.0.3 h1:HKnTgEjj4jlmhr8zVFkTP9qmV1ey7ypYYosQ8GzXWu
 github.com/gomlx/exceptions v0.0.3/go.mod h1:uHL0TQwJ0xaV2/snJOJV6hSE4yRmhhfymuYgNredGxU=
 github.com/gomlx/go-darwinml v0.1.7 h1:h6hDBlCKOHAmTOAoMMkxM815DhjlT0kDwWPXNyrpeVc=
 github.com/gomlx/go-darwinml v0.1.7/go.mod h1:HHGSj2kGy0BzGgfYMTXpHjUY1gOYWteDOWC38Tuhlio=
-github.com/gomlx/go-huggingface v0.4.36 h1:A1ruMvqLvfDAIphcN2wVlpqSdQRyPAeNmzm9h4lGf4I=
-github.com/gomlx/go-huggingface v0.4.36/go.mod h1:m78H2coA22PECyCsJSDPbVJwHofrYbCfud3vpKDx1ss=
+github.com/gomlx/go-huggingface v0.4.37 h1:BYLCfZBmTUUqfz9UMmKbt3L7F975OPucDIlPHg6uBL8=
+github.com/gomlx/go-huggingface v0.4.37/go.mod h1:m78H2coA22PECyCsJSDPbVJwHofrYbCfud3vpKDx1ss=
 github.com/gomlx/go-xla v0.4.30 h1:49w3U9A5xk/PKhCMXj87Hh2C6o1tvYGx6HDtjDMTpx0=
 github.com/gomlx/go-xla v0.4.30/go.mod h1:8SXfbdS7/rUuu59Jks8+1Vto4GONBdFMYoXoxiydhis=
 github.com/gomlx/gomlx v0.28.36 h1:G8myNGja+qyJYEOOqQF2ETu+w2twaEfVkc/YhOgQI/o=
