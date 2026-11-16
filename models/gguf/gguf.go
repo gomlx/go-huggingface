@@ -40,8 +40,8 @@ type File struct {
 	// TensorInfos holds parsed information about every tensor in the file.
 	TensorInfos []TensorInfo
 
-	kvByKey      map[string]*KeyValue
-	tensorByName map[string]*TensorInfo
+	kvByKey      map[string]KeyValue
+	tensorByName map[string]TensorInfo
 	path         string
 	dataOffset   int64
 }
@@ -111,13 +111,13 @@ func Open(path string) (*File, error) {
 	}
 
 	// Build indexes (needed before alignment lookup).
-	file.kvByKey = make(map[string]*KeyValue, len(file.KeyValues))
-	for i := range file.KeyValues {
-		file.kvByKey[file.KeyValues[i].Key] = &file.KeyValues[i]
+	file.kvByKey = make(map[string]KeyValue, len(file.KeyValues))
+	for _, kv := range file.KeyValues {
+		file.kvByKey[kv.Key] = kv
 	}
-	file.tensorByName = make(map[string]*TensorInfo, len(file.TensorInfos))
-	for i := range file.TensorInfos {
-		file.tensorByName[file.TensorInfos[i].Name] = &file.TensorInfos[i]
+	file.tensorByName = make(map[string]TensorInfo, len(file.TensorInfos))
+	for _, ti := range file.TensorInfos {
+		file.tensorByName[ti.Name] = ti
 	}
 
 	// Sort tensors by offset for optimal sequential I/O.
@@ -155,7 +155,7 @@ func (f *File) GetKeyValue(key string) (KeyValue, bool) {
 	if !ok {
 		return KeyValue{}, false
 	}
-	return *kv, true
+	return kv, true
 }
 
 // GetTensorInfo looks up a tensor by name.
@@ -164,7 +164,7 @@ func (f *File) GetTensorInfo(name string) (TensorInfo, bool) {
 	if !ok {
 		return TensorInfo{}, false
 	}
-	return *ti, true
+	return ti, true
 }
 
 // Architecture returns the model architecture string (e.g., "llama", "gemma"),

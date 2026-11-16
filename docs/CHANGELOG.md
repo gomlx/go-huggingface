@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- 2026/11/16:
+  - `models/gguf`:
+    - Stored `TensorInfo` and `KeyValue` by value in `File.tensorByName` (`map[string]TensorInfo`) and `File.kvByKey` (`map[string]KeyValue`) instead of pointers into `File.TensorInfos` / `File.KeyValues`, fixing `GetTensorInfo` returning mismatched entries after `slices.SortFunc(file.TensorInfos, ...)` reordered the slice (GHSA-372p-cjj6-v33v).
+    - Added `TestTensorInfoLookupWithUnsortedOffsets` regression test in `models/gguf/gguf_test.go`.
+
 - 2026/11/15:
   - `models/transformer`:
     - Added native half-precision (`Float16` / `BFloat16`) support for unquantized half-precision GGUF models in `ggufDTypes()`, `loadStoreGGUF`, `loadSplitGGUFQKV`, and `CreateGoMLXModel`: preserves half-precision weights and split QKV tensors natively while configuring `tm.WithNormDType(normDType)` when GGUF normalization parameters are `Float32` (as in llama.cpp `F16`/`BF16` exports); quantized GGUFs continue to use `Float32` with `QuantGGML` weights.
