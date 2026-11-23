@@ -261,6 +261,11 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 	if m.KVCache != nil {
 		tm.KVCache = m.KVCache
 	}
+	if m.Config.SlidingWindow > 0 && int(mltransformer.LocalLayer) < len(tm.KVCache.MaxSeqLenPerLayerType) {
+		if tm.KVCache.MaxSeqLenPerLayerType[int(mltransformer.LocalLayer)] > m.Config.SlidingWindow {
+			tm.KVCache.MaxSeqLenPerLayerType[int(mltransformer.LocalLayer)] = m.Config.SlidingWindow
+		}
+	}
 
 	if m.Config.GlobalHeadDim > 0 {
 		tm.WithGlobalHeadDim(m.Config.GlobalHeadDim)
