@@ -138,6 +138,7 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 
 		tm.WithSlidingWindow(m.Config.SlidingWindow).
 			WithNumKVSharedLayers(m.Config.NumKVSharedLayers).
+			WithUseDoubleWideMLP(m.Config.UseDoubleWideMLP).
 			WithScoreSoftCap(attnLogitCap).
 			WithFinalLogitSoftCap(m.Config.FinalLogitSoftcapping)
 		if len(m.Config.LayerTypes) > 0 {

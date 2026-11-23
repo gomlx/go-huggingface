@@ -15,6 +15,7 @@ type Config struct {
 	IntermediateSize  int      `json:"intermediate_size"`
 	NumKeyValueHeads  int      `json:"num_key_value_heads"`
 	NumKVSharedLayers int      `json:"num_kv_shared_layers"`
+	UseDoubleWideMLP  bool     `json:"use_double_wide_mlp"`
 	RMSNormEps            float64  `json:"rms_norm_eps"`
 	LayerNormEps          float64  `json:"layer_norm_eps"`
 	AttentionLogitCap     float64  `json:"attention_logit_cap"`
