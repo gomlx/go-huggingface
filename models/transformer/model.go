@@ -300,6 +300,7 @@ func (m *Model) LoadStoreFiltered(backend compute.Backend, store *model.Store, f
 		}
 		scopePath, varName, ok := mapTensorName(tensorAndName.Name)
 		if !ok {
+			tensorAndName.Tensor.FinalizeAll()
 			name := strings.TrimPrefix(tensorAndName.Name, "model.")
 			if isBert && (name == "embeddings.position_ids" || strings.HasPrefix(name, "pooler.")) {
 				continue

@@ -32,6 +32,7 @@ var (
 	flagPromptTokens = flag.Int("prompt_tokens", 1024, "Maximum number of tokens used for prompt+context.")
 	flagGenTokens    = flag.Int("gen_tokens", 128, "Maximum number of tokens to generate.")
 	flagDonateStore  = flag.Bool("donate_store", true, "Donate model weights to shared backend constants for pre-packing without duplicating memory.")
+	flagMMap         = flag.Bool("mmap", false, "Use memory-mapped file I/O (mmap) when loading safetensors weights. Disabling mmap avoids counting the file size toward MaxRSS.")
 	flagCPUProf      = flag.String("cpuprof", "", "If set, writes a CPU profile of the generation loop to this file.")
 )
 
@@ -112,7 +113,7 @@ func newGeneratorRunner(modelRepo string, maxPromptTokens, maxGenTokens int) (*g
 		backend.Finalize()
 		return nil, fmt.Errorf("failed to load model config: %w", err)
 	}
-	hfModel.WithCausalMask(true)
+	hfModel.WithCausalMask(true).WithMMap(*flagMMap)
 	fmt.Printf("done (%s)\n", humanize.Duration(time.Since(start)))
 
 	descLines := strings.Split(hfModel.Description(), "\n")
@@ -131,7 +132,7 @@ func newGeneratorRunner(modelRepo string, maxPromptTokens, maxGenTokens int) (*g
 		backend.Finalize()
 		return nil, fmt.Errorf("failed to load weights into store: %w", err)
 	}
-	fmt.Printf("done (%s)\n", humanize.Duration(time.Since(start)))
+	fmt.Printf("done (%s, MaxRSS=%s)\n", humanize.Duration(time.Since(start)), humanize.Bytes(support.MaxRSS()))
 
 	tokenizer, err := hfModel.GetTokenizer()
 	if err != nil {
@@ -241,12 +242,14 @@ func (r *generatorRunner) generate(record dolly.Record, maxPromptTokens, maxGenT
 	var displayIDs []int
 
 	start := time.Now()
-	var firstTokenAt time.Time
-	var firstTokenCPU time.Duration
+	var ttft time.Duration
+	var decodeStart time.Time
+	var decodeStartCPU time.Duration
 	err := r.decoder.GenerateStreaming(r.backend, r.store.RootScope(), promptIDs, func(token int) bool {
 		if len(allGenIDs) == 0 {
-			firstTokenAt = time.Now()
-			firstTokenCPU = support.CPUTime()
+			ttft = time.Since(start)
+			decodeStart = time.Now()
+			decodeStartCPU = support.CPUTime()
 		}
 		allGenIDs = append(allGenIDs, token)
 		if !r.stopTokens[token] {
@@ -259,17 +262,15 @@ func (r *generatorRunner) generate(record dolly.Record, maxPromptTokens, maxGenT
 	})
 	endCPU := support.CPUTime()
 	totalTime := time.Since(start)
-	if err != nil {
-		return genResult{}, err
-	}
-
-	var ttft, decodeTime, decodeCPUTime time.Duration
-	if !firstTokenAt.IsZero() {
-		ttft = firstTokenAt.Sub(start)
-		decodeTime = totalTime - ttft
-		decodeCPUTime = endCPU - firstTokenCPU
+	var decodeTime, decodeCPUTime time.Duration
+	if !decodeStart.IsZero() {
+		decodeTime = time.Since(decodeStart)
+		decodeCPUTime = endCPU - decodeStartCPU
 	} else {
 		ttft = totalTime
+	}
+	if err != nil {
+		return genResult{}, err
 	}
 
 	return genResult{
