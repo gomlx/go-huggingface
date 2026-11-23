@@ -29,7 +29,8 @@ import (
 )
 
 var (
-	flagNum          = flag.Int("n", 3, "Number of examples to print from the dataset.")
+	flagNum          = flag.Int("n", 1, "Number of examples to print from the dataset.")
+	flagExample      = flag.Int("ex", 1, "1-based example number to start from in the dataset.")
 	flagModel        = flag.String("model", "", "HuggingFace model repository to use for generation (e.g. \"google/gemma-4-E2B-it\"). If empty, only browses the dataset.")
 	flagOllama       = flag.String("ollama", "", "Ollama model name to use for generation (e.g. \"gemma4:e2b-it-bf16\"). If both -model and -ollama are set, compares their outputs.")
 	flagOllamaHost   = flag.String("ollama_host", "", "Ollama server base URL (defaults to OLLAMA_HOST env var or http://localhost:11434).")
@@ -118,7 +119,7 @@ func newGeneratorRunner(modelRepo string, maxPromptTokens, maxGenTokens int) (*g
 		backend.Finalize()
 		return nil, fmt.Errorf("failed to load model config: %w", err)
 	}
-	hfModel.WithCausalMask(true).WithMMap(*flagMMap).WithForceFloat32(*flagForceF32)
+	hfModel.WithCausalMask(true).WithMMap(*flagMMap).WithForceFloat32(*flagForceF32).WithOnlyLastTokenLogits(true)
 	fmt.Printf("done (%s)\n", humanize.Duration(time.Since(start)))
 
 	descLines := strings.Split(hfModel.Description(), "\n")
@@ -378,7 +379,12 @@ func main() {
 		}
 	}
 
+	if *flagExample < 1 {
+		klog.Fatalf("-ex must be >= 1, got %d", *flagExample)
+	}
+
 	ds := datasets.New(dolly.ID)
+	recordIdx := 0
 	count := 0
 	var totalPromptTokens, totalGenTokens, totalDecodeTokens int
 	var totalTTFT, totalDecodeTime, totalDecodeCPUTime, totalTime time.Duration
@@ -402,11 +408,15 @@ func main() {
 		if err != nil {
 			klog.Fatalf("Failed to read record: %+v", err)
 		}
+		recordIdx++
+		if recordIdx < *flagExample {
+			continue
+		}
 		if *flagNum > 0 && count >= *flagNum {
 			break
 		}
 		count++
-		fmt.Printf("=== Example #%d [%s] ===\n", count, record.Category)
+		fmt.Printf("=== Example #%d [%s] ===\n", recordIdx, record.Category)
 		fmt.Printf("Instruction:\n%s\n", strings.TrimSpace(record.Instruction))
 		if ctx := strings.TrimSpace(record.Context); ctx != "" {
 			fmt.Printf("\nContext:\n%s\n", ctx)

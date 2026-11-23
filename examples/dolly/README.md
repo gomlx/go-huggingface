@@ -17,8 +17,8 @@ A small CLI in [`browse/`](./browse) that downloads (and caches) the dataset, pr
 generates responses with a HuggingFace model using GoMLX's `ml/zoo/transformer/generate`:
 
 ```bash
-# Browse 3 dataset examples (no model loaded):
-go run ./examples/dolly/browse -n=3
+# Browse example #3 (default -n=1):
+go run ./examples/dolly/browse -ex=3
 
 # Generate responses for 3 examples using a GoMLX model:
 go run ./examples/dolly/browse -n=3 -model=google/gemma-4-E2B-it -prompt_tokens=1024 -gen_tokens=128

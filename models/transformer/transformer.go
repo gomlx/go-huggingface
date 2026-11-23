@@ -322,10 +322,11 @@ func (m *Model) Forward(
 ) (logits *graph.Node, updatedCache mltransformer.KVCacheNodes) {
 	tm := m.CreateGoMLXModel(scope)
 	opts := mltransformer.CallOptions{
-		PositionIds:   positionIds,
-		Cache:         cache,
-		SeqLen:        seqLen,
-		AttentionMask: attentionMask,
+		PositionIds:         positionIds,
+		Cache:               cache,
+		SeqLen:              seqLen,
+		AttentionMask:       attentionMask,
+		OnlyLastTokenLogits: m.onlyLastTokenLogits,
 	}
 	logits, updatedCache = tm.Forward(tokenIds, opts)
 	return logits, updatedCache
