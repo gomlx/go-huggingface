@@ -20,6 +20,12 @@ generates responses with a HuggingFace model using GoMLX's `ml/zoo/transformer/g
 # Browse 3 dataset examples (no model loaded):
 go run ./examples/dolly/browse -n=3
 
-# Generate responses for 3 examples using a model:
+# Generate responses for 3 examples using a GoMLX model:
 go run ./examples/dolly/browse -n=3 -model=google/gemma-4-E2B-it -prompt_tokens=1024 -gen_tokens=128
+
+# Generate responses using a local Ollama server:
+go run ./examples/dolly/browse -n=3 -ollama=gemma4:e2b-it-bf16
+
+# Run both and compare generated outputs side-by-side:
+go run ./examples/dolly/browse -n=3 -model=google/gemma-4-E2B-it -ollama=gemma4:e2b-it-bf16
 ```

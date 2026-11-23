@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/gomlx/go-huggingface/datasets"
 	"github.com/gomlx/go-huggingface/examples/dolly"
 	"github.com/gomlx/go-huggingface/hub"
+	"github.com/gomlx/go-huggingface/internal/ollamaclient"
 	"github.com/gomlx/go-huggingface/models/transformer"
 	"github.com/gomlx/go-huggingface/tokenizers"
 	tapi "github.com/gomlx/go-huggingface/tokenizers/api"
@@ -29,6 +31,8 @@ import (
 var (
 	flagNum          = flag.Int("n", 3, "Number of examples to print from the dataset.")
 	flagModel        = flag.String("model", "", "HuggingFace model repository to use for generation (e.g. \"google/gemma-4-E2B-it\"). If empty, only browses the dataset.")
+	flagOllama       = flag.String("ollama", "", "Ollama model name to use for generation (e.g. \"gemma4:e2b-it-bf16\"). If both -model and -ollama are set, compares their outputs.")
+	flagOllamaHost   = flag.String("ollama_host", "", "Ollama server base URL (defaults to OLLAMA_HOST env var or http://localhost:11434).")
 	flagPromptTokens = flag.Int("prompt_tokens", 1024, "Maximum number of tokens used for prompt+context.")
 	flagGenTokens    = flag.Int("gen_tokens", 128, "Maximum number of tokens to generate.")
 	flagDonateStore  = flag.Bool("donate_store", true, "Donate model weights to shared backend constants for pre-packing without duplicating memory.")
@@ -202,14 +206,18 @@ func (r *generatorRunner) close() {
 	}
 }
 
-func (r *generatorRunner) encodePrompt(record dolly.Record, maxPromptTokens int) []int {
+func formatUserPrompt(record dolly.Record) string {
 	var sb strings.Builder
 	sb.WriteString(strings.TrimSpace(record.Instruction))
 	if ctx := strings.TrimSpace(record.Context); ctx != "" {
 		sb.WriteString("\n\nContext:\n")
 		sb.WriteString(ctx)
 	}
-	bodyIDs := r.tokenizer.Encode(sb.String())
+	return sb.String()
+}
+
+func (r *generatorRunner) encodePrompt(record dolly.Record, maxPromptTokens int) []int {
+	bodyIDs := r.tokenizer.Encode(formatUserPrompt(record))
 
 	if maxPromptTokens > 0 {
 		overhead := len(r.prefixIDs) + len(r.suffixIDs)
@@ -284,18 +292,69 @@ func (r *generatorRunner) generate(record dolly.Record, maxPromptTokens, maxGenT
 	}, nil
 }
 
+type ollamaRunner struct {
+	client *ollamaclient.Client
+	model  string
+}
+
+func newOllamaRunner(baseURL, modelName string) (*ollamaRunner, error) {
+	client := ollamaclient.New(baseURL)
+	ver, err := client.Version(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to Ollama at %s: %w", client.BaseURL(), err)
+	}
+	fmt.Printf("- Ollama: %s (version %s), model %q\n", client.BaseURL(), ver, modelName)
+	return &ollamaRunner{
+		client: client,
+		model:  modelName,
+	}, nil
+}
+
+func (o *ollamaRunner) generate(record dolly.Record, maxPromptTokens, maxGenTokens int) (*ollamaclient.GenerateResponse, error) {
+	temp := 0.0
+	think := false
+	numPredict := maxGenTokens
+	numCtx := maxPromptTokens + maxGenTokens
+	return o.client.Generate(context.Background(), &ollamaclient.GenerateRequest{
+		Model:  o.model,
+		Prompt: formatUserPrompt(record),
+		Think:  &think,
+		Options: &ollamaclient.Options{
+			Temperature: &temp,
+			NumPredict:  &numPredict,
+			NumCtx:      &numCtx,
+		},
+	})
+}
+
+func firstDiffByte(a, b string) int {
+	n := min(len(a), len(b))
+	for i := range n {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	if len(a) != len(b) {
+		return n
+	}
+	return -1
+}
+
 func main() {
 	klog.InitFlags(nil)
 	flag.Parse()
 
-	var runner *generatorRunner
-	if *flagModel != "" {
+	if *flagModel != "" || *flagOllama != "" {
 		if *flagPromptTokens <= 0 {
 			klog.Fatalf("-prompt_tokens must be > 0, got %d", *flagPromptTokens)
 		}
 		if *flagGenTokens <= 0 {
 			klog.Fatalf("-gen_tokens must be > 0, got %d", *flagGenTokens)
 		}
+	}
+
+	var runner *generatorRunner
+	if *flagModel != "" {
 		var err error
 		runner, err = newGeneratorRunner(*flagModel, *flagPromptTokens, *flagGenTokens)
 		if err != nil {
@@ -305,10 +364,26 @@ func main() {
 		defer runner.close()
 	}
 
+	var ollama *ollamaRunner
+	if *flagOllama != "" {
+		var err error
+		ollama, err = newOllamaRunner(*flagOllamaHost, *flagOllama)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\n%v\n", err)
+			os.Exit(1)
+		}
+		if runner == nil {
+			fmt.Println()
+		}
+	}
+
 	ds := datasets.New(dolly.ID)
 	count := 0
 	var totalPromptTokens, totalGenTokens, totalDecodeTokens int
 	var totalTTFT, totalDecodeTime, totalDecodeCPUTime, totalTime time.Duration
+	var ollamaPromptTokens, ollamaGenTokens int
+	var ollamaPrefillTime, ollamaDecodeTime, ollamaWallTime time.Duration
+	var exactMatches int
 
 	if *flagCPUProf != "" {
 		f, err := os.Create(*flagCPUProf)
@@ -337,11 +412,13 @@ func main() {
 		}
 		fmt.Printf("\nReference Response:\n%s\n", strings.TrimSpace(record.Response))
 
+		var gomlxText string
 		if runner != nil {
 			res, err := runner.generate(record, *flagPromptTokens, *flagGenTokens)
 			if err != nil {
-				klog.Fatalf("Failed to generate for example #%d: %+v", count, err)
+				klog.Fatalf("Failed to generate with GoMLX for example #%d: %+v", count, err)
 			}
+			gomlxText = res.text
 			decodeToks := max(res.genTokens-1, 0)
 			totalPromptTokens += res.promptTokens
 			totalGenTokens += res.genTokens
@@ -363,8 +440,12 @@ func main() {
 				}
 				cpuPerTok = res.decodeCPUTime / time.Duration(decodeToks)
 			}
-			fmt.Printf("\nGenerated Response:\n%s\n", res.text)
-			fmt.Printf("\n[Stats: prompt=%d tok, gen=%d tok, TTFT=%s (%.2f tok/s), decode=%s (%.2f tok/s, CPUTime/tok=%s, avg_cores=%.2f), total=%s, MaxRSS=%s]\n",
+			header := "Generated Response"
+			if ollama != nil {
+				header = "Generated Response (GoMLX)"
+			}
+			fmt.Printf("\n%s:\n%s\n", header, res.text)
+			fmt.Printf("\n[GoMLX Stats: prompt=%d tok, gen=%d tok, TTFT=%s (%.2f tok/s), decode=%s (%.2f tok/s, CPUTime/tok=%s, avg_cores=%.2f), total=%s, MaxRSS=%s]\n",
 				res.promptTokens, res.genTokens,
 				humanize.Duration(res.ttft), prefillTPS,
 				humanize.Duration(res.decodeTime), decodeTPS,
@@ -372,31 +453,88 @@ func main() {
 				humanize.Duration(res.totalTime),
 				humanize.Bytes(support.MaxRSS()))
 		}
+
+		var ollamaText string
+		if ollama != nil {
+			ores, err := ollama.generate(record, *flagPromptTokens, *flagGenTokens)
+			if err != nil {
+				klog.Fatalf("Failed to generate with Ollama for example #%d: %+v", count, err)
+			}
+			ollamaText = strings.TrimSpace(ores.Response)
+			ollamaPromptTokens += ores.PromptEvalCount
+			ollamaGenTokens += ores.EvalCount
+			ollamaPrefillTime += ores.PromptEvalDuration
+			ollamaDecodeTime += ores.EvalDuration
+			ollamaWallTime += ores.WallDuration
+
+			header := "Generated Response"
+			if runner != nil {
+				header = "Generated Response (Ollama)"
+			}
+			fmt.Printf("\n%s:\n%s\n", header, ollamaText)
+			fmt.Printf("\n[Ollama Stats: prompt=%d tok, gen=%d tok, prefill=%s (%.2f tok/s), decode=%s (%.2f tok/s), wall=%s]\n",
+				ores.PromptEvalCount, ores.EvalCount,
+				humanize.Duration(ores.PromptEvalDuration), ores.PrefillTokensPerSec(),
+				humanize.Duration(ores.EvalDuration), ores.DecodeTokensPerSec(),
+				humanize.Duration(ores.WallDuration))
+		}
+
+		if runner != nil && ollama != nil {
+			if gomlxText == ollamaText {
+				exactMatches++
+				fmt.Printf("\n[Comparison: EXACT MATCH]\n")
+			} else {
+				diffIdx := firstDiffByte(gomlxText, ollamaText)
+				fmt.Printf("\n[Comparison: DIFFERS at byte %d (GoMLX len=%d, Ollama len=%d)]\n",
+					diffIdx, len(gomlxText), len(ollamaText))
+			}
+		}
 		fmt.Println()
 	}
 
-	if runner != nil {
-		if count > 1 {
-			var avgPrefillTPS, avgDecodeTPS, avgCPUCores float64
-			var avgCPUPerTok time.Duration
-			if totalTTFT.Seconds() > 0 {
-				avgPrefillTPS = float64(totalPromptTokens) / totalTTFT.Seconds()
-			}
-			if totalDecodeTokens > 0 {
-				if totalDecodeTime.Seconds() > 0 {
-					avgDecodeTPS = float64(totalDecodeTokens) / totalDecodeTime.Seconds()
-					avgCPUCores = totalDecodeCPUTime.Seconds() / totalDecodeTime.Seconds()
-				}
-				avgCPUPerTok = totalDecodeCPUTime / time.Duration(totalDecodeTokens)
-			}
+	if runner != nil || ollama != nil {
+		if count > 1 || (runner != nil && ollama != nil) {
 			fmt.Printf("=== Summary (%d examples) ===\n", count)
-			fmt.Printf("Prompt tokens: %d, Generated tokens: %d\n", totalPromptTokens, totalGenTokens)
-			fmt.Printf("Prefill: %s (%.2f tok/s), Decode: %s (%.2f tok/s, CPUTime/tok=%s, avg_cores=%.2f), Total: %s\n",
-				humanize.Duration(totalTTFT), avgPrefillTPS,
-				humanize.Duration(totalDecodeTime), avgDecodeTPS,
-				humanize.Duration(avgCPUPerTok), avgCPUCores,
-				humanize.Duration(totalTime))
 		}
-		fmt.Printf("MaxRSS: %s\n", humanize.Bytes(support.MaxRSS()))
+		if runner != nil {
+			if count > 1 || ollama != nil {
+				var avgPrefillTPS, avgDecodeTPS, avgCPUCores float64
+				var avgCPUPerTok time.Duration
+				if totalTTFT.Seconds() > 0 {
+					avgPrefillTPS = float64(totalPromptTokens) / totalTTFT.Seconds()
+				}
+				if totalDecodeTokens > 0 {
+					if totalDecodeTime.Seconds() > 0 {
+						avgDecodeTPS = float64(totalDecodeTokens) / totalDecodeTime.Seconds()
+						avgCPUCores = totalDecodeCPUTime.Seconds() / totalDecodeTime.Seconds()
+					}
+					avgCPUPerTok = totalDecodeCPUTime / time.Duration(totalDecodeTokens)
+				}
+				fmt.Printf("GoMLX  - Prompt: %d tok, Gen: %d tok, Prefill: %s (%.2f tok/s), Decode: %s (%.2f tok/s, CPUTime/tok=%s, avg_cores=%.2f), Total: %s\n",
+					totalPromptTokens, totalGenTokens,
+					humanize.Duration(totalTTFT), avgPrefillTPS,
+					humanize.Duration(totalDecodeTime), avgDecodeTPS,
+					humanize.Duration(avgCPUPerTok), avgCPUCores,
+					humanize.Duration(totalTime))
+			}
+			fmt.Printf("GoMLX  - MaxRSS: %s\n", humanize.Bytes(support.MaxRSS()))
+		}
+		if ollama != nil && (count > 1 || runner != nil) {
+			var avgPrefillTPS, avgDecodeTPS float64
+			if ollamaPrefillTime.Seconds() > 0 {
+				avgPrefillTPS = float64(ollamaPromptTokens) / ollamaPrefillTime.Seconds()
+			}
+			if ollamaDecodeTime.Seconds() > 0 {
+				avgDecodeTPS = float64(ollamaGenTokens) / ollamaDecodeTime.Seconds()
+			}
+			fmt.Printf("Ollama - Prompt: %d tok, Gen: %d tok, Prefill: %s (%.2f tok/s), Decode: %s (%.2f tok/s), Wall: %s\n",
+				ollamaPromptTokens, ollamaGenTokens,
+				humanize.Duration(ollamaPrefillTime), avgPrefillTPS,
+				humanize.Duration(ollamaDecodeTime), avgDecodeTPS,
+				humanize.Duration(ollamaWallTime))
+		}
+		if runner != nil && ollama != nil {
+			fmt.Printf("Comparison: %d/%d exact matches\n", exactMatches, count)
+		}
 	}
 }
