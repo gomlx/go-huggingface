@@ -4,10 +4,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime/pprof"
 	"strings"
 	"time"
 
 	"github.com/gomlx/compute"
+	"github.com/gomlx/compute/support"
 	"github.com/gomlx/compute/support/humanize"
 	"github.com/gomlx/go-huggingface/datasets"
 	"github.com/gomlx/go-huggingface/examples/dolly"
@@ -29,6 +31,8 @@ var (
 	flagModel        = flag.String("model", "", "HuggingFace model repository to use for generation (e.g. \"google/gemma-4-E2B-it\"). If empty, only browses the dataset.")
 	flagPromptTokens = flag.Int("prompt_tokens", 1024, "Maximum number of tokens used for prompt+context.")
 	flagGenTokens    = flag.Int("gen_tokens", 128, "Maximum number of tokens to generate.")
+	flagDonateStore  = flag.Bool("donate_store", true, "Donate model weights to shared backend constants for pre-packing without duplicating memory.")
+	flagCPUProf      = flag.String("cpuprof", "", "If set, writes a CPU profile of the generation loop to this file.")
 )
 
 type chatTemplate struct {
@@ -146,7 +150,8 @@ func newGeneratorRunner(modelRepo string, maxPromptTokens, maxGenTokens int) (*g
 	maxTotalLen := maxPromptTokens + maxGenTokens
 	decoder := generate.New(incrementalModelFn).
 		WithKVCache(kvCacheConfig, tm.NumKVHeads, tm.HeadDim, tm.DType).
-		WithMaxLength(maxTotalLen)
+		WithMaxLength(maxTotalLen).
+		WithDonateStore(*flagDonateStore)
 	decoder.Temperature = 0
 	decoder.TopK = 0
 	decoder.TopP = 0
@@ -221,12 +226,13 @@ func (r *generatorRunner) encodePrompt(record dolly.Record, maxPromptTokens int)
 }
 
 type genResult struct {
-	text         string
-	promptTokens int
-	genTokens    int
-	ttft         time.Duration
-	decodeTime   time.Duration
-	totalTime    time.Duration
+	text          string
+	promptTokens  int
+	genTokens     int
+	ttft          time.Duration
+	decodeTime    time.Duration
+	decodeCPUTime time.Duration
+	totalTime     time.Duration
 }
 
 func (r *generatorRunner) generate(record dolly.Record, maxPromptTokens, maxGenTokens int) (genResult, error) {
@@ -236,9 +242,11 @@ func (r *generatorRunner) generate(record dolly.Record, maxPromptTokens, maxGenT
 
 	start := time.Now()
 	var firstTokenAt time.Time
+	var firstTokenCPU time.Duration
 	err := r.decoder.GenerateStreaming(r.backend, r.store.RootScope(), promptIDs, func(token int) bool {
 		if len(allGenIDs) == 0 {
 			firstTokenAt = time.Now()
+			firstTokenCPU = support.CPUTime()
 		}
 		allGenIDs = append(allGenIDs, token)
 		if !r.stopTokens[token] {
@@ -249,26 +257,29 @@ func (r *generatorRunner) generate(record dolly.Record, maxPromptTokens, maxGenT
 		}
 		return true
 	})
+	endCPU := support.CPUTime()
 	totalTime := time.Since(start)
 	if err != nil {
 		return genResult{}, err
 	}
 
-	var ttft, decodeTime time.Duration
+	var ttft, decodeTime, decodeCPUTime time.Duration
 	if !firstTokenAt.IsZero() {
 		ttft = firstTokenAt.Sub(start)
 		decodeTime = totalTime - ttft
+		decodeCPUTime = endCPU - firstTokenCPU
 	} else {
 		ttft = totalTime
 	}
 
 	return genResult{
-		text:         strings.TrimSpace(r.tokenizer.Decode(displayIDs)),
-		promptTokens: len(promptIDs),
-		genTokens:    len(allGenIDs),
-		ttft:         ttft,
-		decodeTime:   decodeTime,
-		totalTime:    totalTime,
+		text:          strings.TrimSpace(r.tokenizer.Decode(displayIDs)),
+		promptTokens:  len(promptIDs),
+		genTokens:     len(allGenIDs),
+		ttft:          ttft,
+		decodeTime:    decodeTime,
+		decodeCPUTime: decodeCPUTime,
+		totalTime:     totalTime,
 	}, nil
 }
 
@@ -295,8 +306,20 @@ func main() {
 
 	ds := datasets.New(dolly.ID)
 	count := 0
-	var totalPromptTokens, totalGenTokens int
-	var totalTTFT, totalDecodeTime, totalTime time.Duration
+	var totalPromptTokens, totalGenTokens, totalDecodeTokens int
+	var totalTTFT, totalDecodeTime, totalDecodeCPUTime, totalTime time.Duration
+
+	if *flagCPUProf != "" {
+		f, err := os.Create(*flagCPUProf)
+		if err != nil {
+			klog.Fatalf("Could not create CPU profile %q: %v", *flagCPUProf, err)
+		}
+		defer f.Close()
+		if err := pprof.StartCPUProfile(f); err != nil {
+			klog.Fatalf("Could not start CPU profile: %v", err)
+		}
+		defer pprof.StopCPUProfile()
+	}
 
 	for record, err := range datasets.IterParquetFromDataset[dolly.Record](ds, dolly.Config, dolly.TrainSplit) {
 		if err != nil {
@@ -318,42 +341,61 @@ func main() {
 			if err != nil {
 				klog.Fatalf("Failed to generate for example #%d: %+v", count, err)
 			}
+			decodeToks := max(res.genTokens-1, 0)
 			totalPromptTokens += res.promptTokens
 			totalGenTokens += res.genTokens
+			totalDecodeTokens += decodeToks
 			totalTTFT += res.ttft
 			totalDecodeTime += res.decodeTime
+			totalDecodeCPUTime += res.decodeCPUTime
 			totalTime += res.totalTime
 
-			var prefillTPS, decodeTPS float64
+			var prefillTPS, decodeTPS, cpuCores float64
+			var cpuPerTok time.Duration
 			if res.ttft.Seconds() > 0 {
 				prefillTPS = float64(res.promptTokens) / res.ttft.Seconds()
 			}
-			if res.genTokens > 1 && res.decodeTime.Seconds() > 0 {
-				decodeTPS = float64(res.genTokens-1) / res.decodeTime.Seconds()
+			if decodeToks > 0 {
+				if res.decodeTime.Seconds() > 0 {
+					decodeTPS = float64(decodeToks) / res.decodeTime.Seconds()
+					cpuCores = res.decodeCPUTime.Seconds() / res.decodeTime.Seconds()
+				}
+				cpuPerTok = res.decodeCPUTime / time.Duration(decodeToks)
 			}
 			fmt.Printf("\nGenerated Response:\n%s\n", res.text)
-			fmt.Printf("\n[Stats: prompt=%d tok, gen=%d tok, TTFT=%s (%.2f tok/s), decode=%s (%.2f tok/s), total=%s]\n",
+			fmt.Printf("\n[Stats: prompt=%d tok, gen=%d tok, TTFT=%s (%.2f tok/s), decode=%s (%.2f tok/s, CPUTime/tok=%s, avg_cores=%.2f), total=%s, MaxRSS=%s]\n",
 				res.promptTokens, res.genTokens,
 				humanize.Duration(res.ttft), prefillTPS,
 				humanize.Duration(res.decodeTime), decodeTPS,
-				humanize.Duration(res.totalTime))
+				humanize.Duration(cpuPerTok), cpuCores,
+				humanize.Duration(res.totalTime),
+				humanize.Bytes(support.MaxRSS()))
 		}
 		fmt.Println()
 	}
 
-	if runner != nil && count > 1 {
-		var avgPrefillTPS, avgDecodeTPS float64
-		if totalTTFT.Seconds() > 0 {
-			avgPrefillTPS = float64(totalPromptTokens) / totalTTFT.Seconds()
+	if runner != nil {
+		if count > 1 {
+			var avgPrefillTPS, avgDecodeTPS, avgCPUCores float64
+			var avgCPUPerTok time.Duration
+			if totalTTFT.Seconds() > 0 {
+				avgPrefillTPS = float64(totalPromptTokens) / totalTTFT.Seconds()
+			}
+			if totalDecodeTokens > 0 {
+				if totalDecodeTime.Seconds() > 0 {
+					avgDecodeTPS = float64(totalDecodeTokens) / totalDecodeTime.Seconds()
+					avgCPUCores = totalDecodeCPUTime.Seconds() / totalDecodeTime.Seconds()
+				}
+				avgCPUPerTok = totalDecodeCPUTime / time.Duration(totalDecodeTokens)
+			}
+			fmt.Printf("=== Summary (%d examples) ===\n", count)
+			fmt.Printf("Prompt tokens: %d, Generated tokens: %d\n", totalPromptTokens, totalGenTokens)
+			fmt.Printf("Prefill: %s (%.2f tok/s), Decode: %s (%.2f tok/s, CPUTime/tok=%s, avg_cores=%.2f), Total: %s\n",
+				humanize.Duration(totalTTFT), avgPrefillTPS,
+				humanize.Duration(totalDecodeTime), avgDecodeTPS,
+				humanize.Duration(avgCPUPerTok), avgCPUCores,
+				humanize.Duration(totalTime))
 		}
-		if totalGenTokens > count && totalDecodeTime.Seconds() > 0 {
-			avgDecodeTPS = float64(totalGenTokens-count) / totalDecodeTime.Seconds()
-		}
-		fmt.Printf("=== Summary (%d examples) ===\n", count)
-		fmt.Printf("Prompt tokens: %d, Generated tokens: %d\n", totalPromptTokens, totalGenTokens)
-		fmt.Printf("Prefill: %s (%.2f tok/s), Decode: %s (%.2f tok/s), Total: %s\n",
-			humanize.Duration(totalTTFT), avgPrefillTPS,
-			humanize.Duration(totalDecodeTime), avgDecodeTPS,
-			humanize.Duration(totalTime))
+		fmt.Printf("MaxRSS: %s\n", humanize.Bytes(support.MaxRSS()))
 	}
 }
