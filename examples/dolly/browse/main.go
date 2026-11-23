@@ -37,6 +37,7 @@ var (
 	flagGenTokens    = flag.Int("gen_tokens", 128, "Maximum number of tokens to generate.")
 	flagDonateStore  = flag.Bool("donate_store", true, "Donate model weights to shared backend constants for pre-packing without duplicating memory.")
 	flagMMap         = flag.Bool("mmap", false, "Use memory-mapped file I/O (mmap) when loading safetensors weights. Disabling mmap avoids counting the file size toward MaxRSS.")
+	flagForceF32     = flag.Bool("force_f32", false, "Force Float32 weights and computation instead of native Float16/BFloat16.")
 	flagCPUProf      = flag.String("cpuprof", "", "If set, writes a CPU profile of the generation loop to this file.")
 )
 
@@ -117,7 +118,7 @@ func newGeneratorRunner(modelRepo string, maxPromptTokens, maxGenTokens int) (*g
 		backend.Finalize()
 		return nil, fmt.Errorf("failed to load model config: %w", err)
 	}
-	hfModel.WithCausalMask(true).WithMMap(*flagMMap)
+	hfModel.WithCausalMask(true).WithMMap(*flagMMap).WithForceFloat32(*flagForceF32)
 	fmt.Printf("done (%s)\n", humanize.Duration(time.Since(start)))
 
 	descLines := strings.Split(hfModel.Description(), "\n")
