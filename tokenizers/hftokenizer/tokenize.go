@@ -211,6 +211,9 @@ func (t *Tokenizer) bpeTokenizeWithSpans(word wordWithOffset) ([]int, []api.Toke
 // unigramTokenizeWithSpans picks the pieces with the highest total score (Viterbi), as HuggingFace's Unigram model does.
 func (t *Tokenizer) unigramTokenizeWithSpans(word wordWithOffset) ([]int, []api.TokenSpan) {
 	text, model := word.text, &t.tokenizer.Model
+	if text == "" {
+		return nil, nil
+	}
 	best := make([]float64, len(text)+1)
 	from := make([]int, len(text)+1)
 	pieceID := make([]int, len(text)+1)
@@ -225,15 +228,20 @@ func (t *Tokenizer) unigramTokenizeWithSpans(word wordWithOffset) ([]int, []api.
 	for start := 0; start < len(text); {
 		_, charLen := utf8.DecodeRuneInString(text[start:])
 		hasChar := false
-		for end := start + 1; end <= min(len(text), start+t.unigramMaxPiece); end++ {
+		for end := start + charLen; end <= min(len(text), start+t.unigramMaxPiece); {
 			if id, ok := model.Vocab[text[start:end]]; ok {
 				score := -1.0 // Fewest pieces win when the model has no scores.
-				if id < len(model.Scores) {
+				if id >= 0 && id < len(model.Scores) {
 					score = model.Scores[id]
 				}
 				relax(start, end, id, score)
 				hasChar = hasChar || end == start+charLen
 			}
+			if end == len(text) {
+				break
+			}
+			_, size := utf8.DecodeRuneInString(text[end:])
+			end += size
 		}
 		if !hasChar {
 			relax(start, start+charLen, -1, t.unigramUnkScore)
@@ -242,6 +250,7 @@ func (t *Tokenizer) unigramTokenizeWithSpans(word wordWithOffset) ([]int, []api.
 	}
 
 	var ends []int
+	// Trace the best path back from the end, fusing each run of consecutive unknown pieces into one span.
 	for end := len(text); end > 0; end = from[end] {
 		if pieceID[end] >= 0 || len(ends) == 0 || pieceID[ends[len(ends)-1]] >= 0 {
 			ends = append(ends, end)

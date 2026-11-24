@@ -187,12 +187,17 @@ func NewFromStruct(config *api.Config, tj *TokenizerJSON) (*Tokenizer, error) {
 	}
 
 	if tj.Model.Type == "Unigram" {
-		minScore := 0.0
+		minScore := -1.0
+		if len(tj.Model.Scores) > 0 {
+			minScore = tj.Model.Scores[0]
+		}
 		for token := range tj.Model.Vocab {
 			t.unigramMaxPiece = max(t.unigramMaxPiece, len(token))
 		}
 		for _, score := range tj.Model.Scores {
-			minScore = min(minScore, score)
+			if score < minScore {
+				minScore = score
+			}
 		}
 		t.unigramUnkScore = minScore - 10
 	}
@@ -223,7 +228,7 @@ func (t *Tokenizer) resolveSpecialTokens() {
 		}
 		content := at.Content
 		switch {
-		case content == "[UNK]" || content == "<unk>":
+		case (content == "[UNK]" || content == "<unk>") && t.tokenizer.Model.UnkID == nil:
 			t.unkID = at.ID
 		case content == "[PAD]" || content == "<pad>":
 			t.padID = at.ID
