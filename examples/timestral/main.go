@@ -68,6 +68,7 @@ func main() {
 
 	t0 := time.Now()
 	backend := must1(compute.NewWithConfig(*backendConfig))
+	fmt.Printf("Backend: %s\n", backend.Description())
 	repo := openRepo(*modelID)
 	tmModel := must1(timestral.LoadModel(repo)).WithMMap(*useMMap).WithForceFloat32(*forceFloat32)
 	numQuantiles := tmModel.Config.NumQuantiles()
