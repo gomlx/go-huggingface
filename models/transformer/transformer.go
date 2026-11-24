@@ -127,8 +127,7 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 		if attnLogitCap == 0 {
 			attnLogitCap = m.Config.AttnLogitSoftcapping
 		}
-		if attnLogitCap == 0 && (m.Config.ModelType == "gemma4" || m.Config.ModelType == "gemma4_text") {
-			attnLogitCap = 50.0
+		if m.Config.ModelType == "gemma4" || m.Config.ModelType == "gemma4_text" {
 			tm.WithRMSNormOffset(0.0)
 			tm.WithQueryKeyScale(1.0)
 		}
@@ -138,6 +137,7 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 
 		tm.WithSlidingWindow(m.Config.SlidingWindow).
 			WithNumKVSharedLayers(m.Config.NumKVSharedLayers).
+			WithUseDoubleWideMLP(m.Config.UseDoubleWideMLP).
 			WithScoreSoftCap(attnLogitCap).
 			WithFinalLogitSoftCap(m.Config.FinalLogitSoftcapping)
 		if len(m.Config.LayerTypes) > 0 {
@@ -171,16 +171,24 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 					fDim = headDim
 				}
 				if fp.PartialRotaryFactor > 0 && fp.PartialRotaryFactor < 1.0 {
-					rotatedDims := int(fp.PartialRotaryFactor * float64(fDim))
-					fullRope = pos.NewRoPEWithDimRange(fp.RopeTheta, 0, rotatedDims).WithFrequencyDivisor(fDim)
+					if fp.RopeType == "proportional" {
+						fullRope = pos.NewRoPE(fp.RopeTheta).WithPartialRotaryFactor(fp.PartialRotaryFactor)
+					} else {
+						rotatedDims := int(fp.PartialRotaryFactor * float64(fDim))
+						fullRope = pos.NewRoPEWithDimRange(fp.RopeTheta, 0, rotatedDims).WithFrequencyDivisor(fDim)
+					}
 				} else {
 					fullRope = pos.NewRoPE(fp.RopeTheta)
 				}
 			}
 			if sp, ok := m.Config.RoPEParameters["sliding_attention"]; ok && sp.RopeTheta > 0 {
 				if sp.PartialRotaryFactor > 0 && sp.PartialRotaryFactor < 1.0 {
-					rotatedDims := int(sp.PartialRotaryFactor * float64(headDim))
-					slidingRope = pos.NewRoPEWithDimRange(sp.RopeTheta, 0, rotatedDims).WithFrequencyDivisor(headDim)
+					if sp.RopeType == "proportional" {
+						slidingRope = pos.NewRoPE(sp.RopeTheta).WithPartialRotaryFactor(sp.PartialRotaryFactor)
+					} else {
+						rotatedDims := int(sp.PartialRotaryFactor * float64(headDim))
+						slidingRope = pos.NewRoPEWithDimRange(sp.RopeTheta, 0, rotatedDims).WithFrequencyDivisor(headDim)
+					}
 				} else {
 					slidingRope = pos.NewRoPE(sp.RopeTheta)
 				}
@@ -253,6 +261,11 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 	if m.KVCache != nil {
 		tm.KVCache = m.KVCache
 	}
+	if m.Config.SlidingWindow > 0 && int(mltransformer.LocalLayer) < len(tm.KVCache.MaxSeqLenPerLayerType) {
+		if tm.KVCache.MaxSeqLenPerLayerType[int(mltransformer.LocalLayer)] > m.Config.SlidingWindow {
+			tm.KVCache.MaxSeqLenPerLayerType[int(mltransformer.LocalLayer)] = m.Config.SlidingWindow
+		}
+	}
 
 	if m.Config.GlobalHeadDim > 0 {
 		tm.WithGlobalHeadDim(m.Config.GlobalHeadDim)
@@ -314,10 +327,11 @@ func (m *Model) Forward(
 ) (logits *graph.Node, updatedCache mltransformer.KVCacheNodes) {
 	tm := m.CreateGoMLXModel(scope)
 	opts := mltransformer.CallOptions{
-		PositionIds:   positionIds,
-		Cache:         cache,
-		SeqLen:        seqLen,
-		AttentionMask: attentionMask,
+		PositionIds:         positionIds,
+		Cache:               cache,
+		SeqLen:              seqLen,
+		AttentionMask:       attentionMask,
+		OnlyLastTokenLogits: m.onlyLastTokenLogits,
 	}
 	logits, updatedCache = tm.Forward(tokenIds, opts)
 	return logits, updatedCache

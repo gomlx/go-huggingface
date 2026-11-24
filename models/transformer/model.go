@@ -43,12 +43,13 @@ type Model struct {
 	totalBytes      *int64
 
 	// GGUF support and GELU precision override
-	isGGUF          bool
-	ggufFiles       []string
-	ggufFile        string
-	parsedGGUF      *gguf.File
-	approximateGelu *bool
-	forceFloat32    bool
+	isGGUF              bool
+	ggufFiles           []string
+	ggufFile            string
+	parsedGGUF          *gguf.File
+	approximateGelu     *bool
+	forceFloat32        bool
+	onlyLastTokenLogits bool
 
 	tokenizer tokenizers.Tokenizer
 	KVCache   *mltransformer.KVCache
@@ -65,6 +66,19 @@ func (m *Model) WithForceFloat32(force bool) *Model {
 // ForceFloat32 returns whether weights and computation are forced to Float32.
 func (m *Model) ForceFloat32() bool {
 	return m.forceFloat32
+}
+
+// WithOnlyLastTokenLogits configures Forward to slice the final hidden states to only the last
+// sequence position [batchSize, 1, hiddenSize] before projecting through the vocabulary head (lm_head).
+// This avoids computing unused logits for earlier prompt tokens during autoregressive prefill.
+func (m *Model) WithOnlyLastTokenLogits(enabled bool) *Model {
+	m.onlyLastTokenLogits = enabled
+	return m
+}
+
+// OnlyLastTokenLogits returns whether Forward projects only the last token through lm_head.
+func (m *Model) OnlyLastTokenLogits() bool {
+	return m.onlyLastTokenLogits
 }
 
 // WithMMap configures whether to use memory-mapped files (mmap) when reading tensors,
@@ -300,6 +314,7 @@ func (m *Model) LoadStoreFiltered(backend compute.Backend, store *model.Store, f
 		}
 		scopePath, varName, ok := mapTensorName(tensorAndName.Name)
 		if !ok {
+			tensorAndName.Tensor.FinalizeAll()
 			name := strings.TrimPrefix(tensorAndName.Name, "model.")
 			if isBert && (name == "embeddings.position_ids" || strings.HasPrefix(name, "pooler.")) {
 				continue
