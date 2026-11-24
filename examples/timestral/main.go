@@ -27,6 +27,7 @@ import (
 	"github.com/gomlx/compute/dtypes"
 	_ "github.com/gomlx/compute/gobackend" // registers the pure Go backend "go"
 	"github.com/gomlx/compute/shapes"
+	"github.com/gomlx/compute/support"
 	"github.com/gomlx/compute/support/humanize"
 	"github.com/gomlx/go-huggingface/hub"
 	"github.com/gomlx/go-huggingface/models/safetensors"
@@ -193,12 +194,7 @@ func liveMem() float64 {
 }
 
 func maxRSS() float64 {
-	var ru syscall.Rusage
-	_ = syscall.Getrusage(syscall.RUSAGE_SELF, &ru)
-	if runtime.GOOS == "darwin" {
-		return float64(ru.Maxrss) / 1e9 // bytes
-	}
-	return float64(ru.Maxrss) * 1024 / 1e9 // KiB
+	return float64(support.MaxRSS()) / 1e9
 }
 
 func cpuTime() time.Duration {
