@@ -56,6 +56,7 @@ func (m *Model) UnmarshalJSON(data []byte) error {
 			var vocabArray [][]interface{}
 			if err := json.Unmarshal(raw.Vocab, &vocabArray); err == nil {
 				m.Vocab = make(map[string]int, len(vocabArray))
+				m.Scores = make([]float64, len(vocabArray))
 				for idx, pair := range vocabArray {
 					if len(pair) >= 1 {
 						token, ok := pair[0].(string)
@@ -63,6 +64,9 @@ func (m *Model) UnmarshalJSON(data []byte) error {
 							// Use array index as the token ID
 							m.Vocab[token] = idx
 						}
+					}
+					if len(pair) >= 2 {
+						m.Scores[idx], _ = pair[1].(float64)
 					}
 				}
 			} else {
@@ -182,6 +186,17 @@ func NewFromStruct(config *api.Config, tj *TokenizerJSON) (*Tokenizer, error) {
 		}
 	}
 
+	if tj.Model.Type == "Unigram" {
+		minScore := 0.0
+		for token := range tj.Model.Vocab {
+			t.unigramMaxPiece = max(t.unigramMaxPiece, len(token))
+		}
+		for _, score := range tj.Model.Scores {
+			minScore = min(minScore, score)
+		}
+		t.unigramUnkScore = minScore - 10
+	}
+
 	// Resolve special token IDs
 	t.resolveSpecialTokens()
 
@@ -195,6 +210,10 @@ func (t *Tokenizer) resolveSpecialTokens() {
 		if id, ok := t.tokenizer.Model.Vocab[t.tokenizer.Model.UnkToken]; ok {
 			t.unkID = id
 		}
+	}
+
+	if id := t.tokenizer.Model.UnkID; id != nil {
+		t.unkID = *id
 	}
 
 	// Then check added tokens for special tokens

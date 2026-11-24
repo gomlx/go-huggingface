@@ -1,8 +1,11 @@
 package hftokenizer
 
 import (
-	"github.com/gomlx/go-huggingface/tokenizers/api"
+	"fmt"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/gomlx/go-huggingface/tokenizers/api"
 )
 
 // spanForSubword returns the original text span [origStart, origEnd] for a subword
@@ -205,55 +208,70 @@ func (t *Tokenizer) bpeTokenizeWithSpans(word wordWithOffset) ([]int, []api.Toke
 	return ids, offsets
 }
 
-// unigramTokenizeWithSpans implements Unigram tokenization with offset tracking.
+// unigramTokenizeWithSpans picks the pieces with the highest total score (Viterbi), as HuggingFace's Unigram model does.
 func (t *Tokenizer) unigramTokenizeWithSpans(word wordWithOffset) ([]int, []api.TokenSpan) {
-	text := word.text
-	if text == "" {
-		return nil, nil
+	text, model := word.text, &t.tokenizer.Model
+	best := make([]float64, len(text)+1)
+	from := make([]int, len(text)+1)
+	pieceID := make([]int, len(text)+1)
+	for i := range from {
+		from[i] = -1
+	}
+	relax := func(start, end, id int, score float64) {
+		if s := best[start] + score; from[end] < 0 || s > best[end] {
+			best[end], from[end], pieceID[end] = s, start, id
+		}
+	}
+	for start := 0; start < len(text); {
+		_, charLen := utf8.DecodeRuneInString(text[start:])
+		hasChar := false
+		for end := start + 1; end <= min(len(text), start+t.unigramMaxPiece); end++ {
+			if id, ok := model.Vocab[text[start:end]]; ok {
+				score := -1.0 // Fewest pieces win when the model has no scores.
+				if id < len(model.Scores) {
+					score = model.Scores[id]
+				}
+				relax(start, end, id, score)
+				hasChar = hasChar || end == start+charLen
+			}
+		}
+		if !hasChar {
+			relax(start, start+charLen, -1, t.unigramUnkScore)
+		}
+		start += charLen
 	}
 
+	var ends []int
+	for end := len(text); end > 0; end = from[end] {
+		if pieceID[end] >= 0 || len(ends) == 0 || pieceID[ends[len(ends)-1]] >= 0 {
+			ends = append(ends, end)
+		}
+	}
 	var ids []int
 	var offsets []api.TokenSpan
-	runes := []rune(text)
-	start := 0
-	runeLen := len(runes)
-
-	for start < runeLen {
-		end := runeLen
-		found := false
-
-		for end > start {
-			substr := string(runes[start:end])
-			if id, ok := t.tokenizer.Model.Vocab[substr]; ok {
-				ids = append(ids, id)
-
-				// Calculate offsets - map from rune position to byte position
-				startByte := len(string(runes[:start]))
-				endByte := len(string(runes[:end]))
-
-				offsets = append(offsets, word.spanForSubword(startByte, endByte))
-				found = true
-				start = end
-				break
-			}
-			end--
+	for i := len(ends) - 1; i >= 0; i-- {
+		start, end := 0, ends[i]
+		if i+1 < len(ends) {
+			start = ends[i+1]
 		}
-
-		if !found {
-			// Single character fallback
-			char := string(runes[start])
-			startByte := len(string(runes[:start]))
-			endByte := len(string(runes[:start+1]))
-
-			if id, ok := t.tokenizer.Model.Vocab[char]; ok {
-				ids = append(ids, id)
-			} else if t.unkID >= 0 {
-				ids = append(ids, t.unkID)
+		span := word.spanForSubword(start, end)
+		if id := pieceID[end]; id >= 0 {
+			ids, offsets = append(ids, id), append(offsets, span)
+			continue
+		}
+		var byteIDs []int
+		for j := start; model.ByteFallback && j < end; j++ {
+			if id, ok := model.Vocab[fmt.Sprintf("<0x%02X>", text[j])]; ok {
+				byteIDs = append(byteIDs, id)
 			}
-			offsets = append(offsets, word.spanForSubword(startByte, endByte))
-			start++
+		}
+		if len(byteIDs) == end-start {
+			for _, id := range byteIDs {
+				ids, offsets = append(ids, id), append(offsets, span)
+			}
+		} else if t.unkID >= 0 {
+			ids, offsets = append(ids, t.unkID), append(offsets, span)
 		}
 	}
-
 	return ids, offsets
 }

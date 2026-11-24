@@ -114,7 +114,9 @@ type Model struct {
 	Type                    string         `json:"type"`
 	Vocab                   map[string]int `json:"-"` // Custom unmarshaling handles both map and array formats
 	Merges                  []string       `json:"-"` // Custom unmarshaling handles both string and array formats
+	Scores                  []float64      `json:"-"` // Unigram log probabilities, indexed by token ID.
 	UnkToken                string         `json:"unk_token"`
+	UnkID                   *int           `json:"unk_id"`
 	ContinuingSubwordPrefix string         `json:"continuing_subword_prefix"`
 	MaxInputCharsPerWord    int            `json:"max_input_chars_per_word"`
 	FuseUnk                 bool           `json:"fuse_unk"`
@@ -129,6 +131,9 @@ type Tokenizer struct {
 	tokenizer  *TokenizerJSON
 	idToToken  map[int]string
 	mergeRanks map[string]int // For BPE: maps "token1 token2" to merge priority
+
+	unigramMaxPiece int     // Longest Unigram piece in bytes.
+	unigramUnkScore float64 // Score of an unknown character: lowest piece score minus 10, as in HuggingFace.
 
 	// Special token IDs
 	unkID  int
