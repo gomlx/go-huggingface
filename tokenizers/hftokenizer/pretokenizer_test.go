@@ -2,6 +2,8 @@ package hftokenizer
 
 import (
 	"testing"
+
+	"github.com/gomlx/go-huggingface/tokenizers/api"
 )
 
 func TestIsPunctuation(t *testing.T) {
@@ -59,6 +61,32 @@ func TestSplitPreTokenizerEmptyRegexIsolatesCharacters(t *testing.T) {
 	for i := range want {
 		if words[i].text != want[i].text || words[i].start != want[i].start || words[i].end != want[i].end {
 			t.Errorf("preTokenizeWithSpans() word %d = %+v, want %+v", i, words[i], want[i])
+		}
+	}
+}
+
+func TestMetaspacePreTokenizeSpans(t *testing.T) {
+	tests := []struct {
+		text string
+		want []api.TokenSpan
+	}{
+		{"hello world", []api.TokenSpan{{Start: 0, End: 5}, {Start: 5, End: 11}}},
+		{"éé", []api.TokenSpan{{Start: 0, End: 4}}},
+		{"a  b", []api.TokenSpan{{Start: 0, End: 1}, {Start: 1, End: 2}, {Start: 2, End: 4}}},
+		{" x", []api.TokenSpan{{Start: 0, End: 2}}},
+	}
+	for _, tt := range tests {
+		words := metaspacePreTokenizeWithOffsets(tt.text, identityOffsets(len(tt.text)), true, "", "always", true)
+		if len(words) != len(tt.want) {
+			t.Fatalf("%q: got %d words, want %d", tt.text, len(words), len(tt.want))
+		}
+		for i, w := range words {
+			if len(w.offsets) != len(w.text) {
+				t.Errorf("%q word %q: %d offsets for %d bytes", tt.text, w.text, len(w.offsets), len(w.text))
+			}
+			if got := w.spanForSubword(0, len(w.text)); got != tt.want[i] {
+				t.Errorf("%q word %q: span %v, want %v", tt.text, w.text, got, tt.want[i])
+			}
 		}
 	}
 }

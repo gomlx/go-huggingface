@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // preTokenizeWithOffsets splits text into words with their byte offsets.
@@ -243,68 +244,47 @@ func metaspacePreTokenizeWithOffsets(text string, normOffsets []int, addPrefixSp
 		normOffsets = newOffsets
 	}
 
-	// Replace spaces with metaspace character
+	orig := func(i int) int {
+		if i < len(normOffsets) {
+			return normOffsets[i]
+		}
+		return i
+	}
 	var words []wordWithOffset
 	var current strings.Builder
-	currentStart := -1
-
-	for i, r := range text {
-		if r == ' ' {
-			if split && current.Len() > 0 {
-				origStart := 0
-				origEnd := i
-				if currentStart < len(normOffsets) && currentStart >= 0 {
-					origStart = normOffsets[currentStart]
-				}
-				if i > 0 && i <= len(normOffsets) {
-					origEnd = normOffsets[i-1] + 1
-				}
-				var subOffsets []int
-				if len(normOffsets) >= i && currentStart >= 0 && currentStart <= i {
-					subOffsets = normOffsets[currentStart:i]
-				}
-				words = append(words, wordWithOffset{
-					text:    current.String(),
-					start:   origStart,
-					end:     origEnd,
-					offsets: subOffsets,
-				})
-				current.Reset()
-				currentStart = i
-			}
-			current.WriteString(replacement)
-			if currentStart == -1 {
-				currentStart = i
-			}
-		} else {
-			if currentStart == -1 {
-				currentStart = i
-			}
-			current.WriteRune(r)
-		}
-	}
-
-	if current.Len() > 0 {
-		origStart := 0
-		origEnd := len(text)
-		if currentStart < len(normOffsets) && currentStart >= 0 {
-			origStart = normOffsets[currentStart]
-		}
-		if len(normOffsets) > 0 {
-			origEnd = normOffsets[len(normOffsets)-1] + 1
-		}
-		var subOffsets []int
-		if len(normOffsets) >= len(text) && currentStart >= 0 && currentStart <= len(text) {
-			subOffsets = normOffsets[currentStart:]
+	var offsets []int
+	flush := func() {
+		if current.Len() == 0 {
+			return
 		}
 		words = append(words, wordWithOffset{
 			text:    current.String(),
-			start:   origStart,
-			end:     origEnd,
-			offsets: subOffsets,
+			start:   offsets[0],
+			end:     offsets[len(offsets)-1] + 1,
+			offsets: offsets,
 		})
+		current.Reset()
+		offsets = nil
 	}
-
+	for i, r := range text {
+		size := utf8.RuneLen(r)
+		if r == ' ' {
+			if split {
+				flush()
+			}
+			current.WriteString(replacement)
+			size = len(replacement)
+		} else {
+			current.WriteRune(r)
+		}
+		for j := range size {
+			if r == ' ' {
+				j = 0 // every byte of the replacement maps to the space it replaces
+			}
+			offsets = append(offsets, orig(i+j))
+		}
+	}
+	flush()
 	return words
 }
 
