@@ -386,10 +386,14 @@ func main() {
 	ds := datasets.New(dolly.ID)
 	recordIdx := 0
 	count := 0
-	var totalPromptTokens, totalGenTokens, totalDecodeTokens int
-	var totalTTFT, totalDecodeTime, totalDecodeCPUTime, totalTime time.Duration
-	var ollamaPromptTokens, ollamaGenTokens int
-	var ollamaPrefillTime, ollamaDecodeTime, ollamaWallTime time.Duration
+	var firstPromptTokens, firstGenTokens, firstDecodeTokens int
+	var firstTTFT, firstDecodeTime, firstDecodeCPUTime, firstTime time.Duration
+	var warmPromptTokens, warmGenTokens, warmDecodeTokens int
+	var warmTTFT, warmDecodeTime, warmDecodeCPUTime, warmTime time.Duration
+	var firstOllamaPromptTokens, firstOllamaGenTokens int
+	var firstOllamaPrefillTime, firstOllamaDecodeTime, firstOllamaWallTime time.Duration
+	var warmOllamaPromptTokens, warmOllamaGenTokens int
+	var warmOllamaPrefillTime, warmOllamaDecodeTime, warmOllamaWallTime time.Duration
 	var exactMatches int
 
 	if *flagCPUProf != "" {
@@ -431,13 +435,23 @@ func main() {
 			}
 			gomlxText = res.text
 			decodeToks := max(res.genTokens-1, 0)
-			totalPromptTokens += res.promptTokens
-			totalGenTokens += res.genTokens
-			totalDecodeTokens += decodeToks
-			totalTTFT += res.ttft
-			totalDecodeTime += res.decodeTime
-			totalDecodeCPUTime += res.decodeCPUTime
-			totalTime += res.totalTime
+			if count == 1 {
+				firstPromptTokens = res.promptTokens
+				firstGenTokens = res.genTokens
+				firstDecodeTokens = decodeToks
+				firstTTFT = res.ttft
+				firstDecodeTime = res.decodeTime
+				firstDecodeCPUTime = res.decodeCPUTime
+				firstTime = res.totalTime
+			} else {
+				warmPromptTokens += res.promptTokens
+				warmGenTokens += res.genTokens
+				warmDecodeTokens += decodeToks
+				warmTTFT += res.ttft
+				warmDecodeTime += res.decodeTime
+				warmDecodeCPUTime += res.decodeCPUTime
+				warmTime += res.totalTime
+			}
 
 			var prefillTPS, decodeTPS, cpuCores float64
 			var cpuPerTok time.Duration
@@ -472,11 +486,19 @@ func main() {
 				klog.Fatalf("Failed to generate with Ollama for example #%d: %+v", count, err)
 			}
 			ollamaText = strings.TrimSpace(ores.Response)
-			ollamaPromptTokens += ores.PromptEvalCount
-			ollamaGenTokens += ores.EvalCount
-			ollamaPrefillTime += ores.PromptEvalDuration
-			ollamaDecodeTime += ores.EvalDuration
-			ollamaWallTime += ores.WallDuration
+			if count == 1 {
+				firstOllamaPromptTokens = ores.PromptEvalCount
+				firstOllamaGenTokens = ores.EvalCount
+				firstOllamaPrefillTime = ores.PromptEvalDuration
+				firstOllamaDecodeTime = ores.EvalDuration
+				firstOllamaWallTime = ores.WallDuration
+			} else {
+				warmOllamaPromptTokens += ores.PromptEvalCount
+				warmOllamaGenTokens += ores.EvalCount
+				warmOllamaPrefillTime += ores.PromptEvalDuration
+				warmOllamaDecodeTime += ores.EvalDuration
+				warmOllamaWallTime += ores.WallDuration
+			}
 
 			header := "Generated Response"
 			if runner != nil {
@@ -504,45 +526,59 @@ func main() {
 	}
 
 	if runner != nil || ollama != nil {
-		if count > 1 || (runner != nil && ollama != nil) {
-			fmt.Printf("=== Summary (%d examples) ===\n", count)
+		// When multiple examples ran, report warm averages skipping example #1 (cold compile/pre-pack/warmup).
+		sumPromptTokens, sumGenTokens, sumDecodeTokens := warmPromptTokens, warmGenTokens, warmDecodeTokens
+		sumTTFT, sumDecodeTime, sumDecodeCPUTime, sumTime := warmTTFT, warmDecodeTime, warmDecodeCPUTime, warmTime
+		sumOllamaPromptTokens, sumOllamaGenTokens := warmOllamaPromptTokens, warmOllamaGenTokens
+		sumOllamaPrefillTime, sumOllamaDecodeTime, sumOllamaWallTime := warmOllamaPrefillTime, warmOllamaDecodeTime, warmOllamaWallTime
+		if count == 1 {
+			sumPromptTokens, sumGenTokens, sumDecodeTokens = firstPromptTokens, firstGenTokens, firstDecodeTokens
+			sumTTFT, sumDecodeTime, sumDecodeCPUTime, sumTime = firstTTFT, firstDecodeTime, firstDecodeCPUTime, firstTime
+			sumOllamaPromptTokens, sumOllamaGenTokens = firstOllamaPromptTokens, firstOllamaGenTokens
+			sumOllamaPrefillTime, sumOllamaDecodeTime, sumOllamaWallTime = firstOllamaPrefillTime, firstOllamaDecodeTime, firstOllamaWallTime
+		}
+
+		if count > 1 {
+			fmt.Printf("=== Summary (%d warm examples, skipping #1) ===\n", count-1)
+		} else if runner != nil && ollama != nil {
+			fmt.Printf("=== Summary (1 example) ===\n")
 		}
 		if runner != nil {
 			if count > 1 || ollama != nil {
 				var avgPrefillTPS, avgDecodeTPS, avgCPUCores float64
 				var avgCPUPerTok time.Duration
-				if totalTTFT.Seconds() > 0 {
-					avgPrefillTPS = float64(totalPromptTokens) / totalTTFT.Seconds()
+				if sumTTFT.Seconds() > 0 {
+					avgPrefillTPS = float64(sumPromptTokens) / sumTTFT.Seconds()
 				}
-				if totalDecodeTokens > 0 {
-					if totalDecodeTime.Seconds() > 0 {
-						avgDecodeTPS = float64(totalDecodeTokens) / totalDecodeTime.Seconds()
-						avgCPUCores = totalDecodeCPUTime.Seconds() / totalDecodeTime.Seconds()
+				if sumDecodeTokens > 0 {
+					if sumDecodeTime.Seconds() > 0 {
+						avgDecodeTPS = float64(sumDecodeTokens) / sumDecodeTime.Seconds()
+						avgCPUCores = sumDecodeCPUTime.Seconds() / sumDecodeTime.Seconds()
 					}
-					avgCPUPerTok = totalDecodeCPUTime / time.Duration(totalDecodeTokens)
+					avgCPUPerTok = sumDecodeCPUTime / time.Duration(sumDecodeTokens)
 				}
 				fmt.Printf("GoMLX  - Prompt: %d tok, Gen: %d tok, Prefill: %s (%.2f tok/s), Decode: %s (%.2f tok/s, CPUTime/tok=%s, avg_cores=%.2f), Total: %s\n",
-					totalPromptTokens, totalGenTokens,
-					humanize.Duration(totalTTFT), avgPrefillTPS,
-					humanize.Duration(totalDecodeTime), avgDecodeTPS,
+					sumPromptTokens, sumGenTokens,
+					humanize.Duration(sumTTFT), avgPrefillTPS,
+					humanize.Duration(sumDecodeTime), avgDecodeTPS,
 					humanize.Duration(avgCPUPerTok), avgCPUCores,
-					humanize.Duration(totalTime))
+					humanize.Duration(sumTime))
 			}
 			fmt.Printf("GoMLX  - MaxRSS: %s\n", humanize.Bytes(support.MaxRSS()))
 		}
 		if ollama != nil && (count > 1 || runner != nil) {
 			var avgPrefillTPS, avgDecodeTPS float64
-			if ollamaPrefillTime.Seconds() > 0 {
-				avgPrefillTPS = float64(ollamaPromptTokens) / ollamaPrefillTime.Seconds()
+			if sumOllamaPrefillTime.Seconds() > 0 {
+				avgPrefillTPS = float64(sumOllamaPromptTokens) / sumOllamaPrefillTime.Seconds()
 			}
-			if ollamaDecodeTime.Seconds() > 0 {
-				avgDecodeTPS = float64(ollamaGenTokens) / ollamaDecodeTime.Seconds()
+			if sumOllamaDecodeTime.Seconds() > 0 {
+				avgDecodeTPS = float64(sumOllamaGenTokens) / sumOllamaDecodeTime.Seconds()
 			}
 			fmt.Printf("Ollama - Prompt: %d tok, Gen: %d tok, Prefill: %s (%.2f tok/s), Decode: %s (%.2f tok/s), Wall: %s\n",
-				ollamaPromptTokens, ollamaGenTokens,
-				humanize.Duration(ollamaPrefillTime), avgPrefillTPS,
-				humanize.Duration(ollamaDecodeTime), avgDecodeTPS,
-				humanize.Duration(ollamaWallTime))
+				sumOllamaPromptTokens, sumOllamaGenTokens,
+				humanize.Duration(sumOllamaPrefillTime), avgPrefillTPS,
+				humanize.Duration(sumOllamaDecodeTime), avgDecodeTPS,
+				humanize.Duration(sumOllamaWallTime))
 		}
 		if runner != nil && ollama != nil {
 			fmt.Printf("Comparison: %d/%d exact matches\n", exactMatches, count)
