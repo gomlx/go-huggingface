@@ -239,8 +239,10 @@ func metaspacePreTokenizeWithOffsets(text string, normOffsets []int, addPrefixSp
 	if (addPrefixSpace || prependScheme == "always") && len(text) > 0 && text[0] != ' ' {
 		text = " " + text
 		newOffsets := make([]int, len(normOffsets)+1)
-		newOffsets[0] = 0
 		copy(newOffsets[1:], normOffsets)
+		if len(normOffsets) > 0 {
+			newOffsets[0] = normOffsets[0]
+		}
 		normOffsets = newOffsets
 	}
 
@@ -267,21 +269,19 @@ func metaspacePreTokenizeWithOffsets(text string, normOffsets []int, addPrefixSp
 		offsets = nil
 	}
 	for i, r := range text {
-		size := utf8.RuneLen(r)
 		if r == ' ' {
 			if split {
 				flush()
 			}
 			current.WriteString(replacement)
-			size = len(replacement)
+			for range len(replacement) {
+				offsets = append(offsets, orig(i))
+			}
 		} else {
 			current.WriteRune(r)
-		}
-		for j := range size {
-			if r == ' ' {
-				j = 0 // every byte of the replacement maps to the space it replaces
+			for j := range utf8.RuneLen(r) {
+				offsets = append(offsets, orig(i+j))
 			}
-			offsets = append(offsets, orig(i+j))
 		}
 	}
 	flush()
