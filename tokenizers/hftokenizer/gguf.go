@@ -204,9 +204,14 @@ func NewFromGGUF(config *api.Config, params GGUFTokenizerParams) (*Tokenizer, er
 			PrependScheme:  prependScheme,
 			AddPrefixSpace: addSpacePrefix,
 		}
+		scores := make([]float64, len(params.Scores))
+		for i, score := range params.Scores {
+			scores[i] = float64(score)
+		}
 		tj.Model = Model{
 			Type:         "Unigram",
 			Vocab:        vocab,
+			Scores:       scores,
 			UnkToken:     unkStr,
 			ByteFallback: hasByteTokens,
 		}
