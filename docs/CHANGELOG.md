@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- 2026/11/25:
+  - `models/transformer`:
+    - Added Qwen3.5 (`model_type: "qwen3_5"` / `"qwen3_5_text"`) model support for both sentence embedding and autoregressive text generation:
+      - Extended `Config` with Qwen3.5 hybrid Gated DeltaNet parameters (`attn_output_gate`, `full_attention_interval`, `linear_conv_kernel_dim`, `linear_key_head_dim`, `linear_value_head_dim`, `linear_num_key_heads`, `linear_num_value_heads`, `mamba_ssm_dtype`, `tie_word_embeddings`) and updated `Config.UnmarshalJSON` to parse both flat `rope_parameters` objects (Qwen3.5) and per-layer-type `rope_parameters` maps (Gemma 4).
+      - Mapped `layers.{N}.linear_attn.*` safetensors weights (`in_proj_qkv`, `in_proj_z`, `in_proj_b`, `in_proj_a`, `out_proj`, `conv1d.weight`, `A_log`, `dt_bias`, `norm.weight`) and untied `lm_head.weight`, while cleanly skipping `model.visual.*` and `mtp.*` tensors.
+      - Configured `mltransformer.ArchitectureQwen35`, `mltransformer.LinearLayer` layer types, zero-centered RMSNorm (`RMSNormOffset = 1.0`), gated attention output, and standard partial RoPE (`partial_rotary_factor`) in `CreateGoMLXModel`, and added `qwen3_5` / `qwen3_5_text` to `detectCausalMask`.
+      - Added unit tests (`TestQwen35ConfigAndTensorMapping`) verifying Qwen3.5 config/tensor mapping and Gemma 4 nested `rope_parameters` backwards compatibility.
+
 - 2026/11/24:
   - `tokenizers/hftokenizer`:
     - Unigram tokenization picks the best-scoring split with Viterbi over the vocab scores, matching HuggingFace `tokenizers` (e.g. `Munich` → `▁`+`Munich` with deberta-v3 / GLiNER, previously greedy `▁Munic`+`h`).

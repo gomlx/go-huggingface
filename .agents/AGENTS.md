@@ -117,7 +117,7 @@ Manages downloading and access to HuggingFace repositories.
   - `config_sentence_transformers.json` (sentence transformer pipeline settings)
   - `modules.json` (execution pipeline: Transformer -> Pooling -> Normalize)
   - `1_Pooling/config.json` (pooling strategy: mean, CLS, last-token; defaults to last-token for causal decoders and mean for bidirectional encoders when absent)
-- Supports native quantized GGUF execution (`LoadStore` attaches `model.Quantization` metadata so GoMLX dispatches `nn.QuantizedDense` and `nn.QuantizedGather`), `WithGGUFFile(filename)`, `WithApproximateGelu(approx)`, RoPE positional embeddings, layer normalization, RMSNorm, multi-head/grouped-query attention, and task prompts (`task_prompts.json`).
+- Supports native quantized GGUF execution (`LoadStore` attaches `model.Quantization` metadata so GoMLX dispatches `nn.QuantizedDense` and `nn.QuantizedGather`), `WithGGUFFile(filename)`, `WithApproximateGelu(approx)`, RoPE positional embeddings (including partial RoPE and flat or per-layer-type `rope_parameters`), layer normalization, RMSNorm (including zero-centered `1 + weight`), multi-head/grouped-query attention (including gated attention outputs), hybrid Gated DeltaNet linear attention layers (e.g., Qwen3.5), and task prompts (`task_prompts.json`).
 
 ### 3.6. `models/sam2`
 - Implements Facebook's Segment Anything 2 (SAM2) image architecture in GoMLX:

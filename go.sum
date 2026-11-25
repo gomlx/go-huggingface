@@ -60,8 +60,8 @@ github.com/gomlx/go-darwinml v0.1.11 h1:97F3Ki1aQekxopCkypzDFI4LyosniX5AuK8vcr0N
 github.com/gomlx/go-darwinml v0.1.11/go.mod h1:XKlwSErj4TwHBpBm4k42lKqsDM9Zr+m2BLJXCeDcHX8=
 github.com/gomlx/go-xla v0.4.34 h1:MiIBBYwQNF6gUupZ40X7ZMo7RgkSVjbjDbOhuxYQzdY=
 github.com/gomlx/go-xla v0.4.34/go.mod h1:ZelbdzYVHVDlPszUwYnV1mw8kbtOvp0/OlEz+aECiKM=
-github.com/gomlx/gomlx v0.28.40 h1:FsYu1sGIvKMpULfGcNCGcQzl5naHmjyoMLruszLW74E=
-github.com/gomlx/gomlx v0.28.40/go.mod h1:oH8s8hvpzYNDYUNiw5km0AscX4UJvM/r0CZo1KDzc3E=
+github.com/gomlx/gomlx v0.28.41-0.20261125134254-cce1c9501d0b h1:KWCOehW7rOlijKOT4EwfmdMsgyrbMWxARsjrbP8Baz0=
+github.com/gomlx/gomlx v0.28.41-0.20261125134254-cce1c9501d0b/go.mod h1:oH8s8hvpzYNDYUNiw5km0AscX4UJvM/r0CZo1KDzc3E=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=

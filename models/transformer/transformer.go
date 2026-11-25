@@ -108,6 +108,8 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 			arch = mltransformer.ArchitectureGemma4
 		case "gemma2", "gemma":
 			arch = mltransformer.ArchitectureGemma
+		case "qwen3_5", "qwen3_5_text":
+			arch = mltransformer.ArchitectureQwen35
 		default:
 			arch = mltransformer.ArchitectureGemma3
 		}
@@ -131,6 +133,43 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 			tm.WithRMSNormOffset(0.0)
 			tm.WithQueryKeyScale(1.0)
 		}
+		if arch == mltransformer.ArchitectureQwen35 {
+			tm.WithRMSNormOffset(1.0)
+			// Qwen3_5Attention always fuses an output gate into q_proj.
+			tm.WithAttnOutputGate(true)
+			convKernelDim := m.Config.LinearConvKernelDim
+			if convKernelDim == 0 {
+				convKernelDim = 4
+			}
+			keyHeadDim := m.Config.LinearKeyHeadDim
+			if keyHeadDim == 0 {
+				keyHeadDim = 128
+			}
+			valueHeadDim := m.Config.LinearValueHeadDim
+			if valueHeadDim == 0 {
+				valueHeadDim = 128
+			}
+			numKeyHeads := m.Config.LinearNumKeyHeads
+			if numKeyHeads == 0 {
+				numKeyHeads = 16
+			}
+			numValueHeads := m.Config.LinearNumValueHeads
+			if numValueHeads == 0 {
+				numValueHeads = 32
+			}
+			stateDType := dtypes.Float32
+			if m.Config.MambaSSMDType == "bfloat16" {
+				stateDType = dtypes.BFloat16
+			} else if m.Config.MambaSSMDType == "float16" {
+				stateDType = dtypes.Float16
+			}
+			tm.WithLinearConvKernelDim(convKernelDim).
+				WithLinearKeyHeadDim(keyHeadDim).
+				WithLinearValueHeadDim(valueHeadDim).
+				WithLinearNumKeyHeads(numKeyHeads).
+				WithLinearNumValueHeads(numValueHeads).
+				WithLinearStateDType(stateDType)
+		}
 		if m.Config.QueryPreAttnScalar > 0 {
 			tm.WithQueryKeyScale(1.0 / math.Sqrt(m.Config.QueryPreAttnScalar))
 		}
@@ -143,10 +182,27 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 		if len(m.Config.LayerTypes) > 0 {
 			layerTypes := make([]mltransformer.LayerType, m.Config.NumHiddenLayers)
 			for i, lt := range m.Config.LayerTypes {
-				if lt == "sliding_attention" {
+				switch lt {
+				case "sliding_attention":
 					layerTypes[i] = mltransformer.LocalLayer
-				} else {
+				case "linear_attention":
+					layerTypes[i] = mltransformer.LinearLayer
+				default:
 					layerTypes[i] = mltransformer.GlobalLayer
+				}
+			}
+			tm.WithLayerTypes(layerTypes)
+		} else if arch == mltransformer.ArchitectureQwen35 && m.Config.NumHiddenLayers > 0 {
+			interval := m.Config.FullAttentionInterval
+			if interval <= 0 {
+				interval = 4
+			}
+			layerTypes := make([]mltransformer.LayerType, m.Config.NumHiddenLayers)
+			for i := range layerTypes {
+				if (i+1)%interval == 0 {
+					layerTypes[i] = mltransformer.GlobalLayer
+				} else {
+					layerTypes[i] = mltransformer.LinearLayer
 				}
 			}
 			tm.WithLayerTypes(layerTypes)
@@ -179,6 +235,26 @@ func (m *Model) CreateGoMLXModel(scope *model.Scope) *mltransformer.Model {
 					}
 				} else {
 					fullRope = pos.NewRoPE(fp.RopeTheta)
+				}
+			} else if dp, ok := m.Config.RoPEParameters["default"]; ok {
+				theta := dp.RopeTheta
+				if theta == 0 {
+					theta = ropeTheta
+				}
+				partialFactor := dp.PartialRotaryFactor
+				if partialFactor == 0 && arch == mltransformer.ArchitectureQwen35 {
+					partialFactor = 0.25
+				}
+				if partialFactor > 0 && partialFactor < 1.0 {
+					if dp.RopeType == "proportional" {
+						fullRope = pos.NewRoPE(theta).WithPartialRotaryFactor(partialFactor)
+					} else {
+						rotatedDims := int(partialFactor * float64(headDim))
+						// Standard partial RoPE (e.g. Qwen3.5) computes inv_freq over rotatedDims (FrequencyDivisor=0).
+						fullRope = pos.NewRoPEWithDimRange(theta, 0, rotatedDims)
+					}
+				} else {
+					fullRope = pos.NewRoPE(theta)
 				}
 			}
 			if sp, ok := m.Config.RoPEParameters["sliding_attention"]; ok && sp.RopeTheta > 0 {
