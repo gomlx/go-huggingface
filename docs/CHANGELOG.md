@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- 2026/11/25:
+  - `datasets`:
+    - Updated `parquet-go` list logical type checks (`isListLogicalType`) in `datasets/codegen.go` for `parquet-go`'s union-based `format.LogicalType` (`lt.Value.(*format.ListType)` instead of the removed `lt.List` field), and extended `resolveParquetField` to handle all Parquet `LIST` backward-compatibility layouts (rules 1–5) while preserving existing generated struct definitions.
+    - Removed the obsolete `ParquetFixListSchema` schema-rewriting workaround from `IterParquetFromFile` and `CreateParquetReader`, relying directly on `parquet-go`'s native list schema compatibility (parquet-go PR #669), and kept `ParquetFixListSchema` as a deprecated compatibility shim returning `parquet.SchemaOf(new(T))` so existing generated structs (such as `examples/msmarco/gen_schema.go`) continue working unchanged.
+
 - 2026/11/24:
   - `tokenizers/hftokenizer`:
     - Unigram tokenization picks the best-scoring split with Viterbi over the vocab scores, matching HuggingFace `tokenizers` (e.g. `Munich` → `▁`+`Munich` with deberta-v3 / GLiNER, previously greedy `▁Munic`+`h`).

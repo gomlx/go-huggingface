@@ -2,9 +2,11 @@ package datasets
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"testing"
 
+	"github.com/parquet-go/parquet-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -77,5 +79,41 @@ func TestParquetFixListSchema(t *testing.T) {
 			break
 		}
 	}
-	assert.Equal(t, count, 10) // There are only 10 records in the file, it should yield exactly 10.
+	assert.Equal(t, 10, count) // There are only 10 records in the file, it should yield exactly 10.
+
+	// Verify deprecated ParquetFixListSchema remains compatible with parquet.NewGenericReader.
+	fixedSchema, err := ParquetFixListSchema[MsMarcoRecord]("ms_marco_v2.1_validation_10.parquet")
+	require.NoError(t, err)
+	f, err := os.Open("ms_marco_v2.1_validation_10.parquet")
+	require.NoError(t, err)
+	defer f.Close()
+	reader := parquet.NewGenericReader[MsMarcoRecord](f, fixedSchema)
+	defer reader.Close()
+	rows := make([]MsMarcoRecord, 12)
+	n, err := reader.Read(rows)
+	if err != io.EOF {
+		require.NoError(t, err)
+	}
+	assert.Equal(t, 10, n)
+	assert.NotEmpty(t, rows[0].Query)
+	assert.NotEmpty(t, rows[0].Answers)
+	assert.NotEmpty(t, rows[0].Passages.PassageText)
+
+	// Verify MultiRowGroup + NewGenericRowGroupReader + SeekToRow (as used by CreateParquetReader).
+	stat, err := f.Stat()
+	require.NoError(t, err)
+	pf, err := parquet.OpenFile(f, stat.Size())
+	require.NoError(t, err)
+	multiGroup := parquet.MultiRowGroup(append(pf.RowGroups(), pf.RowGroups()...)...)
+	rgReader := parquet.NewGenericRowGroupReader[MsMarcoRecord](multiGroup)
+	defer rgReader.Close()
+	assert.Equal(t, int64(20), rgReader.NumRows())
+	require.NoError(t, rgReader.SeekToRow(12))
+	seekRows := make([]MsMarcoRecord, 10)
+	n, err = rgReader.Read(seekRows)
+	if err != io.EOF {
+		require.NoError(t, err)
+	}
+	assert.Equal(t, 8, n)
+	assert.Equal(t, rows[2], seekRows[0])
 }

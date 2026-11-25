@@ -182,10 +182,10 @@ When modifying or extending this repo, keep these specific architectural nuances
    - If unknown, it defaults to **true** (the standard for modern LLMs and the GoMLX default).
    - Callers can inspect the setting via `hfModel.UseCausalMask()` and explicitly override it via `hfModel.WithCausalMask(bool)`.
 
-8. **Parquet 3-Level List Schema Compatibility (`ParquetFixListSchema`)**:
-   - The Go `parquet-go` package expects repeated lists to follow a rigid standard schema with node names `"list"` and `"element"`.
-   - Many HuggingFace parquet files use custom group/element node names for list fields.
-   - `datasets.ParquetFixListSchema[T]` inspects the actual Parquet file schema and dynamically rewrites the Go struct's schema tree to match the file's naming conventions, preventing unmarshaling errors.
+8. **Parquet List Schema Compatibility**:
+   - `parquet-go` (v0.32.2+, PR #669) natively handles non-standard Parquet `LIST` schemas (PyArrow's `"list"`/`"item"`, Athena's `"bag"`/`"array_element"`, and legacy 2-level lists) during schema conversion in `NewGenericReader` and `NewGenericRowGroupReader`.
+   - `format.LogicalType` in `parquet-go` uses a union `Value` field (`lt.Value.(*format.ListType)`), not a `.List` field.
+   - `datasets.ParquetFixListSchema[T]` is retained as a deprecated compatibility shim returning `parquet.SchemaOf(new(T))`; `IterParquetFromFile` and `CreateParquetReader` rely directly on `parquet-go`'s native list schema conversion.
 
 9. **Dynamic XLA Pooling in Sentence Transformers**:
    - Sentence pooling in `models/transformer/sentence.go` utilizes dynamic XLA operations (`DynamicBroadcastInDim`, `DynamicIota`, etc.) to support variable sequence lengths and padded batches without triggering recompilation or conditional graph branching.

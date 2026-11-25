@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/parquet-go/parquet-go"
+	"github.com/parquet-go/parquet-go/format"
 	"github.com/pkg/errors"
 )
 
@@ -93,20 +94,9 @@ func resolveParquetField(field parquet.Field, defs *[]StructDef) FieldDef {
 
 	if field.Leaf() {
 		goType = mapParquetTypeToGoType(field.Type().Kind())
-	} else if field.Type().LogicalType() != nil && field.Type().LogicalType().List != nil {
+	} else if isListLogicalType(field.Type()) {
 		isList = true
-		subfields := field.Fields()
-		if len(subfields) > 0 {
-			elementFields := subfields[0].Fields()
-			if len(elementFields) > 0 {
-				elementDef := resolveParquetField(elementFields[0], defs)
-				goType = "[]" + elementDef.GoType
-			} else {
-				goType = "[]any"
-			}
-		} else {
-			goType = "[]any"
-		}
+		goType = "[]" + resolveListElementType(field, goName, defs)
 	} else {
 		subStructName := goName + "Item"
 		var fields []FieldDef
@@ -123,6 +113,64 @@ func resolveParquetField(field parquet.Field, defs *[]StructDef) FieldDef {
 		JSONName: jsonName,
 		IsList:   isList,
 	}
+}
+
+func isListLogicalType(t parquet.Type) bool {
+	lt := t.LogicalType()
+	if lt == nil {
+		return false
+	}
+	_, ok := lt.Value.(*format.ListType)
+	return ok
+}
+
+// resolveListElementType resolves the Go type of elements inside a Parquet LIST node,
+// following the Parquet LIST backward-compatibility rules:
+// https://github.com/apache/parquet-format/blob/master/LogicalTypes.md#backward-compatibility-rules
+func resolveListElementType(listField parquet.Field, listGoName string, defs *[]StructDef) string {
+	subfields := listField.Fields()
+	if len(subfields) == 0 {
+		return "any"
+	}
+	repeated := subfields[0]
+	// Rule 1: a repeated primitive is the element itself.
+	if repeated.Leaf() {
+		return mapParquetTypeToGoType(repeated.Type().Kind())
+	}
+	elementFields := repeated.Fields()
+	switch len(elementFields) {
+	case 0:
+		return "any"
+	case 1:
+		child := elementFields[0]
+		// Rule 3: a repeated group whose only child is repeated is the element itself (e.g. nested 2-level list).
+		if child.Repeated() {
+			if isListLogicalType(repeated.Type()) {
+				return "[]" + resolveListElementType(repeated, listGoName+"Item", defs)
+			}
+			return buildSubStruct(listGoName+"Item", elementFields, defs)
+		}
+		// Rule 4: a repeated group named "array" or "<list>_tuple" is a single-field struct element.
+		repName := repeated.Name()
+		if repName == "array" || (listField.Name() != "" && repName == listField.Name()+"_tuple") {
+			return buildSubStruct(listGoName+"Item", elementFields, defs)
+		}
+		// Rule 5: standard 3-level layout (list/element, PyArrow list/item, Athena bag/array_element, etc.).
+		elementDef := resolveParquetField(child, defs)
+		return elementDef.GoType
+	default:
+		// Rule 2: a repeated group with multiple fields is a struct element.
+		return buildSubStruct(listGoName+"Item", elementFields, defs)
+	}
+}
+
+func buildSubStruct(structName string, parquetFields []parquet.Field, defs *[]StructDef) string {
+	var fields []FieldDef
+	for _, sub := range parquetFields {
+		fields = append(fields, resolveParquetField(sub, defs))
+	}
+	*defs = append(*defs, StructDef{Name: structName, Fields: fields})
+	return structName
 }
 
 func mapParquetTypeToGoType(kind parquet.Kind) string {
