@@ -1,8 +1,10 @@
 package transformer
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/gomlx/compute/dtypes"
 	"github.com/gomlx/gomlx/ml/model"
 	mltransformer "github.com/gomlx/gomlx/ml/zoo/transformer"
 	"github.com/stretchr/testify/assert"
@@ -218,4 +220,124 @@ func TestCreateGoMLXModelPropagatesCausalMask(t *testing.T) {
 		mltransformer.LocalLayer,
 		mltransformer.GlobalLayer,
 	}, tmGemma2.LayerTypes)
+}
+
+func TestQwen35ConfigAndTensorMapping(t *testing.T) {
+	rawConfig := `{
+		"architectures": ["Qwen3_5ForConditionalGeneration"],
+		"model_type": "qwen3_5",
+		"tie_word_embeddings": true,
+		"text_config": {
+			"attention_bias": false,
+			"attn_output_gate": true,
+			"dtype": "bfloat16",
+			"full_attention_interval": 4,
+			"head_dim": 256,
+			"hidden_act": "silu",
+			"hidden_size": 2560,
+			"intermediate_size": 9216,
+			"layer_types": ["linear_attention", "linear_attention", "linear_attention", "full_attention"],
+			"linear_conv_kernel_dim": 4,
+			"linear_key_head_dim": 128,
+			"linear_num_key_heads": 16,
+			"linear_num_value_heads": 32,
+			"linear_value_head_dim": 128,
+			"max_position_embeddings": 262144,
+			"model_type": "qwen3_5_text",
+			"num_attention_heads": 16,
+			"num_hidden_layers": 4,
+			"num_key_value_heads": 4,
+			"rms_norm_eps": 1e-06,
+			"tie_word_embeddings": true,
+			"vocab_size": 248320,
+			"mamba_ssm_dtype": "float32",
+			"rope_parameters": {
+				"mrope_interleaved": true,
+				"mrope_section": [11, 11, 10],
+				"rope_type": "default",
+				"rope_theta": 10000000,
+				"partial_rotary_factor": 0.25
+			}
+		}
+	}`
+
+	var cfg Config
+	require.NoError(t, json.Unmarshal([]byte(rawConfig), &cfg))
+	assert.Equal(t, "qwen3_5_text", cfg.ModelType)
+	assert.Equal(t, 2560, cfg.HiddenSize)
+	assert.Equal(t, 4, cfg.NumHiddenLayers)
+	assert.True(t, cfg.AttnOutputGate)
+	assert.Equal(t, 4, cfg.LinearConvKernelDim)
+	assert.Equal(t, 16, cfg.LinearNumKeyHeads)
+	assert.Equal(t, 32, cfg.LinearNumValueHeads)
+	require.NotNil(t, cfg.TieWordEmbeddings)
+	assert.True(t, *cfg.TieWordEmbeddings)
+	require.Contains(t, cfg.RoPEParameters, "default")
+	assert.Equal(t, 10000000.0, cfg.RoPEParameters["default"].RopeTheta)
+	assert.Equal(t, 0.25, cfg.RoPEParameters["default"].PartialRotaryFactor)
+
+	m := &Model{Config: cfg}
+	m.useCausalMask = m.detectCausalMask()
+	assert.True(t, m.useCausalMask)
+
+	scope := model.NewStore().RootScope()
+	tm := m.CreateGoMLXModel(scope)
+	assert.Equal(t, mltransformer.ArchitectureQwen35, tm.Architecture)
+	assert.False(t, tm.ScaleTokenEmbeddings)
+	assert.True(t, tm.AttnOutputGate)
+	assert.Equal(t, 1.0, tm.RMSNormOffset)
+	assert.Equal(t, dtypes.BFloat16, tm.DType)
+	assert.Equal(t, dtypes.Float32, tm.LinearStateDType)
+	assert.Equal(t, []mltransformer.LayerType{
+		mltransformer.LinearLayer,
+		mltransformer.LinearLayer,
+		mltransformer.LinearLayer,
+		mltransformer.GlobalLayer,
+	}, tm.LayerTypes)
+
+	// Verify Gemma 4 nested map rope_parameters still parses identically.
+	gemma4Raw := `{
+		"model_type": "gemma4_text",
+		"rope_parameters": {
+			"full_attention": {"rope_theta": 1000000.0, "rope_type": "proportional", "partial_rotary_factor": 0.25},
+			"sliding_attention": {"rope_theta": 10000.0, "rope_type": "default"}
+		}
+	}`
+	var g4Cfg Config
+	require.NoError(t, json.Unmarshal([]byte(gemma4Raw), &g4Cfg))
+	require.Contains(t, g4Cfg.RoPEParameters, "full_attention")
+	require.Contains(t, g4Cfg.RoPEParameters, "sliding_attention")
+	assert.Equal(t, 1000000.0, g4Cfg.RoPEParameters["full_attention"].RopeTheta)
+	assert.Equal(t, "proportional", g4Cfg.RoPEParameters["full_attention"].RopeType)
+	assert.Equal(t, 10000.0, g4Cfg.RoPEParameters["sliding_attention"].RopeTheta)
+
+	// Verify tensor name mappings for Qwen3.5 linear_attn and ignored visual/mtp weights.
+	mapped := map[string]struct {
+		scope []string
+		name  string
+	}{
+		"model.language_model.layers.0.linear_attn.in_proj_qkv.weight": {[]string{"layer_0", "linear_attn", "in_proj_qkv", "dense"}, "weights"},
+		"model.language_model.layers.0.linear_attn.in_proj_z.weight":   {[]string{"layer_0", "linear_attn", "in_proj_z", "dense"}, "weights"},
+		"model.language_model.layers.0.linear_attn.in_proj_b.weight":   {[]string{"layer_0", "linear_attn", "in_proj_b", "dense"}, "weights"},
+		"model.language_model.layers.0.linear_attn.in_proj_a.weight":   {[]string{"layer_0", "linear_attn", "in_proj_a", "dense"}, "weights"},
+		"model.language_model.layers.0.linear_attn.out_proj.weight":    {[]string{"layer_0", "linear_attn", "out_proj", "dense"}, "weights"},
+		"model.language_model.layers.0.linear_attn.conv1d.weight":      {[]string{"layer_0", "linear_attn"}, "conv1d_weight"},
+		"model.language_model.layers.0.linear_attn.A_log":              {[]string{"layer_0", "linear_attn"}, "A_log"},
+		"model.language_model.layers.0.linear_attn.dt_bias":            {[]string{"layer_0", "linear_attn"}, "dt_bias"},
+		"model.language_model.layers.0.linear_attn.norm.weight":        {[]string{"layer_0", "linear_attn", "norm"}, "weight"},
+		"lm_head.weight":                                               {[]string{"output", "dense"}, "weights"},
+	}
+	for tensorName, want := range mapped {
+		gotScope, gotName, ok := mapTensorName(tensorName)
+		require.True(t, ok, "expected %s to map", tensorName)
+		assert.Equal(t, want.scope, gotScope, tensorName)
+		assert.Equal(t, want.name, gotName, tensorName)
+	}
+	for _, skipped := range []string{
+		"model.visual.blocks.0.attn.qkv.weight",
+		"mtp.layers.0.self_attn.q_proj.weight",
+	} {
+		_, _, ok := mapTensorName(skipped)
+		assert.False(t, ok, "expected %s to be skipped", skipped)
+	}
 }

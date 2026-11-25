@@ -252,8 +252,8 @@ func (m *Model) detectCausalMask() bool {
 	// 3. Known decoder types:
 	switch modelType {
 	case "gemma", "gemma2", "gemma3", "gemma3_text", "gemma4", "gemma4_text",
-		"llama", "mistral", "qwen", "qwen2", "qwen3", "gpt2", "gpt_neox", "opt",
-		"phi", "phi3", "starcoder", "starcoder2", "falcon", "deepseek":
+		"llama", "mistral", "qwen", "qwen2", "qwen3", "qwen3_5", "qwen3_5_text",
+		"gpt2", "gpt_neox", "opt", "phi", "phi3", "starcoder", "starcoder2", "falcon", "deepseek":
 		return true
 	}
 
@@ -380,6 +380,8 @@ func (m *Model) LoadStoreFiltered(backend compute.Backend, store *model.Store, f
 	tieEmbeddings := false
 	if m.Config.ModelType == "gemma" || m.Config.ModelType == "gemma2" || m.Config.ModelType == "gemma3" || m.Config.ModelType == "gemma4" || m.Config.ModelType == "llama" {
 		tieEmbeddings = true
+	} else if m.Config.TieWordEmbeddings != nil {
+		tieEmbeddings = *m.Config.TieWordEmbeddings
 	} else if tieVal, ok := m.Config.Extra["tie_word_embeddings"]; ok {
 		if b, ok := tieVal.(bool); ok {
 			tieEmbeddings = b
@@ -581,6 +583,9 @@ func mapTensorName(safetensorsName string) (scopePath []string, varName string, 
 	if safetensorsName == "norm.weight" {
 		return []string{"final_norm", "rms_norm"}, "scale", true
 	}
+	if safetensorsName == "lm_head.weight" {
+		return []string{"output", "dense"}, "weights", true
+	}
 
 	var layerNum int
 	var component, sub1, sub2 string
@@ -625,6 +630,31 @@ func mapTensorName(safetensorsName string) (scopePath []string, varName string, 
 			return []string{layerScope, "self_attn", "MultiHeadAttention", "query", "rms_norm"}, "scale", true
 		case "k_norm.weight":
 			return []string{layerScope, "self_attn", "MultiHeadAttention", "key", "rms_norm"}, "scale", true
+		}
+	}
+
+	// Parse linear attention blocks (e.g., Qwen3.5 Gated DeltaNet)
+	if n, err := fmt.Sscanf(safetensorsName, "layers.%d.linear_attn.%s", &layerNum, &sub1); n == 2 && err == nil {
+		layerScope := fmt.Sprintf("layer_%d", layerNum)
+		switch sub1 {
+		case "in_proj_qkv.weight":
+			return []string{layerScope, "linear_attn", "in_proj_qkv", "dense"}, "weights", true
+		case "in_proj_z.weight":
+			return []string{layerScope, "linear_attn", "in_proj_z", "dense"}, "weights", true
+		case "in_proj_b.weight":
+			return []string{layerScope, "linear_attn", "in_proj_b", "dense"}, "weights", true
+		case "in_proj_a.weight":
+			return []string{layerScope, "linear_attn", "in_proj_a", "dense"}, "weights", true
+		case "out_proj.weight":
+			return []string{layerScope, "linear_attn", "out_proj", "dense"}, "weights", true
+		case "conv1d.weight":
+			return []string{layerScope, "linear_attn"}, "conv1d_weight", true
+		case "A_log":
+			return []string{layerScope, "linear_attn"}, "A_log", true
+		case "dt_bias":
+			return []string{layerScope, "linear_attn"}, "dt_bias", true
+		case "norm.weight":
+			return []string{layerScope, "linear_attn", "norm"}, "weight", true
 		}
 	}
 

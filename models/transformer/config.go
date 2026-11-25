@@ -46,9 +46,21 @@ type Config struct {
 	// SlidingWindow is the size of the sliding window for sliding attention layers.
 	SlidingWindow int `json:"sliding_window"`
 
-	// LayerTypes: known values are "full_attention", "sliding_attention"
-	LayerTypes []string       `json:"layer_types"`
-	Extra      map[string]any `json:"-"`
+	// LayerTypes: known values are "full_attention", "sliding_attention", "linear_attention"
+	LayerTypes []string `json:"layer_types"`
+
+	// Qwen3.5 / Hybrid Linear Attention (Gated DeltaNet) configuration.
+	AttnOutputGate        bool   `json:"attn_output_gate"`
+	FullAttentionInterval int    `json:"full_attention_interval"`
+	LinearConvKernelDim   int    `json:"linear_conv_kernel_dim"`
+	LinearKeyHeadDim      int    `json:"linear_key_head_dim"`
+	LinearValueHeadDim    int    `json:"linear_value_head_dim"`
+	LinearNumKeyHeads     int    `json:"linear_num_key_heads"`
+	LinearNumValueHeads   int    `json:"linear_num_value_heads"`
+	MambaSSMDType         string `json:"mamba_ssm_dtype"`
+	TieWordEmbeddings     *bool  `json:"tie_word_embeddings"`
+
+	Extra map[string]any `json:"-"`
 }
 
 type RoPEScaling struct {
@@ -64,9 +76,38 @@ type RoPEParams struct {
 	PartialRotaryFactor float64 `json:"partial_rotary_factor"`
 }
 
-func (c *Config) UnmarshalJSON(data []byte) error {
+func (c *Config) unmarshalSection(data []byte) error {
+	// Parse rope_parameters separately because HuggingFace configs use either:
+	// - a per-layer-type map {"full_attention": {...}, "sliding_attention": {...}} (e.g. Gemma 4), or
+	// - a flat object {"rope_theta": ..., "partial_rotary_factor": ..., "rope_type": ...} (e.g. Qwen3.5).
 	type wrapper Config
-	if err := json.Unmarshal(data, (*wrapper)(c)); err != nil {
+	type rawConfig struct {
+		*wrapper
+		RawRoPEParameters json.RawMessage `json:"rope_parameters"`
+	}
+	rc := rawConfig{wrapper: (*wrapper)(c)}
+	if err := json.Unmarshal(data, &rc); err != nil {
+		return err
+	}
+	if len(rc.RawRoPEParameters) > 0 && string(rc.RawRoPEParameters) != "null" {
+		var perLayer map[string]RoPEParams
+		if err := json.Unmarshal(rc.RawRoPEParameters, &perLayer); err == nil && len(perLayer) > 0 {
+			c.RoPEParameters = perLayer
+		} else {
+			var flat RoPEParams
+			if err := json.Unmarshal(rc.RawRoPEParameters, &flat); err == nil {
+				c.RoPEParameters = map[string]RoPEParams{"default": flat}
+				if c.RoPETheta == 0 && flat.RopeTheta > 0 {
+					c.RoPETheta = flat.RopeTheta
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (c *Config) UnmarshalJSON(data []byte) error {
+	if err := c.unmarshalSection(data); err != nil {
 		return err
 	}
 	if err := json.Unmarshal(data, &c.Extra); err != nil {
@@ -75,7 +116,7 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	if textConfigRaw, ok := c.Extra["text_config"]; ok {
 		textConfigBytes, err := json.Marshal(textConfigRaw)
 		if err == nil {
-			_ = json.Unmarshal(textConfigBytes, (*wrapper)(c))
+			_ = c.unmarshalSection(textConfigBytes)
 		}
 	}
 	return nil
