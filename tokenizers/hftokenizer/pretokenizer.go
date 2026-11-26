@@ -62,6 +62,9 @@ func (t *Tokenizer) applyPreTokenizerWithOffsets(text string, normOffsets []int,
 			copy(newOffsets[1:], normOffsets)
 			normOffsets = newOffsets
 		}
+		if pt.UseRegex != nil && !*pt.UseRegex {
+			return byteLevelEncodeNoSplit(text, normOffsets)
+		}
 		return byteLevelPreTokenizeWithOffsets(text, normOffsets)
 	case "Metaspace":
 		// default to true if missing, not false
@@ -172,6 +175,34 @@ func punctuationPreTokenizeWithOffsets(text string, normOffsets []int) []wordWit
 	}
 
 	return words
+}
+
+// byteLevelEncodeNoSplit maps bytes to GPT-2 byte-level unicode characters without splitting on spaces.
+// Used when ByteLevel has use_regex: false (e.g., after a Split pre-tokenizer in Qwen/Llama-3/DeepSeek).
+func byteLevelEncodeNoSplit(text string, normOffsets []int) []wordWithOffset {
+	if len(text) == 0 {
+		return nil
+	}
+	var current strings.Builder
+	currentOffsets := make([]int, 0, len(text))
+	for i := 0; i < len(text); i++ {
+		current.WriteRune(byteToUnicode[text[i]])
+		if i < len(normOffsets) {
+			currentOffsets = append(currentOffsets, normOffsets[i])
+		}
+	}
+	origStart := 0
+	origEnd := len(text)
+	if len(currentOffsets) > 0 {
+		origStart = currentOffsets[0]
+		origEnd = currentOffsets[len(currentOffsets)-1] + 1
+	}
+	return []wordWithOffset{{
+		text:    current.String(),
+		start:   origStart,
+		end:     origEnd,
+		offsets: currentOffsets,
+	}}
 }
 
 // byteLevelPreTokenizeWithOffsets handles byte-level BPE pre-tokenization with offsets.
@@ -288,30 +319,86 @@ func metaspacePreTokenizeWithOffsets(text string, normOffsets []int, addPrefixSp
 	return words
 }
 
+// findSplitMatches finds all regex match spans in text for a Split pre-tokenizer pattern.
+// Go's RE2 engine does not support negative lookahead `(?!...)`, which appears in GPT-2,
+// Qwen2/3/3.5, Llama-3, and Tiktoken pre-tokenizer regexes as `\s+(?!\S)`.
+// When standard regexp.Compile fails and the pattern contains `\s+(?!\S)`, this function
+// rewrites `\s+(?!\S)` into a named capturing group and emulates the negative lookahead
+// by trimming the trailing whitespace rune whenever the match is followed by a non-space.
+func findSplitMatches(text string, pt *PreTokenizer) ([][]int, bool) {
+	if pt.Pattern == nil {
+		return nil, false
+	}
+	if pt.Pattern.Regex == "" {
+		var re *regexp.Regexp
+		var err error
+		if pt.Pattern.String != "" {
+			re, err = regexp.Compile(regexp.QuoteMeta(pt.Pattern.String))
+		} else {
+			re, err = regexp.Compile(`(?s:.)`)
+		}
+		if err != nil {
+			return nil, false
+		}
+		return re.FindAllStringIndex(text, -1), true
+	}
+
+	if re, err := regexp.Compile(pt.Pattern.Regex); err == nil {
+		return re.FindAllStringIndex(text, -1), true
+	}
+
+	const wsLookahead = `\s+(?!\S)`
+	if !strings.Contains(pt.Pattern.Regex, wsLookahead) {
+		return nil, false
+	}
+
+	rewritten := strings.Replace(pt.Pattern.Regex, wsLookahead, `(?P<ws_not_S>\s+)`, 1)
+	re, err := regexp.Compile(rewritten)
+	if err != nil {
+		return nil, false
+	}
+	wsGroupIdx := re.SubexpIndex("ws_not_S")
+
+	var matches [][]int
+	for pos := 0; pos < len(text); {
+		sub := re.FindStringSubmatchIndex(text[pos:])
+		if sub == nil {
+			break
+		}
+		mStart := pos + sub[0]
+		mEnd := pos + sub[1]
+		if wsGroupIdx > 0 && sub[wsGroupIdx*2] >= 0 && mEnd < len(text) {
+			// Because `\s+` is greedy and mEnd < len(text), text[mEnd] is `\S`.
+			// `\s+(?!\S)` must leave the final whitespace rune for the next match
+			// (e.g., "    if" -> "   " + " if") when at least 2 whitespace runes matched.
+			_, lastSize := utf8.DecodeLastRuneInString(text[mStart:mEnd])
+			if mEnd-lastSize > mStart {
+				mEnd -= lastSize
+			}
+		}
+		matches = append(matches, []int{mStart, mEnd})
+		if mEnd == pos {
+			// Guard against zero-width match infinite loop.
+			_, sz := utf8.DecodeRuneInString(text[pos:])
+			pos += max(sz, 1)
+		} else {
+			pos = mEnd
+		}
+	}
+	return matches, true
+}
+
 // splitPreTokenizeWithOffsets splits text based on pattern and behavior.
 func splitPreTokenizeWithOffsets(text string, normOffsets []int, pt *PreTokenizer) []wordWithOffset {
 	if len(text) == 0 {
 		return nil
 	}
 
-	var re *regexp.Regexp
-	var err error
-	if pt.Pattern != nil {
-		if pt.Pattern.Regex != "" {
-			re, err = regexp.Compile(pt.Pattern.Regex)
-		} else if pt.Pattern.String != "" {
-			re, err = regexp.Compile(regexp.QuoteMeta(pt.Pattern.String))
-		} else {
-			re, err = regexp.Compile(`(?s:.)`)
-		}
-	}
-
-	if re == nil || err != nil {
+	matches, ok := findSplitMatches(text, pt)
+	if !ok {
 		// Fallback: return whole text as a single word
 		return []wordWithOffset{makeWord(text, normOffsets, 0, len(text))}
 	}
-
-	matches := re.FindAllStringIndex(text, -1)
 
 	type segment struct {
 		start       int

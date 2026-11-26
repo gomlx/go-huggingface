@@ -208,55 +208,38 @@ func NewFromStruct(config *api.Config, tj *TokenizerJSON) (*Tokenizer, error) {
 	return t, nil
 }
 
-// resolveSpecialTokens maps special tokens from config to their IDs.
+// lookupTokenID searches added tokens first, then the base model vocabulary.
+func (t *Tokenizer) lookupTokenID(token string) (int, bool) {
+	if token == "" {
+		return 0, false
+	}
+	if id, ok := t.addedTokens[token]; ok {
+		return id, true
+	}
+	if id, ok := t.tokenizer.Model.Vocab[token]; ok {
+		return id, true
+	}
+	return 0, false
+}
+
+// resolveSpecialTokens maps special tokens from config and tokenizer.json to their IDs.
 func (t *Tokenizer) resolveSpecialTokens() {
-	// First check the model's unk_token
+	// 1. Model's own unk_token / unk_id.
 	if t.tokenizer.Model.UnkToken != "" {
-		if id, ok := t.tokenizer.Model.Vocab[t.tokenizer.Model.UnkToken]; ok {
+		if id, ok := t.lookupTokenID(t.tokenizer.Model.UnkToken); ok {
 			t.unkID = id
 		}
 	}
-
 	if id := t.tokenizer.Model.UnkID; id != nil {
 		t.unkID = *id
 	}
 
-	// Then check added tokens for special tokens
-	for _, at := range t.tokenizer.AddedTokens {
-		if !at.Special {
-			continue
-		}
-		content := at.Content
-		switch {
-		case (content == "[UNK]" || content == "<unk>") && t.tokenizer.Model.UnkID == nil:
-			t.unkID = at.ID
-		case content == "[PAD]" || content == "<pad>":
-			t.padID = at.ID
-		case content == "[CLS]" || content == "<s>":
-			t.clsID = at.ID
-		case content == "[SEP]" || content == "</s>":
-			t.sepID = at.ID
-		case content == "[MASK]" || content == "<mask>":
-			t.maskID = at.ID
-		}
-		// Also check for BOS/EOS
-		if t.config != nil {
-			if content == t.config.BosToken.String() {
-				t.bosID = at.ID
-			}
-			if content == t.config.EosToken.String() {
-				t.eosID = at.ID
-			}
-		}
-	}
-
-	// Fall back to config special tokens if available.
+	// 2. Explicit special tokens from tokenizer_config.json (checked in both added_tokens and model.vocab).
 	if t.config != nil {
-		configFallbacks := []struct {
+		configTokens := []struct {
 			id    *int
 			token api.TokensDecoder
 		}{
-			{&t.unkID, t.config.UnkToken},
 			{&t.padID, t.config.PadToken},
 			{&t.clsID, t.config.ClsToken},
 			{&t.sepID, t.config.SepToken},
@@ -264,11 +247,52 @@ func (t *Tokenizer) resolveSpecialTokens() {
 			{&t.bosID, t.config.BosToken},
 			{&t.eosID, t.config.EosToken},
 		}
-		for _, fb := range configFallbacks {
-			if *fb.id == -1 && fb.token.String() != "" {
-				if id, ok := t.tokenizer.Model.Vocab[fb.token.String()]; ok {
-					*fb.id = id
+		if t.tokenizer.Model.UnkID == nil {
+			configTokens = append(configTokens, struct {
+				id    *int
+				token api.TokensDecoder
+			}{&t.unkID, t.config.UnkToken})
+		}
+		for _, ct := range configTokens {
+			if *ct.id == -1 && ct.token.String() != "" {
+				if id, ok := t.lookupTokenID(ct.token.String()); ok {
+					*ct.id = id
 				}
+			}
+		}
+	}
+
+	// 3. Fall back to added_tokens marked special: true for standard token names.
+	for _, at := range t.tokenizer.AddedTokens {
+		if !at.Special {
+			continue
+		}
+		content := at.Content
+		switch {
+		case (content == "[UNK]" || content == "<unk>") && t.unkID == -1 && t.tokenizer.Model.UnkID == nil:
+			t.unkID = at.ID
+		case (content == "[PAD]" || content == "<pad>") && t.padID == -1:
+			t.padID = at.ID
+		case (content == "[CLS]" || content == "<s>") && t.clsID == -1:
+			t.clsID = at.ID
+		case (content == "[SEP]" || content == "</s>") && t.sepID == -1:
+			t.sepID = at.ID
+		case (content == "[MASK]" || content == "<mask>") && t.maskID == -1:
+			t.maskID = at.ID
+		case content == "<bos>" && t.bosID == -1:
+			t.bosID = at.ID
+		case content == "<eos>" && t.eosID == -1:
+			t.eosID = at.ID
+		}
+	}
+
+	// 4. Some tokenizers (e.g., Gemma 3) define "<mask>" in added_tokens with special: false
+	// while Python's AutoTokenizer/GemmaTokenizer still exposes mask_token="<mask>".
+	if t.maskID == -1 {
+		for _, at := range t.tokenizer.AddedTokens {
+			if at.Content == "<mask>" || at.Content == "[MASK]" {
+				t.maskID = at.ID
+				break
 			}
 		}
 	}

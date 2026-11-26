@@ -9,10 +9,8 @@ Demonstrates loading and executing a GGUF-quantized BERT sentence-embedding mode
 
 ## Testing
 
-`similarity_embeddings.txt` contains materialized `float32` reference embeddings produced by `llama.cpp` (via [`hybridgroup/yzma`](https://github.com/hybridgroup/yzma), CPU `NGpuLayers=0`, `PoolingTypeMean`, L2-normalized) on `all-MiniLM-L6-v2-Q4_K_M.gguf`.
-
-Run the parity test with:
+Full parity tests for all 13 GGUF quantization variants of `second-state/All-MiniLM-L6-v2-Embedding-GGUF` against `llama.cpp` live in [`../../modeltests/`](../../modeltests/) (see [`../../docs/ModelTests.md`](../../docs/ModelTests.md)):
 
 ```sh
-GOEXPERIMENT=simd GOMLX_BACKEND="go" go test -v ./examples/minilm-l6-v2-gguf/...
+GOEXPERIMENT=simd go test -v -p=1 ./modeltests -modeltests -run TestModels/minilm-l6-v2-gguf/Q4_K_M
 ```

@@ -1,0 +1,43 @@
+{
+  "name": "timestral",
+  "family": "timeseries",
+  "format": "safetensors",
+  "repo_id": "mistralai/Timestral-28M",
+  "size_tier": "small",
+  "tags": ["safetensors", "timeseries"],
+  "provenance": {
+    "generator": "PyTorch reference (migrated from examples/timestral)",
+    "dtype": "float32",
+    "generated_at": "2026-11-26"
+  },
+  "variants": [
+    {
+      "name": "28m",
+      "repo_id": "mistralai/Timestral-28M",
+      "timeseries": {
+        "batch": 2,
+        "context_steps": 12096,
+        "horizon_steps": 864,
+        "context_file": "context.f32",
+        "results_file": "results_28m.f32",
+        "symmetric_averaging": false,
+        "clip_non_negative": false,
+        "max_abs_diff": 0.0001
+      }
+    },
+    {
+      "name": "123m",
+      "repo_id": "mistralai/Timestral-123M",
+      "timeseries": {
+        "batch": 2,
+        "context_steps": 12096,
+        "horizon_steps": 864,
+        "context_file": "context.f32",
+        "results_file": "results_123m.f32",
+        "symmetric_averaging": false,
+        "clip_non_negative": false,
+        "max_abs_diff": 0.0001
+      }
+    }
+  ]
+}

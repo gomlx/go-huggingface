@@ -1,0 +1,1688 @@
+{
+  "name": "qwen3.5-4b",
+  "family": "transformer",
+  "format": "safetensors",
+  "repo_id": "Qwen/Qwen3.5-4B",
+  "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+  "size_tier": "medium",
+  "tags": [
+    "safetensors",
+    "qwen35",
+    "generate"
+  ],
+  "gated": false,
+  "model_options": {
+    "causal_mask": true
+  },
+  "provenance": {
+    "generator": "modeltests/internal/generators/python/gen_generate.py",
+    "command": "modeltests/internal/generators/python/gen_generate.py --model Qwen/Qwen3.5-4B --chat-prefix <|im_start|>user\n --chat-suffix <|im_end|>\n<|im_start|>assistant\n --stop-token <|im_end|> --max-new-tokens 32 --dtype bfloat16 --device cuda --tier medium --tags safetensors,qwen35,generate --out modeltests/testdata/qwen3.5-4b",
+    "runtime_version": "torch==2.13.0+cu130, transformers==5.13.1",
+    "dtype": "bfloat16",
+    "device": "cuda",
+    "generated_at": "2026-11-26"
+  },
+  "tokenizer": {
+    "special_tokens": {
+      "eos": 248046,
+      "pad": 248044
+    },
+    "cases": [
+      {
+        "text": "<|im_start|>user\nWhy can camels survive for long without water?<|im_end|>\n<|im_start|>assistant\n",
+        "token_ids": [
+          248045,
+          846,
+          198,
+          9930,
+          628,
+          6384,
+          1943,
+          17171,
+          364,
+          1248,
+          1973,
+          2919,
+          30,
+          248046,
+          198,
+          248045,
+          74455,
+          198
+        ],
+        "decoded": "<|im_start|>user\nWhy can camels survive for long without water?<|im_end|>\n<|im_start|>assistant\n",
+        "decoded_skip_special": "user\nWhy can camels survive for long without water?\nassistant\n"
+      },
+      {
+        "text": "<|im_start|>user\nWhich Dutch artist painted \"Girl with a Pearl Earring\"?<|im_end|>\n<|im_start|>assistant\n",
+        "token_ids": [
+          248045,
+          846,
+          198,
+          22365,
+          22510,
+          9752,
+          23235,
+          328,
+          29628,
+          440,
+          264,
+          35045,
+          458,
+          19254,
+          42418,
+          248046,
+          198,
+          248045,
+          74455,
+          198
+        ],
+        "decoded": "<|im_start|>user\nWhich Dutch artist painted \"Girl with a Pearl Earring\"?<|im_end|>\n<|im_start|>assistant\n",
+        "decoded_skip_special": "user\nWhich Dutch artist painted \"Girl with a Pearl Earring\"?\nassistant\n"
+      },
+      {
+        "text": "<|im_start|>user\nAre whiskers on cats used for balance?<|im_end|>\n<|im_start|>assistant\n",
+        "token_ids": [
+          248045,
+          846,
+          198,
+          11195,
+          39317,
+          382,
+          383,
+          18833,
+          1429,
+          364,
+          7915,
+          30,
+          248046,
+          198,
+          248045,
+          74455,
+          198
+        ],
+        "decoded": "<|im_start|>user\nAre whiskers on cats used for balance?<|im_end|>\n<|im_start|>assistant\n",
+        "decoded_skip_special": "user\nAre whiskers on cats used for balance?\nassistant\n"
+      },
+      {
+        "text": "<|im_start|>user\nWhy is the sky blue?<|im_end|>\n<|im_start|>assistant\n",
+        "token_ids": [
+          248045,
+          846,
+          198,
+          9930,
+          369,
+          279,
+          12515,
+          6105,
+          30,
+          248046,
+          198,
+          248045,
+          74455,
+          198
+        ],
+        "decoded": "<|im_start|>user\nWhy is the sky blue?<|im_end|>\n<|im_start|>assistant\n",
+        "decoded_skip_special": "user\nWhy is the sky blue?\nassistant\n"
+      },
+      {
+        "text": "<|im_start|>user\nWarum ist der Himmel blau?<|im_end|>\n<|im_start|>assistant\n",
+        "token_ids": [
+          248045,
+          846,
+          198,
+          27745,
+          367,
+          5810,
+          2607,
+          199908,
+          242880,
+          30,
+          248046,
+          198,
+          248045,
+          74455,
+          198
+        ],
+        "decoded": "<|im_start|>user\nWarum ist der Himmel blau?<|im_end|>\n<|im_start|>assistant\n",
+        "decoded_skip_special": "user\nWarum ist der Himmel blau?\nassistant\n"
+      },
+      {
+        "text": "<|im_start|>user\nPourquoi le ciel est-il bleu ?<|im_end|>\n<|im_start|>assistant\n",
+        "token_ids": [
+          248045,
+          846,
+          198,
+          40781,
+          59813,
+          501,
+          173941,
+          1725,
+          54384,
+          187451,
+          907,
+          248046,
+          198,
+          248045,
+          74455,
+          198
+        ],
+        "decoded": "<|im_start|>user\nPourquoi le ciel est-il bleu ?<|im_end|>\n<|im_start|>assistant\n",
+        "decoded_skip_special": "user\nPourquoi le ciel est-il bleu ?\nassistant\n"
+      },
+      {
+        "text": "<|im_start|>user\n为什么天空是蓝色的？<|im_end|>\n<|im_start|>assistant\n",
+        "token_ids": [
+          248045,
+          846,
+          198,
+          98832,
+          101850,
+          95761,
+          116981,
+          10992,
+          248046,
+          198,
+          248045,
+          74455,
+          198
+        ],
+        "decoded": "<|im_start|>user\n为什么天空是蓝色的？<|im_end|>\n<|im_start|>assistant\n",
+        "decoded_skip_special": "user\n为什么天空是蓝色的？\nassistant\n"
+      },
+      {
+        "text": "<|im_start|>user\nなぜ空は青いのですか？<|im_end|>\n<|im_start|>assistant\n",
+        "token_ids": [
+          248045,
+          846,
+          198,
+          180264,
+          96292,
+          14876,
+          96556,
+          16098,
+          170854,
+          30031,
+          10992,
+          248046,
+          198,
+          248045,
+          74455,
+          198
+        ],
+        "decoded": "<|im_start|>user\nなぜ空は青いのですか？<|im_end|>\n<|im_start|>assistant\n",
+        "decoded_skip_special": "user\nなぜ空は青いのですか？\nassistant\n"
+      },
+      {
+        "text": "def fibonacci(n):\n    if n <= 1:\n        return n\n    return",
+        "token_ids": [
+          727,
+          73111,
+          1393,
+          1590,
+          198,
+          262,
+          413,
+          307,
+          2564,
+          220,
+          16,
+          25,
+          198,
+          285,
+          460,
+          307,
+          198,
+          262,
+          460
+        ],
+        "decoded": "def fibonacci(n):\n    if n <= 1:\n        return n\n    return",
+        "decoded_skip_special": "def fibonacci(n):\n    if n <= 1:\n        return n\n    return"
+      },
+      {
+        "text": "Don't panic! Price: $19.99 (20% off) — see https://example.com/a_b?x=1.",
+        "token_ids": [
+          7751,
+          914,
+          21297,
+          0,
+          8223,
+          25,
+          393,
+          16,
+          24,
+          13,
+          24,
+          24,
+          318,
+          17,
+          15,
+          4,
+          974,
+          8,
+          1892,
+          1436,
+          3577,
+          1074,
+          8422,
+          877,
+          13780,
+          853,
+          30,
+          87,
+          28,
+          16,
+          13
+        ],
+        "decoded": "Don't panic! Price: $19.99 (20% off) — see https://example.com/a_b?x=1.",
+        "decoded_skip_special": "Don't panic! Price: $19.99 (20% off) — see https://example.com/a_b?x=1."
+      },
+      {
+        "text": "Café naïve résumé — Munich, Zürich, 東京, 京都.",
+        "token_ids": [
+          34,
+          2492,
+          933,
+          91603,
+          571,
+          238976,
+          1892,
+          44663,
+          11,
+          194323,
+          11,
+          220,
+          115197,
+          11,
+          220,
+          118119,
+          13
+        ],
+        "decoded": "Café naïve résumé — Munich, Zürich, 東京, 京都.",
+        "decoded_skip_special": "Café naïve résumé — Munich, Zürich, 東京, 京都."
+      },
+      {
+        "text": "  Leading   and\tmultiple\nspaces  1234567890  a+b=c  ",
+        "token_ids": [
+          220,
+          56095,
+          256,
+          321,
+          2041,
+          11880,
+          198,
+          42815,
+          220,
+          220,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          15,
+          220,
+          264,
+          33932,
+          18941,
+          256
+        ],
+        "decoded": "  Leading   and\tmultiple\nspaces  1234567890  a+b=c  ",
+        "decoded_skip_special": "  Leading   and\tmultiple\nspaces  1234567890  a+b=c  "
+      },
+      {
+        "text": "Hello",
+        "token_ids": [
+          9419
+        ],
+        "decoded": "Hello",
+        "decoded_skip_special": "Hello"
+      }
+    ]
+  },
+  "variants": [
+    {
+      "name": "default",
+      "generate": {
+        "chat_template_prefix": "<|im_start|>user\n",
+        "chat_template_suffix": "<|im_end|>\n<|im_start|>assistant\n",
+        "stop_tokens": [
+          "<|im_end|>"
+        ],
+        "max_new_tokens": 32,
+        "cases": [
+          {
+            "name": "dolly_camels",
+            "prompt": "Why can camels survive for long without water?",
+            "formatted_prompt": "<|im_start|>user\nWhy can camels survive for long without water?<|im_end|>\n<|im_start|>assistant\n",
+            "prompt_token_ids": [
+              248045,
+              846,
+              198,
+              9930,
+              628,
+              6384,
+              1943,
+              17171,
+              364,
+              1248,
+              1973,
+              2919,
+              30,
+              248046,
+              198,
+              248045,
+              74455,
+              198
+            ],
+            "prefill_top_k": [
+              {
+                "token_id": 248068,
+                "text": "<think>",
+                "logit": 31.5
+              },
+              {
+                "token_id": 248045,
+                "text": "<|im_start|>",
+                "logit": 17.25
+              },
+              {
+                "token_id": 248046,
+                "text": "<|im_end|>",
+                "logit": 16.125
+              },
+              {
+                "token_id": 248058,
+                "text": "<tool_call>",
+                "logit": 14.4375
+              },
+              {
+                "token_id": 248069,
+                "text": "</think>",
+                "logit": 14.1875
+              },
+              {
+                "token_id": 16,
+                "text": "1",
+                "logit": 12.9375
+              },
+              {
+                "token_id": 760,
+                "text": "The",
+                "logit": 12.5625
+              },
+              {
+                "token_id": 2,
+                "text": "#",
+                "logit": 12.5
+              },
+              {
+                "token_id": 24601,
+                "text": "Cam",
+                "logit": 12.5
+              },
+              {
+                "token_id": 248044,
+                "text": "<|endoftext|>",
+                "logit": 12.375
+              },
+              {
+                "token_id": 1073,
+                "text": "Con",
+                "logit": 12.1875
+              },
+              {
+                "token_id": 14777,
+                "text": "Cons",
+                "logit": 11.9375
+              },
+              {
+                "token_id": 6651,
+                "text": "They",
+                "logit": 11.875
+              },
+              {
+                "token_id": 32,
+                "text": "A",
+                "logit": 11.8125
+              },
+              {
+                "token_id": 13962,
+                "text": "###",
+                "logit": 11.625
+              },
+              {
+                "token_id": 248067,
+                "text": "</tool_response>",
+                "logit": 11.5
+              }
+            ],
+            "greedy_token_ids": [
+              248068,
+              271,
+              248069,
+              271,
+              24601,
+              1943,
+              513,
+              3428,
+              34811,
+              364,
+              1602,
+              2858,
+              310,
+              17171,
+              1973,
+              2919,
+              1521,
+              781,
+              628,
+              708,
+              364,
+              5381,
+              1973,
+              15687,
+              11,
+              694,
+              279,
+              8464,
+              369,
+              777,
+              78971,
+              13
+            ],
+            "greedy_text": "<think>\n\n</think>\n\nCamels are often mistaken for being able to survive without water because they can go for weeks without drinking, but the reality is more nuanced.",
+            "tolerances": {
+              "logit_max_abs_diff": 0.75,
+              "logit_min_cosine_sim": 0.995,
+              "top1_margin_tolerance": 0.25,
+              "min_exact_prefix_tokens": 16,
+              "kvcache_parity_tokens": 8
+            }
+          },
+          {
+            "name": "dolly_vermeer",
+            "prompt": "Which Dutch artist painted \"Girl with a Pearl Earring\"?",
+            "formatted_prompt": "<|im_start|>user\nWhich Dutch artist painted \"Girl with a Pearl Earring\"?<|im_end|>\n<|im_start|>assistant\n",
+            "prompt_token_ids": [
+              248045,
+              846,
+              198,
+              22365,
+              22510,
+              9752,
+              23235,
+              328,
+              29628,
+              440,
+              264,
+              35045,
+              458,
+              19254,
+              42418,
+              248046,
+              198,
+              248045,
+              74455,
+              198
+            ],
+            "prefill_top_k": [
+              {
+                "token_id": 248068,
+                "text": "<think>",
+                "logit": 30.75
+              },
+              {
+                "token_id": 248069,
+                "text": "</think>",
+                "logit": 15.375
+              },
+              {
+                "token_id": 248046,
+                "text": "<|im_end|>",
+                "logit": 15.125
+              },
+              {
+                "token_id": 16,
+                "text": "1",
+                "logit": 14.875
+              },
+              {
+                "token_id": 760,
+                "text": "The",
+                "logit": 14.6875
+              },
+              {
+                "token_id": 248045,
+                "text": "<|im_start|>",
+                "logit": 13.8125
+              },
+              {
+                "token_id": 248058,
+                "text": "<tool_call>",
+                "logit": 12.6875
+              },
+              {
+                "token_id": 561,
+                "text": " The",
+                "logit": 12.1875
+              },
+              {
+                "token_id": 173976,
+                "text": " **\"",
+                "logit": 11.875
+              },
+              {
+                "token_id": 9726,
+                "text": "\"The",
+                "logit": 11.8125
+              },
+              {
+                "token_id": 175267,
+                "text": "\"**",
+                "logit": 11.75
+              },
+              {
+                "token_id": 1,
+                "text": "\"",
+                "logit": 11.25
+              },
+              {
+                "token_id": 2972,
+                "text": " **",
+                "logit": 10.9375
+              },
+              {
+                "token_id": 332,
+                "text": "**",
+                "logit": 10.8125
+              },
+              {
+                "token_id": 69267,
+                "text": "Assistant",
+                "logit": 10.6875
+              },
+              {
+                "token_id": 55806,
+                "text": "\"Yes",
+                "logit": 10.6875
+              }
+            ],
+            "greedy_token_ids": [
+              248068,
+              271,
+              248069,
+              271,
+              760,
+              18255,
+              173976,
+              29628,
+              440,
+              264,
+              35045,
+              458,
+              19254,
+              175267,
+              557,
+              23235,
+              539,
+              279,
+              22510,
+              17278,
+              12704,
+              9752,
+              2972,
+              41,
+              2194,
+              39797,
+              6054,
+              86833,
+              159034,
+              271,
+              11357,
+              2094
+            ],
+            "greedy_text": "<think>\n\n</think>\n\nThe painting **\"Girl with a Pearl Earring\"** was painted by the Dutch Golden Age artist **Johannes Vermeer**.\n\nCreated around",
+            "tolerances": {
+              "logit_max_abs_diff": 0.75,
+              "logit_min_cosine_sim": 0.995,
+              "top1_margin_tolerance": 0.25,
+              "min_exact_prefix_tokens": 16,
+              "kvcache_parity_tokens": 8
+            }
+          },
+          {
+            "name": "msmarco_whiskers",
+            "prompt": "Are whiskers on cats used for balance?",
+            "formatted_prompt": "<|im_start|>user\nAre whiskers on cats used for balance?<|im_end|>\n<|im_start|>assistant\n",
+            "prompt_token_ids": [
+              248045,
+              846,
+              198,
+              11195,
+              39317,
+              382,
+              383,
+              18833,
+              1429,
+              364,
+              7915,
+              30,
+              248046,
+              198,
+              248045,
+              74455,
+              198
+            ],
+            "prefill_top_k": [
+              {
+                "token_id": 248068,
+                "text": "<think>",
+                "logit": 30.625
+              },
+              {
+                "token_id": 248045,
+                "text": "<|im_start|>",
+                "logit": 17.25
+              },
+              {
+                "token_id": 248069,
+                "text": "</think>",
+                "logit": 16.25
+              },
+              {
+                "token_id": 248046,
+                "text": "<|im_end|>",
+                "logit": 16.125
+              },
+              {
+                "token_id": 760,
+                "text": "The",
+                "logit": 13.9375
+              },
+              {
+                "token_id": 2,
+                "text": "#",
+                "logit": 13.5
+              },
+              {
+                "token_id": 248044,
+                "text": "<|endoftext|>",
+                "logit": 13.0625
+              },
+              {
+                "token_id": 248058,
+                "text": "<tool_call>",
+                "logit": 13.0
+              },
+              {
+                "token_id": 332,
+                "text": "**",
+                "logit": 12.1875
+              },
+              {
+                "token_id": 69267,
+                "text": "Assistant",
+                "logit": 11.625
+              },
+              {
+                "token_id": 15666,
+                "text": "Answer",
+                "logit": 11.3125
+              },
+              {
+                "token_id": 1582,
+                "text": "Wh",
+                "logit": 11.125
+              },
+              {
+                "token_id": 13962,
+                "text": "###",
+                "logit": 10.75
+              },
+              {
+                "token_id": 6651,
+                "text": "They",
+                "logit": 10.6875
+              },
+              {
+                "token_id": 271,
+                "text": "\n\n",
+                "logit": 10.6875
+              },
+              {
+                "token_id": 53,
+                "text": "V",
+                "logit": 10.625
+              }
+            ],
+            "greedy_token_ids": [
+              248068,
+              25,
+              271,
+              248069,
+              271,
+              2665,
+              11,
+              39317,
+              382,
+              383,
+              18833,
+              513,
+              2972,
+              1856,
+              332,
+              1429,
+              364,
+              7915,
+              13,
+              271,
+              7732,
+              424,
+              369,
+              264,
+              4047,
+              20514,
+              421,
+              39317,
+              382,
+              1438,
+              18833,
+              10000
+            ],
+            "greedy_text": "<think>:\n\n</think>\n\nNo, whiskers on cats are **not** used for balance.\n\nWhile it is a common myth that whiskers help cats maintain",
+            "tolerances": {
+              "logit_max_abs_diff": 0.75,
+              "logit_min_cosine_sim": 0.995,
+              "top1_margin_tolerance": 0.25,
+              "min_exact_prefix_tokens": 16,
+              "kvcache_parity_tokens": 8
+            }
+          },
+          {
+            "name": "sky_en",
+            "prompt": "Why is the sky blue?",
+            "formatted_prompt": "<|im_start|>user\nWhy is the sky blue?<|im_end|>\n<|im_start|>assistant\n",
+            "prompt_token_ids": [
+              248045,
+              846,
+              198,
+              9930,
+              369,
+              279,
+              12515,
+              6105,
+              30,
+              248046,
+              198,
+              248045,
+              74455,
+              198
+            ],
+            "prefill_top_k": [
+              {
+                "token_id": 248068,
+                "text": "<think>",
+                "logit": 30.75
+              },
+              {
+                "token_id": 760,
+                "text": "The",
+                "logit": 17.375
+              },
+              {
+                "token_id": 248045,
+                "text": "<|im_start|>",
+                "logit": 15.875
+              },
+              {
+                "token_id": 16,
+                "text": "1",
+                "logit": 15.5
+              },
+              {
+                "token_id": 248046,
+                "text": "<|im_end|>",
+                "logit": 14.0625
+              },
+              {
+                "token_id": 2,
+                "text": "#",
+                "logit": 13.0
+              },
+              {
+                "token_id": 9930,
+                "text": "Why",
+                "logit": 12.9375
+              },
+              {
+                "token_id": 248069,
+                "text": "</think>",
+                "logit": 12.625
+              },
+              {
+                "token_id": 27,
+                "text": "<",
+                "logit": 12.4375
+              },
+              {
+                "token_id": 17,
+                "text": "2",
+                "logit": 12.25
+              },
+              {
+                "token_id": 29108,
+                "text": "Sun",
+                "logit": 11.875
+              },
+              {
+                "token_id": 332,
+                "text": "**",
+                "logit": 11.625
+              },
+              {
+                "token_id": 20,
+                "text": "5",
+                "logit": 11.4375
+              },
+              {
+                "token_id": 37728,
+                "text": " sunlight",
+                "logit": 11.4375
+              },
+              {
+                "token_id": 248044,
+                "text": "<|endoftext|>",
+                "logit": 11.4375
+              },
+              {
+                "token_id": 248058,
+                "text": "<tool_call>",
+                "logit": 11.375
+              }
+            ],
+            "greedy_token_ids": [
+              248068,
+              271,
+              248069,
+              271,
+              760,
+              12515,
+              7701,
+              6105,
+              4016,
+              310,
+              264,
+              24057,
+              2512,
+              2972,
+              28232,
+              60845,
+              69377,
+              159034,
+              271,
+              4350,
+              37728,
+              27891,
+              8964,
+              579,
+              16078,
+              11,
+              424,
+              32785,
+              6605,
+              33470,
+              318,
+              60777
+            ],
+            "greedy_text": "<think>\n\n</think>\n\nThe sky appears blue due to a phenomenon called **Rayleigh scattering**.\n\nWhen sunlight enters Earth's atmosphere, it encounters gas molecules (mostly",
+            "tolerances": {
+              "logit_max_abs_diff": 0.75,
+              "logit_min_cosine_sim": 0.995,
+              "top1_margin_tolerance": 0.25,
+              "min_exact_prefix_tokens": 16,
+              "kvcache_parity_tokens": 8
+            }
+          },
+          {
+            "name": "sky_de",
+            "prompt": "Warum ist der Himmel blau?",
+            "formatted_prompt": "<|im_start|>user\nWarum ist der Himmel blau?<|im_end|>\n<|im_start|>assistant\n",
+            "prompt_token_ids": [
+              248045,
+              846,
+              198,
+              27745,
+              367,
+              5810,
+              2607,
+              199908,
+              242880,
+              30,
+              248046,
+              198,
+              248045,
+              74455,
+              198
+            ],
+            "prefill_top_k": [
+              {
+                "token_id": 248068,
+                "text": "<think>",
+                "logit": 28.25
+              },
+              {
+                "token_id": 248046,
+                "text": "<|im_end|>",
+                "logit": 18.0
+              },
+              {
+                "token_id": 248045,
+                "text": "<|im_start|>",
+                "logit": 16.25
+              },
+              {
+                "token_id": 21483,
+                "text": "Der",
+                "logit": 15.375
+              },
+              {
+                "token_id": 248044,
+                "text": "<|endoftext|>",
+                "logit": 13.875
+              },
+              {
+                "token_id": 248069,
+                "text": "</think>",
+                "logit": 13.375
+              },
+              {
+                "token_id": 16,
+                "text": "1",
+                "logit": 12.875
+              },
+              {
+                "token_id": 12376,
+                "text": " Der",
+                "logit": 12.6875
+              },
+              {
+                "token_id": 248058,
+                "text": "<tool_call>",
+                "logit": 12.0625
+              },
+              {
+                "token_id": 31538,
+                "text": "Das",
+                "logit": 11.1875
+              },
+              {
+                "token_id": 125937,
+                "text": "主要原因",
+                "logit": 11.0625
+              },
+              {
+                "token_id": 2607,
+                "text": " der",
+                "logit": 10.5
+              },
+              {
+                "token_id": 1071,
+                "text": "der",
+                "logit": 10.25
+              },
+              {
+                "token_id": 17,
+                "text": "2",
+                "logit": 10.0
+              },
+              {
+                "token_id": 109832,
+                "text": "主要有",
+                "logit": 9.9375
+              },
+              {
+                "token_id": 118412,
+                "text": "的主要原因",
+                "logit": 9.75
+              }
+            ],
+            "greedy_token_ids": [
+              248068,
+              271,
+              248069,
+              271,
+              21483,
+              199908,
+              200366,
+              6758,
+              242880,
+              11,
+              50739,
+              909,
+              85879,
+              82,
+              11,
+              6407,
+              6335,
+              2607,
+              193131,
+              49791,
+              11,
+              27847,
+              58386,
+              44477,
+              19164,
+              2659,
+              9450,
+              5727,
+              197932,
+              5280,
+              3262,
+              186379
+            ],
+            "greedy_text": "<think>\n\n</think>\n\nDer Himmel erscheint uns blau, weil des Lichts, das von der Sonne kommt, beim Durchgang durch die Erdatmosphäre mit den darin",
+            "tolerances": {
+              "logit_max_abs_diff": 0.75,
+              "logit_min_cosine_sim": 0.995,
+              "top1_margin_tolerance": 0.25,
+              "min_exact_prefix_tokens": 16,
+              "kvcache_parity_tokens": 8
+            }
+          },
+          {
+            "name": "sky_fr",
+            "prompt": "Pourquoi le ciel est-il bleu ?",
+            "formatted_prompt": "<|im_start|>user\nPourquoi le ciel est-il bleu ?<|im_end|>\n<|im_start|>assistant\n",
+            "prompt_token_ids": [
+              248045,
+              846,
+              198,
+              40781,
+              59813,
+              501,
+              173941,
+              1725,
+              54384,
+              187451,
+              907,
+              248046,
+              198,
+              248045,
+              74455,
+              198
+            ],
+            "prefill_top_k": [
+              {
+                "token_id": 248068,
+                "text": "<think>",
+                "logit": 30.75
+              },
+              {
+                "token_id": 248046,
+                "text": "<|im_end|>",
+                "logit": 17.5
+              },
+              {
+                "token_id": 248045,
+                "text": "<|im_start|>",
+                "logit": 17.375
+              },
+              {
+                "token_id": 248044,
+                "text": "<|endoftext|>",
+                "logit": 16.375
+              },
+              {
+                "token_id": 2229,
+                "text": "Le",
+                "logit": 13.8125
+              },
+              {
+                "token_id": 16,
+                "text": "1",
+                "logit": 13.75
+              },
+              {
+                "token_id": 248069,
+                "text": "</think>",
+                "logit": 13.375
+              },
+              {
+                "token_id": 248067,
+                "text": "</tool_response>",
+                "logit": 12.8125
+              },
+              {
+                "token_id": 40781,
+                "text": "Pour",
+                "logit": 12.5625
+              },
+              {
+                "token_id": 248058,
+                "text": "<tool_call>",
+                "logit": 12.25
+              },
+              {
+                "token_id": 174090,
+                "text": " principale",
+                "logit": 11.875
+              },
+              {
+                "token_id": 125937,
+                "text": "主要原因",
+                "logit": 11.8125
+              },
+              {
+                "token_id": 69624,
+                "text": " raison",
+                "logit": 11.6875
+              },
+              {
+                "token_id": 109832,
+                "text": "主要有",
+                "logit": 11.6875
+              },
+              {
+                "token_id": 40773,
+                "text": "Ce",
+                "logit": 11.125
+              },
+              {
+                "token_id": 1900,
+                "text": " Le",
+                "logit": 11.0
+              }
+            ],
+            "greedy_token_ids": [
+              248068,
+              271,
+              248069,
+              271,
+              2229,
+              173941,
+              1725,
+              187451,
+              194027,
+              3656,
+              5073,
+              293,
+              21372,
+              218429,
+              61203,
+              200178,
+              2972,
+              13102,
+              7321,
+              12870,
+              60845,
+              159034,
+              271,
+              43,
+              1052,
+              576,
+              1147,
+              178975,
+              3717,
+              179560,
+              36303,
+              324
+            ],
+            "greedy_text": "<think>\n\n</think>\n\nLe ciel est bleu principalement à cause d'un phénomène physique appelé **diffusion Rayleigh**.\n\nLorsque la lumière du soleil traverse l",
+            "tolerances": {
+              "logit_max_abs_diff": 0.75,
+              "logit_min_cosine_sim": 0.995,
+              "top1_margin_tolerance": 0.25,
+              "min_exact_prefix_tokens": 16,
+              "kvcache_parity_tokens": 8
+            }
+          },
+          {
+            "name": "sky_zh",
+            "prompt": "为什么天空是蓝色的？",
+            "formatted_prompt": "<|im_start|>user\n为什么天空是蓝色的？<|im_end|>\n<|im_start|>assistant\n",
+            "prompt_token_ids": [
+              248045,
+              846,
+              198,
+              98832,
+              101850,
+              95761,
+              116981,
+              10992,
+              248046,
+              198,
+              248045,
+              74455,
+              198
+            ],
+            "prefill_top_k": [
+              {
+                "token_id": 248068,
+                "text": "<think>",
+                "logit": 28.25
+              },
+              {
+                "token_id": 248046,
+                "text": "<|im_end|>",
+                "logit": 17.0
+              },
+              {
+                "token_id": 248045,
+                "text": "<|im_start|>",
+                "logit": 15.625
+              },
+              {
+                "token_id": 101850,
+                "text": "天空",
+                "logit": 15.125
+              },
+              {
+                "token_id": 109455,
+                "text": "这是一个",
+                "logit": 14.8125
+              },
+              {
+                "token_id": 98832,
+                "text": "为什么",
+                "logit": 14.25
+              },
+              {
+                "token_id": 104257,
+                "text": "大气",
+                "logit": 13.8125
+              },
+              {
+                "token_id": 16,
+                "text": "1",
+                "logit": 13.6875
+              },
+              {
+                "token_id": 248044,
+                "text": "<|endoftext|>",
+                "logit": 12.5
+              },
+              {
+                "token_id": 114090,
+                "text": "这是因为",
+                "logit": 12.4375
+              },
+              {
+                "token_id": 125937,
+                "text": "主要原因",
+                "logit": 12.375
+              },
+              {
+                "token_id": 96378,
+                "text": "太",
+                "logit": 12.25
+              },
+              {
+                "token_id": 95854,
+                "text": "这",
+                "logit": 12.125
+              },
+              {
+                "token_id": 97988,
+                "text": "这是",
+                "logit": 12.0
+              },
+              {
+                "token_id": 109495,
+                "text": "白天",
+                "logit": 12.0
+              },
+              {
+                "token_id": 124602,
+                "text": "这种现象",
+                "logit": 11.8125
+              }
+            ],
+            "greedy_token_ids": [
+              248068,
+              198,
+              8160,
+              579,
+              264,
+              7047,
+              1817,
+              421,
+              11177,
+              310,
+              279,
+              15673,
+              314,
+              3069,
+              279,
+              12515,
+              369,
+              6105,
+              25,
+              271,
+              16,
+              13,
+              220,
+              2972,
+              2014,
+              53983,
+              279,
+              5952,
+              64700,
+              198,
+              262,
+              348
+            ],
+            "greedy_text": "<think>\nHere's a thinking process that leads to the explanation of why the sky is blue:\n\n1.  **Analyze the Request:**\n    *",
+            "tolerances": {
+              "logit_max_abs_diff": 0.75,
+              "logit_min_cosine_sim": 0.995,
+              "top1_margin_tolerance": 0.25,
+              "min_exact_prefix_tokens": 16,
+              "kvcache_parity_tokens": 8
+            }
+          },
+          {
+            "name": "sky_ja",
+            "prompt": "なぜ空は青いのですか？",
+            "formatted_prompt": "<|im_start|>user\nなぜ空は青いのですか？<|im_end|>\n<|im_start|>assistant\n",
+            "prompt_token_ids": [
+              248045,
+              846,
+              198,
+              180264,
+              96292,
+              14876,
+              96556,
+              16098,
+              170854,
+              30031,
+              10992,
+              248046,
+              198,
+              248045,
+              74455,
+              198
+            ],
+            "prefill_top_k": [
+              {
+                "token_id": 248068,
+                "text": "<think>",
+                "logit": 32.75
+              },
+              {
+                "token_id": 248045,
+                "text": "<|im_start|>",
+                "logit": 18.0
+              },
+              {
+                "token_id": 248046,
+                "text": "<|im_end|>",
+                "logit": 17.75
+              },
+              {
+                "token_id": 248044,
+                "text": "<|endoftext|>",
+                "logit": 14.8125
+              },
+              {
+                "token_id": 248069,
+                "text": "</think>",
+                "logit": 14.0625
+              },
+              {
+                "token_id": 96292,
+                "text": "空",
+                "logit": 14.0
+              },
+              {
+                "token_id": 248058,
+                "text": "<tool_call>",
+                "logit": 13.0
+              },
+              {
+                "token_id": 16,
+                "text": "1",
+                "logit": 12.4375
+              },
+              {
+                "token_id": 46701,
+                "text": "�",
+                "logit": 11.0625
+              },
+              {
+                "token_id": 248066,
+                "text": "<tool_response>",
+                "logit": 11.0
+              },
+              {
+                "token_id": 217087,
+                "text": "主な",
+                "logit": 10.875
+              },
+              {
+                "token_id": 74455,
+                "text": "assistant",
+                "logit": 10.8125
+              },
+              {
+                "token_id": 187760,
+                "text": "答え",
+                "logit": 10.75
+              },
+              {
+                "token_id": 69267,
+                "text": "Assistant",
+                "logit": 10.5625
+              },
+              {
+                "token_id": 248067,
+                "text": "</tool_response>",
+                "logit": 10.25
+              },
+              {
+                "token_id": 200465,
+                "text": "主に",
+                "logit": 10.25
+              }
+            ],
+            "greedy_token_ids": [
+              248068,
+              198,
+              8160,
+              579,
+              264,
+              7047,
+              1817,
+              421,
+              11177,
+              310,
+              279,
+              15673,
+              314,
+              3069,
+              279,
+              12515,
+              369,
+              6105,
+              25,
+              271,
+              16,
+              13,
+              220,
+              2972,
+              2014,
+              53983,
+              279,
+              5952,
+              64700,
+              198,
+              262,
+              348
+            ],
+            "greedy_text": "<think>\nHere's a thinking process that leads to the explanation of why the sky is blue:\n\n1.  **Analyze the Request:**\n    *",
+            "tolerances": {
+              "logit_max_abs_diff": 0.75,
+              "logit_min_cosine_sim": 0.995,
+              "top1_margin_tolerance": 0.25,
+              "min_exact_prefix_tokens": 16,
+              "kvcache_parity_tokens": 8
+            }
+          },
+          {
+            "name": "code_fib",
+            "prompt": "def fibonacci(n):\n    if n <= 1:\n        return n\n    return",
+            "formatted_prompt": "def fibonacci(n):\n    if n <= 1:\n        return n\n    return",
+            "prompt_token_ids": [
+              727,
+              73111,
+              1393,
+              1590,
+              198,
+              262,
+              413,
+              307,
+              2564,
+              220,
+              16,
+              25,
+              198,
+              285,
+              460,
+              307,
+              198,
+              262,
+              460
+            ],
+            "prefill_top_k": [
+              {
+                "token_id": 73111,
+                "text": " fibonacci",
+                "logit": 21.625
+              },
+              {
+                "token_id": 318,
+                "text": " (",
+                "logit": 17.625
+              },
+              {
+                "token_id": 15336,
+                "text": " fib",
+                "logit": 17.25
+              },
+              {
+                "token_id": 220,
+                "text": " ",
+                "logit": 16.375
+              },
+              {
+                "token_id": 76938,
+                "text": " Fibonacci",
+                "logit": 15.625
+              },
+              {
+                "token_id": 514,
+                "text": " int",
+                "logit": 14.375
+              },
+              {
+                "token_id": 2542,
+                "text": " sum",
+                "logit": 13.9375
+              },
+              {
+                "token_id": 925,
+                "text": "(f",
+                "logit": 13.9375
+              },
+              {
+                "token_id": 307,
+                "text": " n",
+                "logit": 13.9375
+              },
+              {
+                "token_id": 1133,
+                "text": " print",
+                "logit": 13.5
+              },
+              {
+                "token_id": 1259,
+                "text": " __",
+                "logit": 13.25
+              },
+              {
+                "token_id": 264,
+                "text": " a",
+                "logit": 12.9375
+              },
+              {
+                "token_id": 1393,
+                "text": "(n",
+                "logit": 12.9375
+              },
+              {
+                "token_id": 281,
+                "text": " f",
+                "logit": 12.6875
+              },
+              {
+                "token_id": 29812,
+                "text": " recursive",
+                "logit": 12.5625
+              },
+              {
+                "token_id": 498,
+                "text": " [",
+                "logit": 12.3125
+              }
+            ],
+            "greedy_token_ids": [
+              73111,
+              1393,
+              12,
+              16,
+              8,
+              478,
+              73111,
+              1393,
+              12,
+              17,
+              8,
+              271,
+              2,
+              3284,
+              279,
+              709,
+              198,
+              1302,
+              925,
+              564,
+              38044,
+              7,
+              16,
+              15,
+              578,
+              220,
+              653,
+              8984,
+              25,
+              220,
+              20,
+              20
+            ],
+            "greedy_text": " fibonacci(n-1) + fibonacci(n-2)\n\n# Test the function\nprint(fibonacci(10))  # Output: 55",
+            "tolerances": {
+              "logit_max_abs_diff": 0.75,
+              "logit_min_cosine_sim": 0.995,
+              "top1_margin_tolerance": 0.25,
+              "min_exact_prefix_tokens": 16,
+              "kvcache_parity_tokens": 8
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

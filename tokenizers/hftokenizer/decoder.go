@@ -178,7 +178,25 @@ func (t *Tokenizer) wordPieceDecode(tokens []string) string {
 			result.WriteString(token)
 		}
 	}
-	return result.String()
+	out := result.String()
+	if t.tokenizer.Decoder.Cleanup != nil && *t.tokenizer.Decoder.Cleanup {
+		out = cleanUpWordPieceSpaces(out)
+	}
+	return out
+}
+
+// cleanUpWordPieceSpaces mirrors HuggingFace tokenizers' Rust WordPiece decoder cleanup.
+func cleanUpWordPieceSpaces(s string) string {
+	s = strings.ReplaceAll(s, " .", ".")
+	s = strings.ReplaceAll(s, " ?", "?")
+	s = strings.ReplaceAll(s, " !", "!")
+	s = strings.ReplaceAll(s, " ,", ",")
+	s = strings.ReplaceAll(s, " n't", "n't")
+	s = strings.ReplaceAll(s, " 'm", "'m")
+	s = strings.ReplaceAll(s, " 's", "'s")
+	s = strings.ReplaceAll(s, " 've", "'ve")
+	s = strings.ReplaceAll(s, " 're", "'re")
+	return s
 }
 
 func (t *Tokenizer) byteLevelDecode(tokens []string) string {

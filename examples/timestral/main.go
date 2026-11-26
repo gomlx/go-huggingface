@@ -6,7 +6,7 @@
 // It compiles one (batch=2, contextSteps) input shape once with weights baked as graph constants
 // (batch 2 = [context, -context] for symmetric averaging).
 //
-//	GOEXPERIMENT=simd go run ./examples/timestral -model mistralai/Timestral-28M -compare ./examples/timestral/model-28m_test_results.f32 -runs 5
+//	GOEXPERIMENT=simd go run ./examples/timestral -model mistralai/Timestral-28M -compare ./modeltests/testdata/timestral/results_28m.f32 -runs 5
 package main
 
 import (

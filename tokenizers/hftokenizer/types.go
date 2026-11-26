@@ -53,6 +53,7 @@ type Pattern struct {
 type PreTokenizer struct {
 	Type           string         `json:"type"`
 	AddPrefixSpace bool           `json:"add_prefix_space"`
+	UseRegex       *bool          `json:"use_regex"`
 	PreTokenizers  []PreTokenizer `json:"pretokenizers"`
 	Pattern        *Pattern       `json:"pattern"`
 	Behavior       string         `json:"behavior"`
@@ -107,6 +108,7 @@ type Decoder struct {
 	Replacement   string         `json:"replacement"`
 	PrependScheme string         `json:"prepend_scheme"`
 	Split         bool           `json:"split"`
+	Cleanup       *bool          `json:"cleanup"`
 }
 
 // Model represents the tokenizer model (WordPiece, BPE, or Unigram).

@@ -11,7 +11,7 @@ It loads `config.json` and `model.safetensors` directly via `go-huggingface/hub`
 ```bash
 GOEXPERIMENT=simd go run ./examples/timestral \
     -model mistralai/Timestral-28M \
-    -compare ./examples/timestral/model-28m_test_results.f32 \
+    -compare ./modeltests/testdata/timestral/results_28m.f32 \
     -backend go \
     -runs 5
 ```
@@ -21,7 +21,7 @@ For the 123M model:
 ```bash
 GOEXPERIMENT=simd go run ./examples/timestral \
     -model mistralai/Timestral-123M \
-    -compare ./examples/timestral/model-123m_test_results.f32 \
+    -compare ./modeltests/testdata/timestral/results_123m.f32 \
     -backend go \
     -runs 5
 ```
@@ -39,8 +39,8 @@ GOEXPERIMENT=simd go run ./examples/timestral \
 
 ## Running Tests
 
-To run the numerical accuracy tests for both `Timestral-28M` and `Timestral-123M` against the local PyTorch reference files (`model-28m_test_results.f32` and `model-123m_test_results.f32`, verifying `max abs diff < 1e-4`):
+Full numerical accuracy tests for both `Timestral-28M` and `Timestral-123M` against PyTorch reference files live in [`../../modeltests/`](../../modeltests/) (see [`../../docs/ModelTests.md`](../../docs/ModelTests.md)):
 
 ```bash
-go test -v ./examples/timestral/...
+GOEXPERIMENT=simd go test -v -p=1 ./modeltests -modeltests -run TestModels/timestral
 ```

@@ -1371,6 +1371,111 @@ func stringSliceEqual(a, b []string) bool {
 	return true
 }
 
+func TestSplitPreTokenizer_WhitespaceLookaheadAndByteLevelNoRegex(t *testing.T) {
+	// Qwen2 / Qwen3.5 / Tiktoken style Sequence: Split with `\s+(?!\S)` followed by ByteLevel(use_regex=false).
+	useRegexFalse := false
+	pt := &PreTokenizer{
+		Type: "Sequence",
+		PreTokenizers: []PreTokenizer{
+			{
+				Type: "Split",
+				Pattern: &Pattern{
+					Regex: `(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?[\p{L}\p{M}]+|\p{N}| ?[^\s\p{L}\p{M}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+`,
+				},
+				Behavior: "Isolated",
+			},
+			{
+				Type:     "ByteLevel",
+				UseRegex: &useRegexFalse,
+			},
+		},
+	}
+
+	tok := &Tokenizer{
+		tokenizer: &TokenizerJSON{PreTokenizer: pt},
+	}
+
+	tests := []struct {
+		name      string
+		input     string
+		wantWords []string
+	}{
+		{
+			name:  "code indentation",
+			input: "def f():\n    if x:\n        return x\n    return",
+			wantWords: []string{
+				"def", "Ġf", "():Ċ",
+				"ĠĠĠ", "Ġif", "Ġx", ":Ċ",
+				"ĠĠĠĠĠĠĠ", "Ġreturn", "Ġx", "Ċ",
+				"ĠĠĠ", "Ġreturn",
+			},
+		},
+		{
+			name:  "leading middle and trailing multi-spaces with digits",
+			input: "  Leading   and\tmultiple\nspaces  12  ",
+			wantWords: []string{
+				"Ġ", "ĠLeading", "ĠĠ", "Ġand", "ĉmultiple", "Ċ",
+				"spaces", "Ġ", "Ġ", "1", "2", "ĠĠ",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			normOffsets := make([]int, len(tc.input))
+			for i := range normOffsets {
+				normOffsets[i] = i
+			}
+			words := tok.preTokenizeWithOffsets(tc.input, normOffsets)
+			got := make([]string, len(words))
+			for i, w := range words {
+				got[i] = w.text
+			}
+			if !stringSliceEqual(got, tc.wantWords) {
+				t.Errorf("preTokenizeWithOffsets(%q)\n  got:  %q\n  want: %q", tc.input, got, tc.wantWords)
+			}
+		})
+	}
+}
+
+func TestResolveSpecialTokens_ConfigInAddedTokensAndNonSpecialMask(t *testing.T) {
+	// Qwen3.5-style: pad_token is defined in tokenizer_config.json and lives in added_tokens (not model.vocab).
+	// Gemma3-style: <mask> lives in added_tokens with special: false and is not listed in tokenizer_config.json.
+	tj := &TokenizerJSON{
+		Model: Model{
+			Type:  "BPE",
+			Vocab: map[string]int{"a": 10},
+		},
+		AddedTokens: []AddedToken{
+			{ID: 4, Content: "<mask>", Special: false},
+			{ID: 248044, Content: "<|endoftext|>", Special: true},
+			{ID: 248046, Content: "<|im_end|>", Special: true},
+		},
+	}
+	cfg := &api.Config{
+		PadToken: api.TokensDecoder{Content: "<|endoftext|>"},
+		EosToken: api.TokensDecoder{Content: "<|im_end|>"},
+	}
+
+	tok, err := NewFromStruct(cfg, tj)
+	if err != nil {
+		t.Fatalf("NewFromStruct failed: %v", err)
+	}
+
+	padID, err := tok.SpecialTokenID(api.TokPad)
+	if err != nil || padID != 248044 {
+		t.Errorf("SpecialTokenID(TokPad) = (%d, %v), want (248044, nil)", padID, err)
+	}
+	eosID, err := tok.SpecialTokenID(api.TokEndOfSentence)
+	if err != nil || eosID != 248046 {
+		t.Errorf("SpecialTokenID(TokEndOfSentence) = (%d, %v), want (248046, nil)", eosID, err)
+	}
+	maskID, err := tok.SpecialTokenID(api.TokMask)
+	if err != nil || maskID != 4 {
+		t.Errorf("SpecialTokenID(TokMask) = (%d, %v), want (4, nil)", maskID, err)
+	}
+}
+
 func BenchmarkEncode_LongText(b *testing.B) {
 	tok, err := NewFromContent(nil, testWordPieceTokenizerJSON)
 	if err != nil {
