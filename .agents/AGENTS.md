@@ -36,24 +36,28 @@ go-huggingface/
 ├── datasets/                    # HuggingFace datasets client & Parquet scanning
 ├── docs/
 │   ├── CHANGELOG.md             # Project change log (MANDATORY UPDATE ON EVERY FIX)
-│   └── GGUF-models.md           # Design & architecture guide for GGUF transformer models
+│   ├── GGUF-models.md           # Design & architecture guide for GGUF transformer models
+│   └── ModelTests.md            # Architecture & developer guide for full model tests (modeltests/)
 ├── examples/
-│   ├── BAAI-bge-small-en-v1.5/  # Example & test suite for BERT-based sentence embeddings
-│   ├── gemma4-e4bit/            # Gemma 4 E4B model loading example
-│   ├── kalmgemma3/              # KaLM-Gemma3 12B sentence embedding example & tests
-│   ├── minilm-l6-v2-gguf/       # GGUF sentence embedding example & llama.cpp parity tests
-│   └── msmarco/                 # MS MARCO dataset reader and embedding benchmark
+│   ├── BAAI-bge-small-en-v1.5/  # BGE Small repo constants & README
+│   ├── dolly/                   # Dolly dataset browser demo
+│   ├── gemma4-e4bit/            # Gemma 4 E4B interactive generation demo
+│   ├── kalmgemma3/              # KaLM-Gemma3 12B repo helpers & task prompts
+│   ├── minilm-l6-v2-gguf/       # GGUF MiniLM repo constants
+│   ├── msmarco/                 # MS MARCO dataset reader and embedding benchmark
+│   └── timestral/               # Timestral time-series forecasting CLI demo
 ├── hub/                         # Core HuggingFace Hub client (remote, local, and embed modes)
 ├── internal/
 │   ├── downloader/              # Parallel download manager with FIFOSemaphore & atomic file locking
 │   ├── files/                   # File utilities (tilde expansion, flock-based file locking)
-│   ├── py/                      # Python reference scripts for generating golden test tensors
-│   └── testing/                 # Shared test validation utilities (tensor comparison tolerances)
+│   └── py/                      # Python parity scripts (e.g., unigram_parity.py)
+├── modeltests/                  # Unified opt-in (-modeltests) full-model parity test suite & generators
 ├── models/
 │   ├── gguf/                    # GGUF parser, metadata extraction & k-quant dequantization
 │   ├── image/                   # Image preprocessing graph operations (resize, normalize)
 │   ├── safetensors/             # Safetensors reader, mmap integration & tensor iterators
 │   ├── sam2/                    # Segment Anything 2 (SAM2) model architecture & Segmenter API
+│   ├── timestral/               # Mistral Timestral time-series foundation model
 │   └── transformer/             # Transformer graph builder for GoMLX
 └── tokenizers/
     ├── api/                     # Tokenizer interface, TokenSpan, AnnotatedEncoding, EncodeOptions
@@ -141,11 +145,8 @@ Manages downloading and access to HuggingFace repositories.
 - **`internal/files`**:
   - `ExecOnFileLock`: Inter-process file locking using `github.com/gofrs/flock` with jittered polling.
   - `ReplaceTildeInDir`: Expands `~` and `~user` paths into system home directories.
-- **`internal/testing`**:
-  - `ValidateEmbeddingTensor`: Compares GoMLX tensor embeddings with PyTorch golden files using relative difference metrics.
-  - `ReadPythonEmbeddingsList`: Parses floating-point golden values dumped by Python scripts.
 - **`internal/py`**:
-  - Python scripts (`embed_sentence.py`, `tokenize_bge.py`) used to produce ground-truth test outputs from official HuggingFace/PyTorch libraries.
+  - Python parity scripts (e.g., `unigram_parity.py`). Full-model reference generators live in `modeltests/internal/generators/`.
 
 ---
 

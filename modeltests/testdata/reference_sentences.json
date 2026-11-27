@@ -1,0 +1,25 @@
+{
+  "queries": [
+    "Why can camels survive for long without water?",
+    "What individual has won the most Olympic gold medals in the history of the games?",
+    "are whiskers on cats used for balance",
+    "what is early bird check in southwest",
+    "Why is the sky blue?",
+    "Warum ist der Himmel blau?",
+    "Pourquoi le ciel est-il bleu ?",
+    "为什么天空是蓝色的？",
+    "なぜ空は青いのですか？"
+  ],
+  "documents": [
+    "Camels use the fat in their humps to keep them filled with energy and hydration for long periods of time.",
+    "Michael Phelps has won the most gold medals of all time with 23 golds.",
+    "Yes whiskers are used to help balance as well as feelers to help them judge space and help in the dark. A cats tail also helps them balance, my cat had lost his tail do to an … injury and now he uses his whiskers more to help balance.",
+    "For a small fee, Southwest Airlines' Early Bird Check-In allows passengers to check-in to a flight automatically up to 36 hours prior to the flight's scheduled departure time."
+  ],
+  "tokenizer_edge_cases": [
+    "Don't panic! Price: $19.99 (20% off) — see https://example.com/a_b?x=1.",
+    "Café naïve résumé — Munich, Zürich, 東京, 京都.",
+    "  Leading   and\tmultiple\nspaces  1234567890  a+b=c  ",
+    "Hello"
+  ]
+}

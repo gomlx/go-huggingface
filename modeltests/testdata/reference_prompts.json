@@ -1,0 +1,49 @@
+{
+  "prompts": [
+    {
+      "name": "dolly_camels",
+      "prompt": "Why can camels survive for long without water?",
+      "raw": false
+    },
+    {
+      "name": "dolly_vermeer",
+      "prompt": "Which Dutch artist painted \"Girl with a Pearl Earring\"?",
+      "raw": false
+    },
+    {
+      "name": "msmarco_whiskers",
+      "prompt": "Are whiskers on cats used for balance?",
+      "raw": false
+    },
+    {
+      "name": "sky_en",
+      "prompt": "Why is the sky blue?",
+      "raw": false
+    },
+    {
+      "name": "sky_de",
+      "prompt": "Warum ist der Himmel blau?",
+      "raw": false
+    },
+    {
+      "name": "sky_fr",
+      "prompt": "Pourquoi le ciel est-il bleu ?",
+      "raw": false
+    },
+    {
+      "name": "sky_zh",
+      "prompt": "为什么天空是蓝色的？",
+      "raw": false
+    },
+    {
+      "name": "sky_ja",
+      "prompt": "なぜ空は青いのですか？",
+      "raw": false
+    },
+    {
+      "name": "code_fib",
+      "prompt": "def fibonacci(n):\n    if n <= 1:\n        return n\n    return",
+      "raw": true
+    }
+  ]
+}

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- 2026/11/26:
+  - `modeltests`, `docs/ModelTests.md`:
+    - Added unified, opt-in end-to-end model parity test suite under `modeltests/` (disabled by default; enable via `-modeltests` or `GOMLX_MODELTESTS=1`), supporting multi-backend matrix testing (`-backends="go:ops_sequential;xla:cpu;..."`), size tier filtering (`-max_tier`), cache-only runs (`-cached_only`), tag filtering (`-tag`), GoMLX store settings (`-set`), and per-model peak memory reporting (Linux `/proc/self/clear_refs` `VmHWM` reset + portable RSS sampler + summary table).
+    - Added harnesses for Transformer models (`transformer_test.go`: tokenizer `Encode`/`Decode` + special token parity, unloaded-variable hygiene, single + padded-batch sentence embeddings, prefill top-K logits, KV-cache vs naive rollout parity, and `temperature=0` greedy generation) and Time-Series models (`timeseries_test.go`).
+    - Added shared reference corpora (`modeltests/testdata/reference_sentences.json` and `reference_prompts.json`) and reference golden generators under `modeltests/internal/generators/`: Python/PyTorch (`gen_embeddings.py`, `gen_generate.py` with PEP 723 metadata) and Go/`yzma` (`llama.cpp`, isolated in its own `go.mod` with `-all_quants` and authentic `llama.Tokenize`/`llama.Detokenize`).
+    - Populated golden test specs & `.f32` reference data for `BAAI/bge-small-en-v1.5`, `sentence-transformers/all-MiniLM-L6-v2`, `ChristianAzinn/bge-base-en-v1.5-gguf` (`Q4_0`), `second-state/All-MiniLM-L6-v2-Embedding-GGUF` (all 13 quantizations), `tencent/KaLM-Embedding-Gemma3-12B-2511`, `Qwen/Qwen3.5-4B`, `google/gemma-4-E4B-it`, and `mistralai/Timestral-{28M,123M}`.
+    - Documented the architecture, flags, and TDD new-model workflow in `docs/ModelTests.md`.
+  - `tokenizers/hftokenizer`:
+    - Added `Decoder.Cleanup` (`"cleanup": true` in `tokenizer.json`) support to `wordPieceDecode` matching HuggingFace `tokenizers`' WordPiece punctuation/contraction cleanup.
+    - Added `PreTokenizer.UseRegex` (`use_regex: false` in `ByteLevel` pre-tokenizers) and `\s+(?!\S)` negative-lookahead emulation in `Split` pre-tokenizers (`findSplitMatches` / `byteLevelEncodeNoSplit`), fixing GPT-2/Qwen/Llama-3 multi-space indentation tokenization (e.g., `Qwen/Qwen3.5-4B`).
+    - Fixed `resolveSpecialTokens` to check both `added_tokens` and `model.vocab` for special tokens configured in `tokenizer_config.json` (fixing `SpecialTokenID(TokPad)` on Qwen3.5) and to fall back to `<mask>`/`[MASK]` entries in `added_tokens` even when marked `special: false` (matching Python `AutoTokenizer` on Gemma 3).
+  - `examples`, `internal`:
+    - Removed redundant parity tests and legacy golden `.txt` files from `examples/{BAAI-bge-small-en-v1.5,minilm-l6-v2-gguf,kalmgemma3,timestral}` (preserving helper packages and runnable demos), removed superseded `internal/testing/` and `internal/py/{embed_sentence,tokenize_bge}.py`, and updated example READMEs to reference `modeltests/`.
+
 - 2026/11/25:
   - `models/transformer`:
     - Added Qwen3.5 (`model_type: "qwen3_5"` / `"qwen3_5_text"`) model support for both sentence embedding and autoregressive text generation:
