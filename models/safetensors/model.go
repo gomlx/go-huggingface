@@ -1,6 +1,8 @@
 package safetensors
 
 import (
+	"math"
+	"math/bits"
 	"runtime"
 
 	"github.com/gomlx/compute/shapes"
@@ -140,10 +142,36 @@ type TensorMetadata struct {
 	DataOffsets [2]int64 `json:"data_offsets"` // [start, end] byte offsets in file
 }
 
+// validateDimensions checks rank limit, non-negative dimensions, and element-count overflow.
+func (t *TensorMetadata) validateDimensions() (uint64, error) {
+	if len(t.Shape) > maxTensorDims {
+		return 0, errors.Errorf("tensor %q has %d dimensions, exceeds limit %d", t.Name, len(t.Shape), maxTensorDims)
+	}
+	nElements := uint64(1)
+	for i, d := range t.Shape {
+		if d < 0 {
+			return 0, errors.Errorf("tensor %q has negative dimension %d at axis %d", t.Name, d, i)
+		}
+		hi, prod := bits.Mul64(nElements, uint64(d))
+		if hi != 0 || prod > uint64(math.MaxInt) {
+			return 0, errors.Errorf("tensor %q shape %v element count overflows int", t.Name, t.Shape)
+		}
+		nElements = prod
+	}
+	return nElements, nil
+}
+
 func (t *TensorMetadata) GoMLXShape() (shapes.Shape, error) {
 	dtype, err := dtypeToGoMLX(t.Dtype)
 	if err != nil {
 		return shapes.Shape{}, err
+	}
+	nElements, err := t.validateDimensions()
+	if err != nil {
+		return shapes.Shape{}, err
+	}
+	if _, err := checkedByteSizeForDType(dtype, nElements); err != nil {
+		return shapes.Shape{}, errors.Wrapf(err, "tensor %q shape %v", t.Name, t.Shape)
 	}
 	return shapes.Make(dtype, t.Shape...), nil
 }

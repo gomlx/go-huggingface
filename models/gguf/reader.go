@@ -13,8 +13,9 @@ import (
 
 // Reader provides random-access to tensor data in a GGUF file.
 type Reader struct {
-	file *os.File
-	gguf *File
+	file     *os.File
+	fileSize int64
+	gguf     *File
 }
 
 // NewReader opens a reader for the given parsed GGUF file.
@@ -23,7 +24,12 @@ func NewReader(gguf *File) (*Reader, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "gguf: open %s", gguf.Path())
 	}
-	return &Reader{file: f, gguf: gguf}, nil
+	fi, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, errors.Wrapf(err, "gguf: stat %s", gguf.Path())
+	}
+	return &Reader{file: f, fileSize: fi.Size(), gguf: gguf}, nil
 }
 
 // Close closes the underlying file.
@@ -39,41 +45,67 @@ func (r *Reader) ReadTensor(backend compute.Backend, tensorName string) (*tensor
 	if !ok {
 		return nil, errors.Errorf("gguf: tensor %q not found", tensorName)
 	}
+	tensorOffset, rawSize, err := validateTensorInFile(info, r.gguf.DataOffset(), r.fileSize, true)
+	if err != nil {
+		return nil, errors.Wrapf(err, "gguf: invalid tensor %q", tensorName)
+	}
+
+	var dequant dequantFunc
+	if info.Type.IsQuantized() {
+		dequant, err = getDequantFunc(info.Type)
+		if err != nil {
+			return nil, errors.Wrapf(err, "gguf: tensor %q", tensorName)
+		}
+	}
+
 	dtype, dims := info.GoMLXShape()
 	shape := shapes.Make(dtype, dims...)
 	t, err := tensors.FromShapeForBackend(backend, 0, shape)
 	if err != nil {
 		return nil, errors.Wrapf(err, "gguf: failed to create tensor %q with shape %s", tensorName, shape)
 	}
-	tensorOffset := r.gguf.DataOffset() + int64(info.Offset)
 
 	if info.Type.IsQuantized() {
-		err := r.readQuantizedTensor(info, tensorOffset, t)
-		if err != nil {
+		if err := r.readQuantizedTensor(info, tensorOffset, rawSize, dequant, t); err != nil {
+			t.FinalizeAll()
 			return nil, err
+		}
+		if backend != nil {
+			if err := t.ToDevice(backend, 0); err != nil {
+				t.FinalizeAll()
+				return nil, errors.WithMessagef(err, "failed to move tensor %q (%s) to backend's device #0", tensorName, t.Shape())
+			}
 		}
 		return t, nil
 	}
 
 	// Native type: direct read into tensor memory -- it assumes current architecture uses
 	// the same number formats (same byte-endianness and float representation)
-	var readErr error
-	t.MutableBytes(func(data []byte) {
-		n, err := r.file.ReadAt(data, tensorOffset)
-		if err != nil && err != io.EOF {
-			readErr = errors.WithStack(err)
-		} else if n != len(data) {
-			readErr = errors.Errorf("short read: got %d bytes, expected %d", n, len(data))
+	if rawSize > 0 {
+		var readErr error
+		t.MutableBytes(func(data []byte) {
+			if int64(len(data)) != rawSize {
+				readErr = errors.Errorf("buffer size mismatch: got %d bytes, expected %d", len(data), rawSize)
+				return
+			}
+			n, err := r.file.ReadAt(data, tensorOffset)
+			if err != nil && err != io.EOF {
+				readErr = errors.WithStack(err)
+			} else if n != len(data) {
+				readErr = errors.Errorf("short read: got %d bytes, expected %d", n, len(data))
+			}
+		})
+		if readErr != nil {
+			t.FinalizeAll()
+			return nil, errors.WithMessagef(readErr, "gguf: read tensor %q", tensorName)
 		}
-	})
-	if readErr != nil {
-		return nil, errors.WithMessagef(readErr, "gguf: read tensor %q", tensorName)
 	}
 
 	// If backend is configured, make sure to materialize it on-device and free the local copy.
 	if backend != nil {
 		err := t.ToDevice(backend, 0)
 		if err != nil {
+			t.FinalizeAll()
 			return nil, errors.WithMessagef(err, "failed to move tensor %q (%s) to backend's device #0", tensorName, t.Shape())
 		}
 	}
@@ -82,14 +114,32 @@ func (r *Reader) ReadTensor(backend compute.Backend, tensorName string) (*tensor
 }
 
 // readQuantizedTensor on-the-fly converts the quantized stored values to float32.
-func (r *Reader) readQuantizedTensor(info TensorInfo, tensorOffset int64, output *tensors.Tensor) error {
-	// Quantized type: read raw bytes, then dequantize into float32 tensor.
-	dequant, err := getDequantFunc(info.Type)
+func (r *Reader) readQuantizedTensor(info TensorInfo, tensorOffset, rawSize int64, dequant dequantFunc, output *tensors.Tensor) error {
+	if rawSize < 0 || rawSize > maxAllocBytes() || tensorOffset < 0 || tensorOffset > r.fileSize || rawSize > r.fileSize-tensorOffset {
+		return errors.Errorf("gguf: raw tensor %q size %d at offset %d out of range for %d-byte file",
+			info.Name, rawSize, tensorOffset, r.fileSize)
+	}
+	nElements64, err := info.checkedNumElements()
 	if err != nil {
 		return errors.Wrapf(err, "gguf: tensor %q", info.Name)
 	}
+	blockSize := info.Type.BlockSize()
+	typeSize := info.Type.TypeSize()
+	if blockSize <= 0 || typeSize <= 0 {
+		return errors.Errorf("gguf: unsupported quantized tensor type %s (%d) for %q", info.Type, info.Type, info.Name)
+	}
+	if nElements64%uint64(blockSize) != 0 {
+		return errors.Errorf("gguf: tensor %q element count %d not divisible by block size %d", info.Name, nElements64, blockSize)
+	}
+	nElements := int(nElements64)
+	nBlocks := nElements / blockSize
+	if int64(nBlocks)*int64(typeSize) != rawSize {
+		return errors.Errorf("gguf: tensor %q raw size %d does not match %d blocks * %d bytes", info.Name, rawSize, nBlocks, typeSize)
+	}
+	if rawSize == 0 {
+		return nil
+	}
 
-	rawSize := info.NumBytes()
 	rawBuf := make([]byte, rawSize)
 	n, err := r.file.ReadAt(rawBuf, tensorOffset)
 	if err != nil && err != io.EOF {
@@ -98,10 +148,6 @@ func (r *Reader) readQuantizedTensor(info TensorInfo, tensorOffset int64, output
 	if n != len(rawBuf) {
 		return errors.Errorf("gguf: read raw tensor %q: short read: got %d bytes, expected %d", info.Name, n, len(rawBuf))
 	}
-
-	blockSize := info.Type.BlockSize()
-	typeSize := info.Type.TypeSize()
-	nElements := int(info.NumElements())
 
 	var dequantErr error
 	output.MutableFlatData(func(flatAny any) {
@@ -116,7 +162,6 @@ func (r *Reader) readQuantizedTensor(info TensorInfo, tensorOffset int64, output
 			return
 		}
 
-		nBlocks := nElements / blockSize
 		for b := range nBlocks {
 			srcStart := b * typeSize
 			srcEnd := srcStart + typeSize
@@ -139,33 +184,45 @@ func (r *Reader) ReadTensorRaw(backend compute.Backend, tensorName string) (*ten
 	if !ok {
 		return nil, errors.Errorf("gguf: tensor %q not found", tensorName)
 	}
+	tensorOffset, rawSize, err := validateTensorInFile(info, r.gguf.DataOffset(), r.fileSize, true)
+	if err != nil {
+		return nil, errors.Wrapf(err, "gguf: invalid tensor %q", tensorName)
+	}
+
 	dtype, dims := info.GoMLXRawShape()
 	if len(dims) == 0 {
 		return nil, errors.Errorf("gguf: invalid raw shape for tensor %q (type %s, shape %v)", tensorName, info.Type, info.Shape)
 	}
 	shape := shapes.Make(dtype, dims...)
+	if shape.ByteSize() != rawSize {
+		return nil, errors.Errorf("gguf: raw shape %s byte size %d does not match expected %d bytes for tensor %q",
+			shape, shape.ByteSize(), rawSize, tensorName)
+	}
 	t, err := tensors.FromShapeForBackend(backend, 0, shape)
 	if err != nil {
 		return nil, errors.Wrapf(err, "gguf: failed to create raw tensor %q with shape %s", tensorName, shape)
 	}
-	tensorOffset := r.gguf.DataOffset() + int64(info.Offset)
 
-	var readErr error
-	t.MutableBytes(func(data []byte) {
-		n, err := r.file.ReadAt(data, tensorOffset)
-		if err != nil && err != io.EOF {
-			readErr = errors.WithStack(err)
-		} else if n != len(data) {
-			readErr = errors.Errorf("short read: got %d bytes, expected %d", n, len(data))
+	if rawSize > 0 {
+		var readErr error
+		t.MutableBytes(func(data []byte) {
+			n, err := r.file.ReadAt(data, tensorOffset)
+			if err != nil && err != io.EOF {
+				readErr = errors.WithStack(err)
+			} else if n != len(data) {
+				readErr = errors.Errorf("short read: got %d bytes, expected %d", n, len(data))
+			}
+		})
+		if readErr != nil {
+			t.FinalizeAll()
+			return nil, errors.WithMessagef(readErr, "gguf: read raw tensor %q", tensorName)
 		}
-	})
-	if readErr != nil {
-		return nil, errors.WithMessagef(readErr, "gguf: read raw tensor %q", tensorName)
 	}
 
 	if backend != nil {
 		err := t.ToDevice(backend, 0)
 		if err != nil {
+			t.FinalizeAll()
 			return nil, errors.WithMessagef(err, "failed to move raw tensor %q (%s) to backend's device #0", tensorName, t.Shape())
 		}
 	}
@@ -180,15 +237,20 @@ func (r *Reader) ReadTensorBytes(tensorName string) ([]byte, *TensorInfo, error)
 		return nil, nil, errors.Errorf("gguf: tensor %q not found", tensorName)
 	}
 
-	rawSize := info.NumBytes()
-	buf := make([]byte, rawSize)
-	tensorOffset := r.gguf.DataOffset() + int64(info.Offset)
-	n, err := r.file.ReadAt(buf, tensorOffset)
-	if err != nil && err != io.EOF {
-		return nil, nil, errors.Wrapf(err, "gguf: read raw tensor %q", tensorName)
+	tensorOffset, rawSize, err := validateTensorInFile(info, r.gguf.DataOffset(), r.fileSize, true)
+	if err != nil {
+		return nil, nil, errors.Wrapf(err, "gguf: invalid tensor %q", tensorName)
 	}
-	if n != len(buf) {
-		return nil, nil, errors.Errorf("gguf: read raw tensor %q: short read: got %d bytes, expected %d", tensorName, n, len(buf))
+
+	buf := make([]byte, rawSize)
+	if rawSize > 0 {
+		n, err := r.file.ReadAt(buf, tensorOffset)
+		if err != nil && err != io.EOF {
+			return nil, nil, errors.Wrapf(err, "gguf: read raw tensor %q", tensorName)
+		}
+		if n != len(buf) {
+			return nil, nil, errors.Errorf("gguf: read raw tensor %q: short read: got %d bytes, expected %d", tensorName, n, len(buf))
+		}
 	}
 
 	return buf, &info, nil

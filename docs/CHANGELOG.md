@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- 2026/11/28:
+  - `models/gguf` (GHSA-v8r9-hqm6-68cf):
+    - Hardened GGUF parsing and tensor reading against attacker-controlled dimensions, counts, lengths, offsets, and alignments so invalid files fail eagerly with an error instead of panicking (`makeslice: len out of range` / `shapes.Make`) or triggering unbounded allocations:
+      - Checked `kvCount`, `tensorCount`, string lengths, and numeric/bool/string array counts against remaining file bytes before allocating in `gguf.Open`, capped eager slice preallocation, and validated `general.alignment` against negative/oversized values and `int64` overflow.
+      - Added overflow-checked element and byte-size validation (`checkedNumElements`, `checkedNumBytes`, `validateTensorShapeAndLimits`, `validateTensorInFile`) rejecting zero/excessive ranks, dimensions exceeding `math.MaxInt`, element-count or byte-size overflow, quantized innermost dimensions not divisible by `BlockSize`, raw/dequantized sizes exceeding platform allocation limits (`64 GiB` / `math.MaxInt`), and tensor spans exceeding the file's data section both eagerly in `gguf.Open` and defensively before any allocation in `Reader.ReadTensor`, `Reader.ReadTensorRaw`, `Reader.ReadTensorBytes`, and `readQuantizedTensor`.
+      - Updated `TensorInfo.NumElements` and `TensorInfo.NumBytes` to check for `uint64`/`int64` multiplication overflow using `math/bits.Mul64`.
+      - Added regression tests in `models/gguf/limits_test.go`.
+  - `models/safetensors`:
+    - Applied equivalent eager and defense-in-depth limit checks to safetensors header parsing and tensor reading:
+      - Validated file size (`>= 8` bytes) and `headerSize` (`> 0`, `<= 100 MiB`, and `<= fileSize - 8`) before allocating the JSON header buffer in `parseHeaderFromReaderWithSize`, and capped sharded index file reads in `Model.LoadShardedModel`.
+      - Rejected `"INVALID"` / `"InvalidDType"` in `dtypeToGoMLX` (preventing panics in `DType.GoType()`), and added rank (`<= 64`), non-negative dimension, element-count/byte-size overflow, and allocation-limit (`64 GiB` / `math.MaxInt`) checks in `TensorMetadata.GoMLXShape()` and eagerly during header parsing in `validateTensorMetadata`.
+      - Fixed `resolveTensorRange` (used by `TensorReader.ReadTensor`, `TensorReader.IterTensors`, and `IterTensorsFromRepoWithMMap`) to validate relative `data_offsets` against `[0, dataSize - dataOffset]` without `int64` overflow (preventing negative relative offsets from reading header bytes), and opened the file once in `Model.NewTensorReader`.
+      - Added regression tests in `models/safetensors/limits_test.go`.
+
 - 2026/11/26:
   - `modeltests`, `docs/ModelTests.md`:
     - Added unified, opt-in end-to-end model parity test suite under `modeltests/` (disabled by default; enable via `-modeltests` or `GOMLX_MODELTESTS=1`), supporting multi-backend matrix testing (`-backends="go:ops_sequential;xla:cpu;..."`), size tier filtering (`-max_tier`), cache-only runs (`-cached_only`), tag filtering (`-tag`), GoMLX store settings (`-set`), and per-model peak memory reporting (Linux `/proc/self/clear_refs` `VmHWM` reset + portable RSS sampler + summary table).

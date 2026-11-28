@@ -30,12 +30,7 @@ func (m *Model) NewTensorReader(fileName string) (*TensorReader, error) {
 		return nil, errors.Wrapf(err, "failed to download %s", fileName)
 	}
 
-	header, dataOffset, err := m.parseHeader(localPath)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to parse header for %s", localPath)
-	}
-
-	// Open file for reading
+	// Open file once, stat it, and validate the header against the file size.
 	f, err := os.Open(localPath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to open %s", localPath)
@@ -47,6 +42,12 @@ func (m *Model) NewTensorReader(fileName string) (*TensorReader, error) {
 		return nil, errors.Wrapf(err, "failed to stat %s", localPath)
 	}
 	fileSize := fi.Size()
+
+	header, dataOffset, err := parseHeaderFromReaderWithSize(f, fileSize)
+	if err != nil {
+		f.Close()
+		return nil, errors.Wrapf(err, "failed to parse header for %s", localPath)
+	}
 
 	var mmapBuf mmap.MMap
 	if m.UseMMap() && fileSize > 0 {
@@ -84,12 +85,48 @@ func (sr *TensorReader) Close() error {
 	return err2
 }
 
+// resolveTensorRange validates a tensor's shape, byte size, and data_offsets against
+// the file's data section [dataOffset, dataSize] without integer overflow.
+func resolveTensorRange(meta *TensorMetadata, dataOffset, dataSize int64) (shape shapes.Shape, tensorOffset, tensorEnd int64, err error) {
+	if dataOffset < 0 || dataSize < 0 || dataOffset > dataSize {
+		return shapes.Shape{}, 0, 0, errors.Errorf("tensor %q data offset %d out of range for %d-byte file", meta.Name, dataOffset, dataSize)
+	}
+
+	shape, err = meta.GoMLXShape()
+	if err != nil {
+		return shapes.Shape{}, 0, 0, err
+	}
+
+	expectedBytes := shape.ByteSize()
+	if expectedBytes < 0 || expectedBytes > maxAllocBytes() {
+		return shapes.Shape{}, 0, 0, errors.Errorf("tensor %q shape %s byte size %d exceeds limit %d", meta.Name, shape, expectedBytes, maxAllocBytes())
+	}
+
+	start, end := meta.DataOffsets[0], meta.DataOffsets[1]
+	dataSectionSize := dataSize - dataOffset
+	// data_offsets come from the (untrusted) file header, so validate they fall
+	// within the file/mapped data section before slicing or reading: otherwise a crafted
+	// header could read out of the header, overflow int64, or panic with slice-out-of-range.
+	if start < 0 || end < start || end > dataSectionSize {
+		return shapes.Shape{}, 0, 0, errors.Errorf("tensor %q data offsets [%d:%d] out of range for %d-byte data section", meta.Name, start, end, dataSectionSize)
+	}
+	if end-start != expectedBytes {
+		return shapes.Shape{}, 0, 0, errors.Errorf("tensor %q shape %s expected %d bytes, but got %d bytes in file", meta.Name, shape, expectedBytes, end-start)
+	}
+
+	return shape, dataOffset + start, dataOffset + end, nil
+}
+
 // readTensorFromFileAt reads a tensor of the given shape from r at tensorOffset.
 // For host (nil) or shared-buffer backends, it reads directly into the tensor's memory without an intermediate buffer.
 // For non-shared-buffer backends (e.g., discrete accelerators), it reads into scratchBuf (growing it if needed)
 // and transfers it to the backend via tensors.FromRaw.
 func readTensorFromFileAt(backend compute.Backend, r io.ReaderAt, tensorName string, shape shapes.Shape, tensorOffset int64, scratchBuf *[]byte) (*tensors.Tensor, error) {
-	expectedBytes := int(shape.ByteSize())
+	expectedBytes64 := shape.ByteSize()
+	if expectedBytes64 < 0 || expectedBytes64 > maxAllocBytes() {
+		return nil, errors.Errorf("tensor %q (%s) byte size %d exceeds limit %d", tensorName, shape, expectedBytes64, maxAllocBytes())
+	}
+	expectedBytes := int(expectedBytes64)
 	if backend == nil || backend.HasSharedBuffers() {
 		t, err := tensors.FromShapeForBackend(backend, 0, shape)
 		if err != nil {
@@ -148,22 +185,8 @@ func (mr *TensorReader) ReadTensor(backend compute.Backend, tensorName string) (
 		return nil, errors.Errorf("tensor %s not found", tensorName)
 	}
 
-	// Create shape.
-	shape, err := meta.GoMLXShape()
-	if err != nil {
-		return nil, err
-	}
-
 	if mr.mmapBuf == nil && mr.file == nil {
 		return nil, errors.New("file is not open or mmaped")
-	}
-
-	tensorOffset := mr.dataOffset + meta.DataOffsets[0]
-	tensorEnd := mr.dataOffset + meta.DataOffsets[1]
-
-	expectedBytes := int64(shape.ByteSize())
-	if tensorEnd-tensorOffset != expectedBytes {
-		return nil, errors.Errorf("tensor shape %s expected %d bytes, but got %d bytes in file", shape, expectedBytes, tensorEnd-tensorOffset)
 	}
 
 	dataSize := mr.fileSize
@@ -171,11 +194,9 @@ func (mr *TensorReader) ReadTensor(backend compute.Backend, tensorName string) (
 		dataSize = int64(len(mr.mmapBuf))
 	}
 
-	// data_offsets come from the (untrusted) file header, so validate they fall
-	// within the file/mapped data before slicing or reading: otherwise a crafted header makes
-	// mr.mmapBuf[tensorOffset:tensorEnd] panic with a slice-out-of-range or reads out of bounds.
-	if tensorOffset < 0 || tensorEnd < tensorOffset || tensorEnd > dataSize {
-		return nil, errors.Errorf("tensor %q data offsets [%d:%d] out of range for %d-byte data section", tensorName, tensorOffset, tensorEnd, dataSize)
+	shape, tensorOffset, tensorEnd, err := resolveTensorRange(meta, mr.dataOffset, dataSize)
+	if err != nil {
+		return nil, err
 	}
 
 	if mr.mmapBuf != nil {
@@ -234,29 +255,10 @@ func (mr *TensorReader) IterTensors(backend compute.Backend, tensorNames []strin
 					return
 				}
 
-				shape, err := meta.GoMLXShape()
+				shape, tensorOffset, tensorEnd, err := resolveTensorRange(meta, mr.dataOffset, dataSize)
 				if err != nil {
 					select {
 					case chParse <- tensorData{err: err}:
-					case <-done:
-					}
-					return
-				}
-
-				tensorOffset := mr.dataOffset + meta.DataOffsets[0]
-				tensorEnd := mr.dataOffset + meta.DataOffsets[1]
-				expectedBytes := int64(shape.ByteSize())
-				if tensorEnd-tensorOffset != expectedBytes {
-					select {
-					case chParse <- tensorData{err: errors.Errorf("tensor shape %s expected %d bytes, but got %d bytes in file", shape, expectedBytes, tensorEnd-tensorOffset)}:
-					case <-done:
-					}
-					return
-				}
-
-				if tensorOffset < 0 || tensorEnd < tensorOffset || tensorEnd > dataSize {
-					select {
-					case chParse <- tensorData{err: errors.Errorf("tensor %q data offsets [%d:%d] out of range for %d-byte data section", name, tensorOffset, tensorEnd, dataSize)}:
 					case <-done:
 					}
 					return
