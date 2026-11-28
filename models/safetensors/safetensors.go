@@ -138,6 +138,14 @@ func (m *Model) LoadShardedModel(indexFilename string) error {
 		return errors.Wrapf(err, "failed to download %s", indexFilename)
 	}
 
+	fi, err := os.Stat(localPath)
+	if err != nil {
+		return errors.Wrapf(err, "failed to stat %s", localPath)
+	}
+	if fi.Size() > maxHeaderSize {
+		return errors.Errorf("sharded model index %s too large: %d bytes (limit %d)", indexFilename, fi.Size(), maxHeaderSize)
+	}
+
 	data, err := os.ReadFile(localPath)
 	if err != nil {
 		return errors.Wrapf(err, "failed to read %s", localPath)

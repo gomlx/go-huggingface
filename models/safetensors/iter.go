@@ -190,7 +190,15 @@ func iterFromRepoDownload(backend compute.Backend, repo *hub.Repo, useMMap bool,
 			return
 		}
 
-		header, dataOffset, err := parseHeaderFromReader(openFile)
+		fi, err := openFile.Stat()
+		if err != nil {
+			openFile.Close()
+			reportErrFn(errors.Wrapf(err, "failed to stat %s", localPath))
+			return
+		}
+		fileSize := fi.Size()
+
+		header, dataOffset, err := parseHeaderFromReaderWithSize(openFile, fileSize)
 		if err != nil {
 			openFile.Close()
 			reportErrFn(errors.Wrapf(err, "failed to parse header for %s", localPath))
@@ -202,14 +210,6 @@ func iterFromRepoDownload(backend compute.Backend, repo *hub.Repo, useMMap bool,
 			tensorNames = append(tensorNames, name)
 		}
 		tensorNames = sortTensorsByOffset(tensorNames, header)
-
-		fi, err := openFile.Stat()
-		if err != nil {
-			openFile.Close()
-			reportErrFn(errors.Wrapf(err, "failed to stat %s", localPath))
-			return
-		}
-		fileSize := fi.Size()
 
 		var mmapBuf mmap.MMap
 		if useMMap && fileSize > 0 {
@@ -246,24 +246,9 @@ func iterFromRepoDownload(backend compute.Backend, repo *hub.Repo, useMMap bool,
 			}
 
 			meta := header.Tensors[name]
-			shape, err := meta.GoMLXShape()
+			shape, tensorOffset, tensorEnd, err := resolveTensorRange(meta, dataOffset, dataSize)
 			if err != nil {
 				reportErrFn(err)
-				return
-			}
-
-			// data_offsets are from the untrusted file header; validate they
-			// fall within the file/mapped data before slicing or reading to avoid a
-			// slice-out-of-range panic on a crafted header.
-			tensorOffset := dataOffset + meta.DataOffsets[0]
-			tensorEnd := dataOffset + meta.DataOffsets[1]
-			expectedBytes := int64(shape.ByteSize())
-			if tensorEnd-tensorOffset != expectedBytes {
-				reportErrFn(errors.Errorf("tensor %q shape %s expected %d bytes, but got %d bytes in file", name, shape, expectedBytes, tensorEnd-tensorOffset))
-				return
-			}
-			if tensorOffset < 0 || tensorEnd < tensorOffset || tensorEnd > dataSize {
-				reportErrFn(errors.Errorf("tensor %q data offsets [%d:%d] out of range for %d-byte data section", name, tensorOffset, tensorEnd, dataSize))
 				return
 			}
 

@@ -29,10 +29,12 @@ package gguf
 import (
 	"fmt"
 	"math"
+	"math/bits"
 	"slices"
 
 	"github.com/gomlx/compute"
 	"github.com/gomlx/compute/dtypes"
+	"github.com/pkg/errors"
 )
 
 // TensorType represents the data type or quantization format of a tensor in a GGUF file.
@@ -308,31 +310,159 @@ type TensorInfo struct {
 }
 
 // NumElements returns the total number of elements in the tensor.
+// Returns 0 if the shape is empty or the product overflows uint64.
 func (ti *TensorInfo) NumElements() uint64 {
 	if len(ti.Shape) == 0 {
 		return 0
 	}
 	n := uint64(1)
 	for _, d := range ti.Shape {
-		n *= d
+		hi, prod := bits.Mul64(n, d)
+		if hi != 0 {
+			return 0
+		}
+		n = prod
 	}
 	return n
 }
 
-// NumBytes returns the total number of bytes the tensor data occupies in the file.
-// Returns 0 if the result would overflow int64.
-func (ti *TensorInfo) NumBytes() int64 {
+// checkedNumElements validates dimensions and returns the total element count,
+// rejecting empty/excessive ranks, dimensions exceeding math.MaxInt, and product overflow.
+func (ti *TensorInfo) checkedNumElements() (uint64, error) {
+	if len(ti.Shape) == 0 {
+		return 0, errors.Errorf("tensor has 0 dimensions")
+	}
+	if len(ti.Shape) > maxTensorDims {
+		return 0, errors.Errorf("tensor has %d dimensions, exceeds limit %d", len(ti.Shape), maxTensorDims)
+	}
+	n := uint64(1)
+	for i, d := range ti.Shape {
+		if d > uint64(math.MaxInt) {
+			return 0, errors.Errorf("dimension %d (%d) exceeds max int (%d)", i, d, math.MaxInt)
+		}
+		hi, prod := bits.Mul64(n, d)
+		if hi != 0 || prod > uint64(math.MaxInt) {
+			return 0, errors.Errorf("tensor shape %v element count overflows int", ti.Shape)
+		}
+		n = prod
+	}
+	return n, nil
+}
+
+// checkedNumBytes computes the serialized byte size of the tensor with full overflow
+// and block-alignment validation.
+func (ti *TensorInfo) checkedNumBytes() (int64, error) {
 	bs := ti.Type.BlockSize()
 	ts := ti.Type.TypeSize()
 	if bs == 0 || ts == 0 {
-		return 0
+		return 0, errors.Errorf("unsupported tensor type %s (%d)", ti.Type, ti.Type)
 	}
-	nElements := ti.NumElements()
+	nElements, err := ti.checkedNumElements()
+	if err != nil {
+		return 0, err
+	}
+	if bs > 1 && ti.Shape[0]%uint64(bs) != 0 {
+		return 0, errors.Errorf("innermost dimension %d is not divisible by block size %d for type %s", ti.Shape[0], bs, ti.Type)
+	}
+	// Ensure GoMLXRawShape's innermost byte dimension cannot overflow int even if an outer dim is 0.
+	if ti.Shape[0]/uint64(bs) > uint64(math.MaxInt)/uint64(ts) {
+		return 0, errors.Errorf("innermost raw byte dimension overflows int for shape %v and type %s", ti.Shape, ti.Type)
+	}
 	nBlocks := nElements / uint64(bs)
-	if nBlocks > uint64(math.MaxInt64)/uint64(ts) {
+	hi, nb := bits.Mul64(nBlocks, uint64(ts))
+	if hi != 0 || nb > math.MaxInt64 {
+		return 0, errors.Errorf("tensor byte size overflows int64 for shape %v and type %s", ti.Shape, ti.Type)
+	}
+	return int64(nb), nil
+}
+
+// validateTensorShapeAndLimits validates a tensor's dimensions, alignment, and
+// allocatable byte limits without requiring file size context.
+func validateTensorShapeAndLimits(ti TensorInfo) error {
+	nElements, err := ti.checkedNumElements()
+	if err != nil {
+		return err
+	}
+	limit := uint64(maxAllocBytes())
+
+	// Check dequantized / GoMLX output tensor byte size.
+	outElemSize := uint64(ti.Type.GoMLXDType().Size())
+	hi, outBytes := bits.Mul64(nElements, outElemSize)
+	if hi != 0 || outBytes > limit {
+		return errors.Errorf("tensor output size for shape %v (%s) exceeds limit %d bytes", ti.Shape, ti.Type, limit)
+	}
+
+	bs := ti.Type.BlockSize()
+	ts := ti.Type.TypeSize()
+	if bs > 0 && ts > 0 {
+		rawBytes, err := ti.checkedNumBytes()
+		if err != nil {
+			return err
+		}
+		if uint64(rawBytes) > limit {
+			return errors.Errorf("tensor raw size %d bytes exceeds limit %d bytes", rawBytes, limit)
+		}
+	}
+	return nil
+}
+
+// validateTensorInFile validates a tensor's dimensions, byte size, and offset against
+// the file's data section [dataOffset, fileSize]. If requireSupportedType is true,
+// tensor types without known BlockSize/TypeSize are rejected.
+func validateTensorInFile(ti TensorInfo, dataOffset, fileSize int64, requireSupportedType bool) (tensorOffset int64, rawBytes int64, err error) {
+	if err := validateTensorShapeAndLimits(ti); err != nil {
+		return 0, 0, err
+	}
+	if dataOffset < 0 || fileSize < 0 || dataOffset > fileSize {
+		return 0, 0, errors.Errorf("data section offset %d out of range for %d-byte file", dataOffset, fileSize)
+	}
+
+	dataSectionSize := uint64(fileSize - dataOffset)
+	if ti.Offset > dataSectionSize {
+		return 0, 0, errors.Errorf("tensor offset %d exceeds %d-byte data section", ti.Offset, dataSectionSize)
+	}
+	tensorOffset = dataOffset + int64(ti.Offset)
+	remaining := dataSectionSize - ti.Offset
+
+	bs := ti.Type.BlockSize()
+	ts := ti.Type.TypeSize()
+	if bs == 0 || ts == 0 {
+		if requireSupportedType {
+			return 0, 0, errors.Errorf("unsupported tensor type %s (%d)", ti.Type, ti.Type)
+		}
+		// Even for an unknown/unimplemented type, any non-empty tensor must require at least 1 bit/element.
+		nElements, err := ti.checkedNumElements()
+		if err != nil {
+			return 0, 0, err
+		}
+		minBytes := (nElements + 7) / 8
+		if minBytes > remaining {
+			return 0, 0, errors.Errorf("tensor requires at least %d bytes at offset %d, exceeding %d-byte data section", minBytes, ti.Offset, dataSectionSize)
+		}
+		return tensorOffset, 0, nil
+	}
+
+	rawBytes, err = ti.checkedNumBytes()
+	if err != nil {
+		return 0, 0, err
+	}
+	if rawBytes > maxAllocBytes() {
+		return 0, 0, errors.Errorf("tensor raw size %d bytes exceeds limit %d bytes", rawBytes, maxAllocBytes())
+	}
+	if uint64(rawBytes) > remaining {
+		return 0, 0, errors.Errorf("tensor requires %d bytes at offset %d, exceeding %d-byte data section", rawBytes, ti.Offset, dataSectionSize)
+	}
+	return tensorOffset, rawBytes, nil
+}
+
+// NumBytes returns the total number of bytes the tensor data occupies in the file.
+// Returns 0 if the type is unsupported or the result would overflow int64.
+func (ti *TensorInfo) NumBytes() int64 {
+	n, err := ti.checkedNumBytes()
+	if err != nil {
 		return 0
 	}
-	return int64(nBlocks) * int64(ts)
+	return n
 }
 
 // GoMLXShape returns the GoMLX dtype and dimensions for this tensor.

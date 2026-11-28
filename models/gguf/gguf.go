@@ -5,8 +5,10 @@ import (
 	"cmp"
 	"encoding/binary"
 	"io"
+	"math"
 	"os"
 	"slices"
+	"unsafe"
 
 	"github.com/pkg/errors"
 )
@@ -21,13 +23,29 @@ const (
 	KeyGeneralAlignment    = "general.alignment"
 )
 
-// Sanity limits to prevent excessive allocations from malicious files.
+// Sanity limits to prevent excessive allocations from malicious or malformed files.
 const (
-	maxKVCount     = 1 << 16 // 65536 metadata pairs.
-	maxTensorCount = 1 << 20 // ~1 million tensors.
-	maxArrayCount  = 1 << 24 // ~16 million array elements.
-	maxTensorDims  = 8       // Maximum number of tensor dimensions.
+	maxKVCount      = 1 << 16  // 65536 metadata pairs.
+	maxTensorCount  = 1 << 20  // ~1 million tensors.
+	maxArrayCount   = 1 << 24  // ~16 million array elements.
+	maxTensorDims   = 8        // Maximum number of tensor dimensions.
+	maxStringLength = 1 << 20  // 1 MiB max single string.
+	maxAlignment    = 1 << 20  // 1 MiB max tensor data alignment.
+	maxTensorBytes  = 64 << 30 // 64 GiB max byte size for a single tensor allocation.
+
+	// Minimum serialized byte sizes for early bounds checks against remaining file bytes.
+	minKVBytes         = 8 + 4 + 1     // uint64 key len + uint32 type tag + >=1 byte value.
+	minTensorInfoBytes = 8 + 4 + 4 + 8 // uint64 name len + uint32 nDims + uint32 type + uint64 offset.
+	maxInitialSliceCap = 4096          // Cap eager slice preallocation before entries are read.
 )
+
+// maxAllocBytes returns the maximum allowed single-tensor allocation size on the current platform.
+func maxAllocBytes() int64 {
+	if int64(math.MaxInt) < maxTensorBytes {
+		return int64(math.MaxInt)
+	}
+	return maxTensorBytes
+}
 
 // File represents a parsed GGUF file. Create one with Open.
 type File struct {
@@ -44,6 +62,7 @@ type File struct {
 	tensorByName map[string]TensorInfo
 	path         string
 	dataOffset   int64
+	fileSize     int64
 }
 
 // Open opens and parses a GGUF file, reading all metadata and tensor info.
@@ -55,8 +74,20 @@ func Open(path string) (*File, error) {
 	}
 	defer f.Close()
 
-	file := &File{path: path}
-	r := &countingReader{r: bufio.NewReaderSize(f, 64*1024)}
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, errors.Wrapf(err, "gguf: stat %s", path)
+	}
+	if fi.IsDir() {
+		return nil, errors.Errorf("gguf: %s is a directory", path)
+	}
+	fileSize := fi.Size()
+
+	file := &File{path: path, fileSize: fileSize}
+	r := &ggufReader{
+		r:        bufio.NewReaderSize(f, 64*1024),
+		fileSize: fileSize,
+	}
 
 	// Read and validate magic number.
 	var magic [4]byte
@@ -89,9 +120,14 @@ func Open(path string) (*File, error) {
 	if kvCount > maxKVCount {
 		return nil, errors.Errorf("gguf: kv count %d exceeds limit %d", kvCount, maxKVCount)
 	}
+	minHeaderBytes := kvCount*minKVBytes + tensorCount*minTensorInfoBytes
+	if rem := r.remaining(); minHeaderBytes > rem {
+		return nil, errors.Errorf("gguf: header declares %d kv pairs and %d tensors (minimum %d bytes), exceeding remaining file size %d",
+			kvCount, tensorCount, minHeaderBytes, rem)
+	}
 
 	// Read all key-value pairs.
-	file.KeyValues = make([]KeyValue, 0, kvCount)
+	file.KeyValues = make([]KeyValue, 0, min(kvCount, maxInitialSliceCap))
 	for range kvCount {
 		kv, err := readKeyValue(r)
 		if err != nil {
@@ -100,8 +136,14 @@ func Open(path string) (*File, error) {
 		file.KeyValues = append(file.KeyValues, kv)
 	}
 
+	// Check remaining bytes before reading tensor info entries.
+	if rem := r.remaining(); tensorCount*minTensorInfoBytes > rem {
+		return nil, errors.Errorf("gguf: header declares %d tensors (minimum %d bytes), exceeding remaining file size %d",
+			tensorCount, tensorCount*minTensorInfoBytes, rem)
+	}
+
 	// Read all tensor info entries.
-	file.TensorInfos = make([]TensorInfo, 0, tensorCount)
+	file.TensorInfos = make([]TensorInfo, 0, min(tensorCount, maxInitialSliceCap))
 	for range tensorCount {
 		ti, err := readTensorInfo(r)
 		if err != nil {
@@ -128,13 +170,38 @@ func Open(path string) (*File, error) {
 	// Compute aligned data offset.
 	file.Alignment = defaultAlignment
 	if kv, ok := file.GetKeyValue(KeyGeneralAlignment); ok {
+		switch kv.Raw().(type) {
+		case int8, int16, int32, int64:
+			if kv.Int64() < 0 {
+				return nil, errors.Errorf("gguf: invalid negative alignment %d", kv.Int64())
+			}
+		}
 		if a := kv.Uint64(); a > 0 {
+			if a > maxAlignment {
+				return nil, errors.Errorf("gguf: alignment %d exceeds limit %d", a, maxAlignment)
+			}
 			file.Alignment = a
 		}
 	}
 	offset := uint64(r.n)
 	alignment := file.Alignment
-	file.dataOffset = int64(offset + (alignment-offset%alignment)%alignment)
+	padding := (alignment - offset%alignment) % alignment
+	if offset > uint64(math.MaxInt64)-padding {
+		return nil, errors.Errorf("gguf: data offset overflows int64")
+	}
+	file.dataOffset = int64(offset + padding)
+
+	if len(file.TensorInfos) > 0 && file.dataOffset > fileSize {
+		return nil, errors.Errorf("gguf: data section offset %d exceeds file size %d", file.dataOffset, fileSize)
+	}
+
+	// Validate every tensor's dimensions, byte size, and data-section bounds eagerly
+	// so malformed or truncated files are rejected immediately upon Open.
+	for _, ti := range file.TensorInfos {
+		if _, _, err := validateTensorInFile(ti, file.dataOffset, fileSize, false); err != nil {
+			return nil, errors.Wrapf(err, "gguf: invalid tensor %q", ti.Name)
+		}
+	}
 
 	return file, nil
 }
@@ -188,26 +255,38 @@ func (f *File) ListTensorNames() []string {
 
 // Binary reading helpers.
 
-// countingReader wraps an io.Reader and counts bytes read.
-type countingReader struct {
-	r io.Reader
-	n int64
+// ggufReader wraps an io.Reader, counts consumed bytes, and tracks total file size
+// so parsers can reject length prefixes that exceed the remaining bytes before allocating.
+type ggufReader struct {
+	r        io.Reader
+	n        int64
+	fileSize int64
 }
 
-func (cr *countingReader) Read(p []byte) (int, error) {
-	n, err := cr.r.Read(p)
-	cr.n += int64(n)
+func (gr *ggufReader) Read(p []byte) (int, error) {
+	n, err := gr.r.Read(p)
+	gr.n += int64(n)
 	return n, err
 }
 
+func (gr *ggufReader) remaining() uint64 {
+	if gr.n >= gr.fileSize {
+		return 0
+	}
+	return uint64(gr.fileSize - gr.n)
+}
+
 // readString reads a GGUF string: uint64 length prefix followed by that many bytes.
-func readString(r io.Reader) (string, error) {
+func readString(r *ggufReader) (string, error) {
 	var length uint64
 	if err := binary.Read(r, binary.LittleEndian, &length); err != nil {
 		return "", errors.Wrapf(err, "read string length")
 	}
-	if length > 1<<20 { // 1MB sanity check for a single string.
-		return "", errors.Errorf("string length %d exceeds 1MB limit", length)
+	if length > maxStringLength {
+		return "", errors.Errorf("string length %d exceeds %d-byte limit", length, maxStringLength)
+	}
+	if rem := r.remaining(); length > rem {
+		return "", errors.Errorf("string length %d exceeds remaining file size %d", length, rem)
 	}
 	buf := make([]byte, length)
 	if _, err := io.ReadFull(r, buf); err != nil {
@@ -217,7 +296,7 @@ func readString(r io.Reader) (string, error) {
 }
 
 // readKeyValue reads a single GGUF key-value pair from the stream.
-func readKeyValue(r io.Reader) (KeyValue, error) {
+func readKeyValue(r *ggufReader) (KeyValue, error) {
 	key, err := readString(r)
 	if err != nil {
 		return KeyValue{}, errors.Wrapf(err, "read key")
@@ -237,7 +316,7 @@ func readKeyValue(r io.Reader) (KeyValue, error) {
 }
 
 // readValue reads a GGUF value of the given type.
-func readValue(r io.Reader, vtype ggufValueType) (Value, error) {
+func readValue(r *ggufReader, vtype ggufValueType) (Value, error) {
 	switch vtype {
 	case valueTypeUint8:
 		var v uint8
@@ -296,7 +375,7 @@ func readValue(r io.Reader, vtype ggufValueType) (Value, error) {
 }
 
 // readArray reads a GGUF typed array: uint32 element type, uint64 count, then elements.
-func readArray(r io.Reader) (Value, error) {
+func readArray(r *ggufReader) (Value, error) {
 	var elemType uint32
 	if err := binary.Read(r, binary.LittleEndian, &elemType); err != nil {
 		return Value{}, errors.Wrapf(err, "read array element type")
@@ -340,7 +419,12 @@ func readArray(r io.Reader) (Value, error) {
 }
 
 // readArrayOf reads a typed numeric array in a single binary.Read call.
-func readArrayOf[T any](r io.Reader, count uint64) (Value, error) {
+func readArrayOf[T any](r *ggufReader, count uint64) (Value, error) {
+	var zero T
+	elemSize := uint64(unsafe.Sizeof(zero))
+	if rem := r.remaining(); count > rem/elemSize {
+		return Value{}, errors.Errorf("array of %d elements (%d bytes each) exceeds remaining file size %d", count, elemSize, rem)
+	}
 	vals := make([]T, count)
 	if err := binary.Read(r, binary.LittleEndian, vals); err != nil {
 		return Value{}, errors.Wrapf(err, "read array (%d elements)", count)
@@ -349,7 +433,10 @@ func readArrayOf[T any](r io.Reader, count uint64) (Value, error) {
 }
 
 // readBoolArray reads an array of bools (each stored as a single byte).
-func readBoolArray(r io.Reader, count uint64) (Value, error) {
+func readBoolArray(r *ggufReader, count uint64) (Value, error) {
+	if rem := r.remaining(); count > rem {
+		return Value{}, errors.Errorf("bool array of %d elements exceeds remaining file size %d", count, rem)
+	}
 	buf := make([]byte, count)
 	if _, err := io.ReadFull(r, buf); err != nil {
 		return Value{}, errors.Wrapf(err, "read bool array")
@@ -363,20 +450,24 @@ func readBoolArray(r io.Reader, count uint64) (Value, error) {
 }
 
 // readStringArray reads an array of GGUF strings.
-func readStringArray(r io.Reader, count uint64) (Value, error) {
-	vals := make([]string, count)
+func readStringArray(r *ggufReader, count uint64) (Value, error) {
+	// Each GGUF string starts with an 8-byte uint64 length prefix.
+	if rem := r.remaining(); count > rem/8 {
+		return Value{}, errors.Errorf("string array of %d elements (minimum %d bytes) exceeds remaining file size %d", count, count*8, rem)
+	}
+	vals := make([]string, 0, min(count, maxInitialSliceCap))
 	for i := range count {
 		s, err := readString(r)
 		if err != nil {
 			return Value{}, errors.Wrapf(err, "read string array element %d", i)
 		}
-		vals[i] = s
+		vals = append(vals, s)
 	}
 	return Value{data: vals}, nil
 }
 
 // readTensorInfo reads a single tensor info entry from the stream.
-func readTensorInfo(r io.Reader) (TensorInfo, error) {
+func readTensorInfo(r *ggufReader) (TensorInfo, error) {
 	name, err := readString(r)
 	if err != nil {
 		return TensorInfo{}, errors.Wrapf(err, "read tensor name")
@@ -386,8 +477,15 @@ func readTensorInfo(r io.Reader) (TensorInfo, error) {
 	if err := binary.Read(r, binary.LittleEndian, &nDims); err != nil {
 		return TensorInfo{}, errors.Wrapf(err, "read tensor dims count for %q", name)
 	}
+	if nDims == 0 {
+		return TensorInfo{}, errors.Errorf("tensor %q has 0 dimensions", name)
+	}
 	if nDims > maxTensorDims {
 		return TensorInfo{}, errors.Errorf("tensor %q has %d dimensions, exceeds limit %d", name, nDims, maxTensorDims)
+	}
+	minTail := uint64(nDims)*8 + 4 + 8 // dims + type + offset
+	if rem := r.remaining(); minTail > rem {
+		return TensorInfo{}, errors.Errorf("tensor %q info (%d bytes) exceeds remaining file size %d", name, minTail, rem)
 	}
 
 	shape := make([]uint64, nDims)
@@ -407,10 +505,15 @@ func readTensorInfo(r io.Reader) (TensorInfo, error) {
 		return TensorInfo{}, errors.Wrapf(err, "read tensor offset for %q", name)
 	}
 
-	return TensorInfo{
+	ti := TensorInfo{
 		Name:   name,
 		Shape:  shape,
 		Type:   TensorType(ttype),
 		Offset: offset,
-	}, nil
+	}
+	// Fail immediately on invalid dimensions, overflow, or oversized allocations.
+	if err := validateTensorShapeAndLimits(ti); err != nil {
+		return TensorInfo{}, errors.Wrapf(err, "invalid tensor %q", name)
+	}
+	return ti, nil
 }
